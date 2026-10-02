@@ -60,11 +60,11 @@ fn fs(i: VOut) -> @location(0) vec4<f32> {
     return shade(i, 0.004);
 }
 
-// Depth-writing geometry: only reasonably opaque texels may occlude what is behind them.
-// APPROX: the original alpha-test reference value still needs confirming.
+// th19.exe enables alpha testing for all drawing with reference 1 and "greater or equal",
+// i.e. only fully transparent texels are discarded, depth-writing or not.
 @fragment
 fn fs_depth(i: VOut) -> @location(0) vec4<f32> {
-    return shade(i, 0.25);
+    return shade(i, 1.0 / 255.0);
 }
 "#;
 

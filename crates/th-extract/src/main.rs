@@ -66,9 +66,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 for s in e.sprites.iter().take(3) {
                     println!("   sprite {:>4} ({}, {}, {}x{})", s.id, s.x, s.y, s.w, s.h);
                 }
-                for sc in e.scripts.iter().take(2) {
+                for sc in &e.scripts {
                     println!("   script {}", sc.id);
-                    for i in sc.instrs.iter().take(12) {
+                    for i in &sc.instrs {
                         let ints: Vec<i32> = (0..i.args.len() / 4).map(|n| i.arg_i32(n)).collect();
                         println!("      t={:<4} op={:<4} mask={:#x} {:?}", i.time, i.opcode, i.param_mask, ints);
                     }
