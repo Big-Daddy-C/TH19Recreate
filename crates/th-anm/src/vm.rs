@@ -318,6 +318,9 @@ pub struct Vm {
     pub stage_layer: u8,
     /// Scissor rectangle on the canvas (e.g. a playfield), inherited by spawned VMs.
     pub clip: Option<[f32; 4]>,
+    /// Sprite numbers 0..4 set by the script are replaced by these (bullets: the colour's
+    /// sprites, th19.exe `FUN_004f66a0`).
+    pub sprite_remap: Option<[i32; 5]>,
 }
 
 impl Vm {
@@ -378,6 +381,14 @@ impl Vm {
             effect: None,
             stage_layer: 0,
             clip: None,
+            sprite_remap: None,
+        }
+    }
+
+    fn remap_sprite(&self, n: i32) -> i32 {
+        match self.sprite_remap {
+            Some(m) if (0..5).contains(&n) => m[n as usize],
+            _ => n,
         }
     }
 
@@ -497,6 +508,26 @@ impl World {
         self.next_order += 1;
         vm.origin = [pos[0], pos[1], 0.0];
         vm.clip = Some(clip);
+        let id = self.insert(vm);
+        self.run(lib, id);
+        id
+    }
+
+    /// Like [`World::spawn_clipped`], with a sprite remap applied from the first instruction.
+    pub fn spawn_remapped(
+        &mut self,
+        lib: &AnmLibrary,
+        file: usize,
+        script: usize,
+        pos: [f32; 2],
+        clip: [f32; 4],
+        remap: [i32; 5],
+    ) -> VmId {
+        let mut vm = Vm::new(file, script, self.next_order);
+        self.next_order += 1;
+        vm.origin = [pos[0], pos[1], 0.0];
+        vm.clip = Some(clip);
+        vm.sprite_remap = Some(remap);
         let id = self.insert(vm);
         self.run(lib, id);
         id
@@ -1125,13 +1156,13 @@ fn exec(
 
         // --- render state ---
         300 => {
-            vm.sprite = i!(0);
+            vm.sprite = vm.remap_sprite(i!(0));
             vm.primitive = None;
         }
         301 => {
             let (base, n) = (i!(0), i!(1));
             let r = if n > 0 { (next_rand(rng) % n as u32) as i32 } else { 0 };
-            vm.sprite = base + r;
+            vm.sprite = vm.remap_sprite(base + r);
             vm.primitive = None;
         }
         302 => vm.render_mode = i!(0),

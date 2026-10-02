@@ -79,6 +79,10 @@ struct Viewer {
     game: Option<Game>,
     /// Keys currently held (gameplay input).
     held: std::collections::HashSet<KeyCode>,
+    /// Bullet sprite table read from th19.exe.
+    bullet_types: std::rc::Rc<Vec<th_formats::exe::BulletType>>,
+    /// Frames simulated since start (debug triggers).
+    frames: u64,
 }
 
 impl Viewer {
@@ -108,6 +112,8 @@ impl Viewer {
             show_all: true,
             game: None,
             held: Default::default(),
+            bullet_types: Default::default(),
+            frames: 0,
         };
         v.restart();
         v
@@ -185,6 +191,7 @@ impl Viewer {
             None => self.dat.read("pl00.anm").ok().and_then(|b| self.lib.load("pl00.anm", &b).ok()),
         };
         for s in &mut sides {
+            s.st.bullet_types = self.bullet_types.clone();
             s.start(&prog);
             if let (Some(sht), Some(anm)) = (&sht, pl_anm) {
                 s.player = Some(th_game::player::Player::new(sht.clone(), anm));
@@ -197,6 +204,10 @@ impl Viewer {
         for _ in 0..if self.fast { 8 } else { 1 } {
             if let Some(st) = &mut self.stage {
                 st.tick(&mut self.world, &self.lib);
+            }
+            self.frames += 1;
+            if std::env::var("TH19_DEBUG_EXTRA").ok().and_then(|v| v.parse::<u64>().ok()) == Some(self.frames) {
+                self.debug_extra_attack();
             }
             let keys = self.player_keys();
             if let Some(g) = &mut self.game {
@@ -350,6 +361,8 @@ impl Viewer {
                 self.restart();
             }
             KeyCode::KeyF => self.fast = !self.fast,
+            // Debug: send an extra attack into player 1's field.
+            KeyCode::KeyX if self.mode == Mode::Game => self.debug_extra_attack(),
             KeyCode::KeyV => self.show_fields = !self.show_fields,
             KeyCode::ArrowRight | KeyCode::ArrowLeft if self.mode != Mode::Anm => {
                 let n = self.stage_files.len().max(1);
@@ -391,6 +404,24 @@ impl Viewer {
                 self.world.interrupt_all(n);
             }
             _ => {}
+        }
+    }
+
+    /// Debug: send an extra attack into player 1's field.
+    fn debug_extra_attack(&mut self) {
+        if let Some(g) = &mut self.game {
+            g.sides[0].st.request(th_game::side::SpawnRequest {
+                id: 0,
+                difficulty: 0,
+                sub: "ExtraAttack".into(),
+                pos: [0.0, 0.0],
+                hp: 1000,
+                score: 0,
+                item: -1,
+                mirrored: false,
+                ivars: [0; 4],
+                fvars: [0.0; 8],
+            });
         }
     }
 }
@@ -537,6 +568,12 @@ fn main() {
     );
 
     let mut viewer = Viewer::new(dat);
+    // Bullet sprite types live in th19.exe, next to th19.dat.
+    let exe_path = dat_path.with_file_name("th19.exe");
+    match std::fs::read(&exe_path).map_err(|e| e.to_string()).and_then(|b| th_formats::exe::Exe::parse(b).map_err(|e| e.to_string())) {
+        Ok(exe) => viewer.bullet_types = std::rc::Rc::new(th_formats::exe::bullet_types(&exe)),
+        Err(e) => log::warn!("{}: {e} (enemy bullets disabled)", exe_path.display()),
+    }
     // `--stage N` starts in the stage viewer on worldNN.std; `--game N` also runs the waves.
     let args: Vec<String> = std::env::args().collect();
     let start = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)?.parse::<usize>().ok());

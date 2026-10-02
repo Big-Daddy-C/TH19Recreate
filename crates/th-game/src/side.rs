@@ -7,12 +7,15 @@
 //! game's synchronised RNG (`FUN_005378c0`) — the same for both players.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use th_anm::{AnmLibrary, World};
 use th_ecl::Program;
 
 use crate::enemy::Enemy;
+use crate::bullet::{self, Bullet, Et};
 use crate::player::Player;
+use th_formats::exe::BulletType;
 
 /// Sub names for wave ids (table at 0x5a0f50 in th19.exe; id 0 is unused).
 pub fn wave_sub(id: i32) -> Option<String> {
@@ -37,6 +40,8 @@ pub fn roll_wave_sequence(seed: u32) -> [u8; 256] {
 pub struct SpawnRequest {
     /// Assigned by [`SideState::request`].
     pub id: i32,
+    /// Difficulty selecting rank-masked instructions; set by [`SideState::request`].
+    pub difficulty: u8,
     pub sub: String,
     pub pos: [f32; 2],
     pub hp: i32,
@@ -51,6 +56,8 @@ pub struct SpawnRequest {
 pub struct SideState {
     /// Field rectangle on the canvas `[x, y, w, h]`.
     pub field: [f32; 4],
+    /// Difficulty (`DAT_0062b250`): 0 Easy, 1 Normal, 2 Hard, 3 Lunatic.
+    pub difficulty: u8,
     pub player_pos: [f32; 2],
     /// TH19's escalating level (0..7), selecting columns of the level tables.
     pub level: usize,
@@ -75,6 +82,12 @@ pub struct SideState {
     pub chain_timer: i32,
     pub chain: i32,
     pub chain_max: i32,
+    /// Enemy bullets on this field.
+    pub bullets: Vec<Bullet>,
+    /// Bullet sprite types from th19.exe.
+    pub bullet_types: Rc<Vec<BulletType>>,
+    /// `ins_613`: cancel every bullet this frame.
+    pub cancel_bullets: bool,
 }
 
 impl SideState {
@@ -99,6 +112,7 @@ impl SideState {
     /// Queue an enemy for creation. Its id is allocated now, as the game creates enemies
     /// synchronously and scripts read the new id right away (variable -9931).
     pub fn request(&mut self, mut req: SpawnRequest) {
+        req.difficulty = self.difficulty;
         req.id = self.next_enemy_id;
         self.next_enemy_id = (self.next_enemy_id + 1) & 0xffff;
         if self.next_enemy_id == 0 {
@@ -107,6 +121,32 @@ impl SideState {
         self.last_enemy_id = req.id;
         self.alive.push((req.id, false));
         self.spawn.push(req);
+    }
+
+    /// Fire a shooter (`ins_601`).
+    pub fn fire(&mut self, et: &Et, origin: [f32; 2], world: &mut World, lib: &AnmLibrary) {
+        let Some(anm) = self.anm_files[0] else { return };
+        let types = self.bullet_types.clone();
+        let mut out = Vec::new();
+        let mut rng = self.rng;
+        let mut rand = move || {
+            rng ^= rng << 13;
+            rng ^= rng >> 17;
+            rng ^= rng << 5;
+            (rng >> 8) as f32 / (1u32 << 24) as f32
+        };
+        let mut ctx = bullet::Ctx {
+            world,
+            lib,
+            types: &types,
+            anm,
+            field: self.field,
+            player: self.player_pos,
+            rand: &mut rand,
+        };
+        bullet::fire(et, origin, &mut ctx, &mut out);
+        self.rand();
+        self.bullets.extend(out);
     }
 
     pub fn wave_members_alive(&self) -> i32 {
@@ -123,6 +163,7 @@ impl SideState {
         let Some(sub) = wave_sub(self.wave_pool[k]) else { return };
         self.request(SpawnRequest {
             id: 0,
+            difficulty: 0,
             sub,
             pos: [0.0, 0.0],
             hp: 10,
@@ -148,6 +189,7 @@ impl Side {
         Self {
             st: SideState {
                 field,
+                difficulty: 1,
                 player_pos: [0.0, 400.0],
                 level: 0,
                 level_table: [[0; 8]; 32],
@@ -166,10 +208,64 @@ impl Side {
                 chain_timer: 0,
                 chain: 0,
                 chain_max: 0,
+                bullets: Vec::new(),
+                bullet_types: Rc::new(Vec::new()),
+                cancel_bullets: false,
             },
             enemies: Vec::new(),
             stage: None,
             player: None,
+        }
+    }
+
+    fn update_bullets(&mut self, world: &mut World, lib: &AnmLibrary) {
+        let st = &mut self.st;
+        if std::mem::take(&mut st.cancel_bullets) {
+            for b in st.bullets.drain(..) {
+                if let Some(id) = b.vm {
+                    world.delete(id);
+                }
+            }
+        }
+        let Some(anm) = st.anm_files[0] else { return };
+        let types = st.bullet_types.clone();
+        let mut rng = st.rand();
+        let mut rand = move || {
+            rng ^= rng << 13;
+            rng ^= rng >> 17;
+            rng ^= rng << 5;
+            (rng >> 8) as f32 / (1u32 << 24) as f32
+        };
+        let mut ctx =
+            bullet::Ctx { world, lib, types: &types, anm, field: st.field, player: st.player_pos, rand: &mut rand };
+        let mut hit = false;
+        let player_r = self.player.as_ref().map_or(0.0, |p| p.hitbox_radius());
+        for b in st.bullets.iter_mut() {
+            b.update(&mut ctx);
+            if b.state == 1 && !b.delete && player_r > 0.0 {
+                let (dx, dy) = (b.pos[0] - st.player_pos[0], b.pos[1] - st.player_pos[1]);
+                let r = b.hitbox + player_r;
+                if dx * dx + dy * dy < r * r {
+                    hit = true;
+                }
+            }
+        }
+        st.bullets.retain(|b| {
+            if b.delete {
+                if let Some(id) = b.vm {
+                    ctx.world.delete(id);
+                }
+            }
+            !b.delete
+        });
+        if hit {
+            if let Some(p) = &mut self.player {
+                if p.hit() {
+                    // APPROX: a hit clears the field's bullets (the game's hit sequence
+                    // hasn't been decoded yet).
+                    st.cancel_bullets = true;
+                }
+            }
         }
     }
 
@@ -201,6 +297,7 @@ impl Side {
     pub fn start(&mut self, prog: &Program) {
         let req = SpawnRequest {
             id: 0,
+            difficulty: 0,
             sub: "main".into(),
             pos: [0.0, 0.0],
             hp: 0,
@@ -210,6 +307,7 @@ impl Side {
             ivars: [0; 4],
             fvars: [0.0; 8],
         };
+        let req = SpawnRequest { difficulty: self.st.difficulty, ..req };
         self.stage = Enemy::new(prog, &req, 0);
     }
 
@@ -243,6 +341,7 @@ impl Side {
             p.update(keys, &mut self.enemies, world, lib, self.st.field);
             self.st.player_pos = p.pos;
         }
+        self.update_bullets(world, lib);
         for e in &mut self.enemies {
             if std::mem::take(&mut e.data.killed) && !e.data.delete {
                 Self::kill(&mut self.st, &mut e.data, world, lib);

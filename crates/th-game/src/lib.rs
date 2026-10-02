@@ -1,5 +1,6 @@
 //! Gameplay: enemies driven by ECL, the wave system, the player and player shots.
 
+pub mod bullet;
 pub mod enemy;
 pub mod motion;
 pub mod player;

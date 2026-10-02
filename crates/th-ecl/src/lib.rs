@@ -130,6 +130,9 @@ pub struct Context {
     pub async_id: i32,
     /// Paused threads don't run (`ins_18`/`ins_19`).
     pub paused: bool,
+    /// `1 << difficulty`: instructions whose rank mask lacks this bit are skipped
+    /// (advanced past without popping the stack), as in the game's loop.
+    pub rank_bit: u8,
     words: Vec<u32>,
     tags: Vec<u8>,
     sp: usize,
@@ -162,6 +165,7 @@ impl Context {
             time: 0.0,
             async_id: 0,
             paused: false,
+            rank_bit: 0xff,
             words: vec![0; STACK_BYTES / 4],
             tags: vec![0; STACK_BYTES / 4],
             sp: 0,
@@ -418,6 +422,10 @@ impl Context {
             if budget == 0 {
                 break;
             }
+            if ins.rank_mask & self.rank_bit == 0 {
+                self.ip += 1;
+                continue;
+            }
             let ip_before = (self.sub, self.ip);
             if trace_enabled() {
                 let top: Vec<String> = (1..=3.min(self.sp / 8))
@@ -595,6 +603,7 @@ impl Context {
                 let (name, mut args) = self.call_args(ins, host);
                 let Some(target) = prog.sub(&name) else { return Flow::Next };
                 let mut child = Context::new(target);
+                child.rank_bit = self.rank_bit;
                 if ins.opcode == 16 && !args.is_empty() {
                     child.async_id = args.remove(0).1 as i32;
                 }

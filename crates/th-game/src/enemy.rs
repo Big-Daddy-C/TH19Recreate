@@ -90,6 +90,8 @@ pub struct EnemyData {
     pub killed: bool,
     /// Where the last damaging shot was (the death effect faces away from it).
     pub last_hit: Option<[f32; 2]>,
+    /// Bullet shooters (`ins_600`..).
+    pub ets: Vec<crate::bullet::Et>,
 }
 
 pub struct Enemy {
@@ -113,7 +115,10 @@ impl Enemy {
         data.ivars = req.ivars;
         data.fvars = req.fvars;
         data.anm_slot = 2;
-        Some(Self { threads: Threads::new(Context::new(sub)), data })
+        data.ets = vec![crate::bullet::Et::default(); 16];
+        let mut ctx = Context::new(sub);
+        ctx.rank_bit = 1 << req.difficulty.min(7);
+        Some(Self { threads: Threads::new(ctx), data })
     }
 
     /// One frame: script, movement, sprites, off-field check.
@@ -410,6 +415,7 @@ impl EnemyHost<'_> {
         }
         self.st.request(SpawnRequest {
             id: 0,
+            difficulty: 0,
             sub,
             pos: [x, y],
             hp,
@@ -419,6 +425,115 @@ impl EnemyHost<'_> {
             ivars: self.e.ivars,
             fvars: self.e.fvars,
         });
+    }
+
+    fn e_difficulty(&self) -> usize {
+        self.st.difficulty.min(7) as usize
+    }
+
+    /// Bullet shooter instructions (handler cases 112..128 of `FUN_004fecc0`).
+    fn et_op(&mut self, ctx: &mut Context, ins: &Instr) {
+        use crate::bullet::{Et, Ex};
+        let op = ins.opcode;
+        let i = |s: &mut Self, ctx: &Context, n: usize| ctx.int_arg(ins, n, s);
+        let f = |s: &mut Self, ctx: &Context, n: usize| ctx.float_arg(ins, n, s);
+        if op == 613 {
+            self.st.cancel_bullets = true;
+            return;
+        }
+        let et = i(self, ctx, 0);
+        let Some(slot) = usize::try_from(et).ok().filter(|&e| e < 16) else { return };
+        match op {
+            600 => self.e.ets[slot] = Et::default(),
+            601 => {
+                let e = &self.e.ets[slot];
+                let origin =
+                    if e.absolute { e.offset } else { [self.e.pos[0] + e.offset[0], self.e.pos[1] + e.offset[1]] };
+                let et = e.clone();
+                self.st.fire(&et, origin, self.world, self.lib);
+            }
+            602 => {
+                let (sp, col) = (i(self, ctx, 1), i(self, ctx, 2));
+                let e = &mut self.e.ets[slot];
+                e.sprite = sp;
+                e.color = col;
+            }
+            603 => {
+                let (x, y) = (f(self, ctx, 1), f(self, ctx, 2));
+                let e = &mut self.e.ets[slot];
+                e.offset = [x, y];
+                e.absolute = false;
+            }
+            604 => {
+                let (a, b) = (f(self, ctx, 1), f(self, ctx, 2));
+                self.e.ets[slot].angle = [a, b];
+            }
+            605 => {
+                let (a, b) = (f(self, ctx, 1), f(self, ctx, 2));
+                self.e.ets[slot].speed = [a, b];
+            }
+            606 => {
+                let (a, b) = (i(self, ctx, 1), i(self, ctx, 2));
+                self.e.ets[slot].count = [a, b];
+            }
+            607 => {
+                let m = i(self, ctx, 1);
+                self.e.ets[slot].aim = m;
+            }
+            // etEx: 609/610 name the slot, 611/612 append; 610/612 add c, d, m, n.
+            609..=612 => {
+                let (mut n, idx) = if op <= 610 { (2, i(self, ctx, 1)) } else { (1, -1) };
+                let asynchronous = i(self, ctx, n) != 0;
+                n += 1;
+                let kind = i(self, ctx, n) as u32;
+                let mut ex = Ex { kind, asynchronous, ..Default::default() };
+                ex.a = i(self, ctx, n + 1);
+                ex.b = i(self, ctx, n + 2);
+                n += 3;
+                if op == 610 || op == 612 {
+                    ex.c = i(self, ctx, n);
+                    ex.d = i(self, ctx, n + 1);
+                    n += 2;
+                }
+                ex.r = f(self, ctx, n);
+                ex.s = f(self, ctx, n + 1);
+                if op == 610 || op == 612 {
+                    ex.m = f(self, ctx, n + 2);
+                    ex.n = f(self, ctx, n + 3);
+                }
+                let e = &mut self.e.ets[slot];
+                let k = if idx >= 0 { idx as usize } else { e.ex_next };
+                if k < 24 {
+                    e.ex[k] = ex;
+                    e.ex_next = k + 1;
+                }
+            }
+            614 => {
+                let src = i(self, ctx, 1);
+                if let Some(s) = self.e.ets.get(src as usize).cloned() {
+                    self.e.ets[slot] = s;
+                }
+            }
+            // Offset given as (angle, distance) (case 126).
+            618 => {
+                let (a, r) = (f(self, ctx, 1), f(self, ctx, 2));
+                let e = &mut self.e.ets[slot];
+                e.offset = [a.cos() * r, a.sin() * r];
+                e.absolute = false;
+            }
+            619 => {
+                let d = f(self, ctx, 1);
+                self.e.ets[slot].distance = d;
+            }
+            // Absolute origin (case 128): x below -990 switches back to relative.
+            620 => {
+                let (x, y) = (f(self, ctx, 1), f(self, ctx, 2));
+                let e = &mut self.e.ets[slot];
+                e.offset = [x, y];
+                e.absolute = x >= -990.0;
+            }
+            _ => *self.st.unknown_ops.entry(op).or_default() += 1,
+        }
     }
 
     fn exec_inner(&mut self, ctx: &mut Context, ins: &Instr) -> Flow {
@@ -599,6 +714,18 @@ impl EnemyHost<'_> {
                 let v = self.st.level_table[slot][self.st.level.min(7)];
                 ctx.set_int_var(ins, 0, v, self);
             }
+            // rankI / rankF: pick the value for the current difficulty.
+            570 => {
+                let d = self.e_difficulty();
+                let v = i!(1 + d);
+                ctx.set_int_var(ins, 0, v, self);
+            }
+            571 => {
+                let d = self.e_difficulty();
+                let v = f!(1 + d);
+                ctx.set_float_var(ins, 0, v, self);
+            }
+            600..=620 => self.et_op(ctx, ins),
             1023 => self.st.wave_param = i!(0),
             1028 => self.e.rewards.a = f!(0),
             1029 => self.e.rewards.b = i!(0),

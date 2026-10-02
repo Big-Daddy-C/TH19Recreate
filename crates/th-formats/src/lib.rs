@@ -20,6 +20,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub mod anm;
 pub mod bgm;
 pub mod ecl;
+pub mod exe;
 pub mod msg;
 pub mod sht;
 pub mod stage;

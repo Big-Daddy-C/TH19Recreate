@@ -101,6 +101,10 @@ pub struct Player {
     shot_timer: Timer,
     long_timer: Timer,
     pub bullets: Vec<PlayerBullet>,
+    /// Frames of invulnerability left after being hit.
+    pub invuln: i32,
+    /// Times hit so far.
+    pub hits: u32,
 }
 
 impl Player {
@@ -123,7 +127,25 @@ impl Player {
             shot_timer: Timer::OFF,
             long_timer: Timer::OFF,
             bullets: Vec::new(),
+            invuln: 0,
+            hits: 0,
         }
+    }
+
+    /// Collision radius against bullets (SHT header).
+    pub fn hitbox_radius(&self) -> f32 {
+        if self.state == State::Normal && self.invuln == 0 { self.sht.radii[0] } else { 0.0 }
+    }
+
+    /// Hit by a bullet. APPROX: until the game's hit/death sequence is decoded, a hit only
+    /// counts and grants 120 frames of invulnerability. Returns whether it counted.
+    pub fn hit(&mut self) -> bool {
+        if self.invuln > 0 {
+            return false;
+        }
+        self.hits += 1;
+        self.invuln = 120;
+        true
     }
 
     fn level(&self) -> usize {
@@ -190,6 +212,9 @@ impl Player {
             }
         }
         self.pos = [self.fixed[0] as f32 / 128.0, self.fixed[1] as f32 / 128.0];
+        if self.invuln > 0 {
+            self.invuln -= 1;
+        }
 
         self.update_options(world, lib, field);
         if self.state == State::Normal {
@@ -200,6 +225,8 @@ impl Player {
         let at = field_to_canvas(field, self.pos);
         if let Some(vm) = self.body.and_then(|id| world.get_mut(id)) {
             vm.origin = [at[0], at[1], 0.0];
+            // Flash while invulnerable.
+            vm.visible = self.invuln == 0 || self.invuln % 4 < 2;
         }
     }
 
