@@ -1308,9 +1308,27 @@ impl Placer<'_> {
     }
 
     fn quad(&self, out: &mut Vec<Vertex>, p: [(f32, f32); 4], uv: [[f32; 2]; 4], col: [[f32; 4]; 4]) {
-        // Corners in order: top-left, top-right, bottom-right, bottom-left.
-        self.tri(out, [(p[0].0, p[0].1, uv[0], col[0]), (p[1].0, p[1].1, uv[1], col[1]), (p[2].0, p[2].1, uv[2], col[2])]);
-        self.tri(out, [(p[0].0, p[0].1, uv[0], col[0]), (p[2].0, p[2].1, uv[2], col[2]), (p[3].0, p[3].1, uv[3], col[3])]);
+        // Corners in order: top-left, top-right, bottom-right, bottom-left (in sprite space).
+        // Split along the same diagonal in *world* space whether or not the sprite is mirrored,
+        // so coplanar copies of a quad (e.g. stage 2's doubled water, one flipped) get
+        // bit-identical depths and the later one reliably wins the depth test.
+        // The diagonal always starts at the corner that is smallest in world coordinates, which
+        // covers flips by negative scale and by rotation alike.
+        let key = |i: usize| -> [f32; 3] {
+            if self.camera.is_some() {
+                self.to_world(p[i].0, p[i].1)
+            } else {
+                let q = self.place_2d(p[i].0, p[i].1, [0.0; 2], [0.0; 4]).pos;
+                [q[0], q[1], 0.0]
+            }
+        };
+        let first = (0..4)
+            .min_by(|&i, &j| key(i).partial_cmp(&key(j)).unwrap_or(std::cmp::Ordering::Equal))
+            .unwrap_or(0);
+        let [a, b, c, d] = [first, (first + 1) % 4, (first + 2) % 4, (first + 3) % 4];
+        let v = |i: usize| (p[i].0, p[i].1, uv[i], col[i]);
+        self.tri(out, [v(a), v(b), v(c)]);
+        self.tri(out, [v(a), v(c), v(d)]);
     }
 }
 
