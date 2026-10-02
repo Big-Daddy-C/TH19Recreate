@@ -56,8 +56,8 @@ const FIELDS: [[f32; 4]; 2] = [[16.0, 0.0, 296.0, 480.0], [328.0, 0.0, 296.0, 48
 
 struct Viewer {
     mode: Mode,
-    /// Show the stage across the whole canvas instead of in the two playfields.
-    full_view: bool,
+    /// Overlay the playfield divider on the stage background.
+    show_fields: bool,
     stage: Option<Stage>,
     stage_files: Vec<String>,
     stage_idx: usize,
@@ -84,7 +84,7 @@ impl Viewer {
         stage_files.sort();
         let mut v = Self {
             mode: Mode::Anm,
-            full_view: false,
+            show_fields: true,
             stage: None,
             stage_files,
             stage_idx: 0,
@@ -133,8 +133,9 @@ impl Viewer {
             Err(e) => return log::error!("{anm_name}: {e}"),
         };
         let mut stage = Stage::new(std, anm, &self.lib, &mut self.world);
-        // Backdrop sprites are positioned relative to the top-centre of a playfield.
-        stage.backdrop_origin = [FIELDS[0][2] * 0.5, 0.0];
+        // Backdrop sprites are positioned relative to the top-centre of the screen.
+        // APPROX: confirm the anchor against th19.exe.
+        stage.backdrop_origin = [render::CANVAS_W * 0.5, 0.0];
         self.stage = Some(stage);
     }
 
@@ -177,33 +178,24 @@ impl Viewer {
                 let f = [st.fog_color[0] / 255.0, st.fog_color[1] / 255.0, st.fog_color[2] / 255.0];
                 // Distant geometry fades into the fog, so fill the background with it too.
                 let sky = if st.fog_range[1] > 0.0 { f } else { c };
-                let fields: Vec<[f32; 4]> = if self.full_view {
-                    vec![[0.0, 0.0, render::CANVAS_W, render::CANVAS_H]]
-                } else {
-                    FIELDS.to_vec()
-                };
-                let mut list = Vec::new();
-                for rect in fields {
-                    list.push(th_anm::DrawBatch::solid_rect(rect, [sky[0], sky[1], sky[2], 1.0]));
-                    let cam = st.camera(rect);
-                    let mut stage = self.world.draw_list(&self.lib, th_anm::Pass::Stage(&cam));
-                    for b in &mut stage {
-                        b.clip = Some(rect);
-                    }
-                    list.extend(stage);
-                    // Sprite-slot sprites (e.g. stage 11's sky band) sit over the distant, fogged
-                    // part of the 3D scene. APPROX: drawn after all stage geometry.
-                    // Backdrops are laid out field-relative; shift them into this field.
-                    let mut back = self.world.draw_list(&self.lib, th_anm::Pass::Backdrop);
-                    let (dx, dy) = (rect[0] + rect[2] * 0.5 - st.backdrop_origin[0], rect[1] - st.backdrop_origin[1]);
-                    for b in &mut back {
-                        b.clip = Some(rect);
-                        for v in &mut b.vertices {
-                            v.pos[0] += dx;
-                            v.pos[1] += dy;
-                        }
-                    }
-                    list.extend(back);
+                // TH19 draws the stage once across the whole screen; the two playfields are
+                // windows laid over that single shared background.
+                let rect = [0.0, 0.0, render::CANVAS_W, render::CANVAS_H];
+                let mut list = vec![th_anm::DrawBatch::solid_rect(rect, [sky[0], sky[1], sky[2], 1.0])];
+                let cam = st.camera(rect);
+                list.extend(self.world.draw_list(&self.lib, th_anm::Pass::Stage(&cam)));
+                // Sprite-slot sprites (e.g. stage 11's sky band) sit over the distant, fogged
+                // part of the 3D scene. APPROX: drawn after all stage geometry.
+                list.extend(self.world.draw_list(&self.lib, th_anm::Pass::Backdrop));
+                if self.show_fields {
+                    // Stand-in for the real frame from front.anm: darken the strip between fields.
+                    let gap_x = FIELDS[0][0] + FIELDS[0][2];
+                    let mut divider = th_anm::DrawBatch::solid_rect(
+                        [gap_x, 0.0, FIELDS[1][0] - gap_x, render::CANVAS_H],
+                        [0.0, 0.0, 0.0, 0.5],
+                    );
+                    divider.blend = th_anm::BlendMode::Normal;
+                    list.push(divider);
                 }
                 (list, [0.0; 3], f)
             }
@@ -249,7 +241,7 @@ impl Viewer {
                 self.restart();
             }
             KeyCode::KeyF => self.fast = !self.fast,
-            KeyCode::KeyV => self.full_view = !self.full_view,
+            KeyCode::KeyV => self.show_fields = !self.show_fields,
             KeyCode::ArrowRight | KeyCode::ArrowLeft if self.mode == Mode::Stage => {
                 let n = self.stage_files.len().max(1);
                 self.stage_idx =
@@ -420,7 +412,7 @@ fn main() {
     log::info!("using {} ({} files)", dat_path.display(), dat.entries().len());
     println!(
         "Controls: Tab = switch ANM / stage viewer, Left/Right = file or stage, Up/Down = single script,\n\
-         A = all scripts, C = toggle centre origin, F = fast-forward x8, V = playfields / full view,\n\
+         A = all scripts, C = toggle centre origin, F = fast-forward x8, V = toggle field divider,\n\
          R = restart, Space = pause,\n\
          . = step frame, 0-9 = send interrupt, Esc = quit"
     );
