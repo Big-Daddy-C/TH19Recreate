@@ -49,8 +49,15 @@ enum Mode {
     Stage,
 }
 
+/// The two side-by-side playfields, as canvas rectangles `[x, y, w, h]`.
+/// APPROX: inferred from the 16-unit border strips in front.anm (left, centre, right);
+/// the exact rectangles live in th19.exe.
+const FIELDS: [[f32; 4]; 2] = [[16.0, 0.0, 296.0, 480.0], [328.0, 0.0, 296.0, 480.0]];
+
 struct Viewer {
     mode: Mode,
+    /// Show the stage across the whole canvas instead of in the two playfields.
+    full_view: bool,
     stage: Option<Stage>,
     stage_files: Vec<String>,
     stage_idx: usize,
@@ -77,6 +84,7 @@ impl Viewer {
         stage_files.sort();
         let mut v = Self {
             mode: Mode::Anm,
+            full_view: false,
             stage: None,
             stage_files,
             stage_idx: 0,
@@ -124,13 +132,16 @@ impl Viewer {
             },
             Err(e) => return log::error!("{anm_name}: {e}"),
         };
-        self.stage = Some(Stage::new(std, anm, &self.lib, &mut self.world));
+        let mut stage = Stage::new(std, anm, &self.lib, &mut self.world);
+        // Backdrop sprites are positioned relative to the top-centre of a playfield.
+        stage.backdrop_origin = [FIELDS[0][2] * 0.5, 0.0];
+        self.stage = Some(stage);
     }
 
     fn tick(&mut self) {
         for _ in 0..if self.fast { 8 } else { 1 } {
             if let Some(st) = &mut self.stage {
-                st.tick(&mut self.world);
+                st.tick(&mut self.world, &self.lib);
             }
             self.world.tick(&self.lib);
         }
@@ -162,15 +173,43 @@ impl Viewer {
     fn frame(&self) -> (th_anm::DrawList, [f32; 3], [f32; 3]) {
         let (mut list, bg, fog) = match &self.stage {
             Some(st) => {
-                let cam = st.camera([0.0, 0.0, render::CANVAS_W, render::CANVAS_H]);
                 let c = st.clear_color.map(|x| x / 255.0);
                 let f = [st.fog_color[0] / 255.0, st.fog_color[1] / 255.0, st.fog_color[2] / 255.0];
                 // Distant geometry fades into the fog, so fill the background with it too.
-                (self.world.draw_list(&self.lib, Some(&cam)), if st.fog_range[1] > 0.0 { f } else { c }, f)
+                let sky = if st.fog_range[1] > 0.0 { f } else { c };
+                let fields: Vec<[f32; 4]> = if self.full_view {
+                    vec![[0.0, 0.0, render::CANVAS_W, render::CANVAS_H]]
+                } else {
+                    FIELDS.to_vec()
+                };
+                let mut list = Vec::new();
+                for rect in fields {
+                    list.push(th_anm::DrawBatch::solid_rect(rect, [sky[0], sky[1], sky[2], 1.0]));
+                    let cam = st.camera(rect);
+                    let mut stage = self.world.draw_list(&self.lib, th_anm::Pass::Stage(&cam));
+                    for b in &mut stage {
+                        b.clip = Some(rect);
+                    }
+                    list.extend(stage);
+                    // Sprite-slot sprites (e.g. stage 11's sky band) sit over the distant, fogged
+                    // part of the 3D scene. APPROX: drawn after all stage geometry.
+                    // Backdrops are laid out field-relative; shift them into this field.
+                    let mut back = self.world.draw_list(&self.lib, th_anm::Pass::Backdrop);
+                    let (dx, dy) = (rect[0] + rect[2] * 0.5 - st.backdrop_origin[0], rect[1] - st.backdrop_origin[1]);
+                    for b in &mut back {
+                        b.clip = Some(rect);
+                        for v in &mut b.vertices {
+                            v.pos[0] += dx;
+                            v.pos[1] += dy;
+                        }
+                    }
+                    list.extend(back);
+                }
+                (list, [0.0; 3], f)
             }
             None => (Vec::new(), [0.0; 3], [0.0; 3]),
         };
-        list.extend(self.world.draw_list(&self.lib, None));
+        list.extend(self.world.draw_list(&self.lib, th_anm::Pass::Ui));
         (list, bg, fog)
     }
 
@@ -210,6 +249,7 @@ impl Viewer {
                 self.restart();
             }
             KeyCode::KeyF => self.fast = !self.fast,
+            KeyCode::KeyV => self.full_view = !self.full_view,
             KeyCode::ArrowRight | KeyCode::ArrowLeft if self.mode == Mode::Stage => {
                 let n = self.stage_files.len().max(1);
                 self.stage_idx =
@@ -380,7 +420,8 @@ fn main() {
     log::info!("using {} ({} files)", dat_path.display(), dat.entries().len());
     println!(
         "Controls: Tab = switch ANM / stage viewer, Left/Right = file or stage, Up/Down = single script,\n\
-         A = all scripts, C = toggle centre origin, F = fast-forward x8, R = restart, Space = pause,\n\
+         A = all scripts, C = toggle centre origin, F = fast-forward x8, V = playfields / full view,\n\
+         R = restart, Space = pause,\n\
          . = step frame, 0-9 = send interrupt, Esc = quit"
     );
 

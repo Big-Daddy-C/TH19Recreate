@@ -17,12 +17,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut world = World::default();
         let mut stage = Stage::new(std, anm, &lib, &mut world);
         let mut on_screen = Vec::new();
-        for frame in 1..=600 {
-            stage.tick(&mut world);
+        for frame in 1..=800 {
+            stage.tick(&mut world, &lib);
             world.tick(&lib);
             if frame % 200 == 0 {
                 let cam = stage.camera([0.0, 0.0, 640.0, 480.0]);
-                let list = world.draw_list(&lib, Some(&cam));
+                let list = world.draw_list(&lib, th_anm::Pass::Stage(&cam));
+                let back = world.draw_list(&lib, th_anm::Pass::Backdrop);
+                for (i, b) in back.iter().enumerate() {
+                    let ys = b.vertices.iter().map(|v| v.pos[1]);
+                    let xs = b.vertices.iter().map(|v| v.pos[0]);
+                    let (y0, y1) = ys.fold((f32::MAX, f32::MIN), |(a, c), y| (a.min(y), c.max(y)));
+                    let (x0, x1) = xs.fold((f32::MAX, f32::MIN), |(a, c), x| (a.min(x), c.max(x)));
+                    println!("  {name} frame {frame}: backdrop batch {i} tris={} x {x0:.0}..{x1:.0} y {y0:.0}..{y1:.0} origin {:?}", b.vertices.len() / 3, stage.backdrop_origin);
+                }
                 let verts: Vec<_> = list.iter().flat_map(|b| b.vertices.iter()).collect();
                 let visible = verts.iter().filter(|v| (0.0..=640.0).contains(&v.pos[0]) && (0.0..=480.0).contains(&v.pos[1])).count();
                 on_screen.push((verts.len() / 3, visible));

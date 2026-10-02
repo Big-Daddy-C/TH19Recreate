@@ -6,11 +6,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use th_anm::{AnmLibrary, BlendMode, DrawList, Vertex};
+use th_anm::{AnmLibrary, BlendMode, DepthMode, DrawList, Vertex};
 use winit::window::Window;
 
 pub const CANVAS_W: f32 = 640.0;
 pub const CANVAS_H: f32 = 480.0;
+const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 const SHADER: &str = r#"
 struct Globals { canvas: vec2<f32>, _pad: vec2<f32>, fog: vec4<f32> };
@@ -32,22 +33,38 @@ fn vs(
     @location(2) color: vec4<f32>,
     @location(3) w: f32,
     @location(4) fog: f32,
+    @location(5) depth: f32,
 ) -> VOut {
     var o: VOut;
     // `pos` is already perspective-divided; multiply back by w so the GPU
     // interpolates UVs perspective-correctly for 3D stage quads.
     let ndc = vec2<f32>(pos.x / g.canvas.x * 2.0 - 1.0, 1.0 - pos.y / g.canvas.y * 2.0);
-    o.pos = vec4<f32>(ndc * w, 0.0, w);
+    o.pos = vec4<f32>(ndc * w, depth * w, w);
     o.uv = uv;
     o.color = color;
     o.fog = fog;
     return o;
 }
 
+fn shade(i: VOut, alpha_ref: f32) -> vec4<f32> {
+    let c = textureSample(tex, samp, i.uv) * i.color;
+    // Like Direct3D alpha testing: (nearly) transparent texels must not occlude via the depth buffer.
+    if (c.a < alpha_ref) {
+        discard;
+    }
+    return vec4<f32>(mix(c.rgb, g.fog.rgb, i.fog), c.a);
+}
+
 @fragment
 fn fs(i: VOut) -> @location(0) vec4<f32> {
-    let c = textureSample(tex, samp, i.uv) * i.color;
-    return vec4<f32>(mix(c.rgb, g.fog.rgb, i.fog), c.a);
+    return shade(i, 0.004);
+}
+
+// Depth-writing geometry: only reasonably opaque texels may occlude what is behind them.
+// APPROX: the original alpha-test reference value still needs confirming.
+@fragment
+fn fs_depth(i: VOut) -> @location(0) vec4<f32> {
+    return shade(i, 0.25);
 }
 "#;
 
@@ -57,7 +74,9 @@ pub struct Renderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
-    pipelines: HashMap<BlendMode, wgpu::RenderPipeline>,
+    pipelines: HashMap<(BlendMode, DepthMode), wgpu::RenderPipeline>,
+    /// Depth buffer and the size it was created for.
+    depth: Option<(wgpu::TextureView, u32, u32)>,
     globals: wgpu::BindGroup,
     globals_buf: wgpu::Buffer,
     tex_layout: wgpu::BindGroupLayout,
@@ -182,7 +201,8 @@ impl Renderer {
             bind_group_layouts: &[Some(&globals_layout), Some(&tex_layout)],
             immediate_size: 0,
         });
-        let attrs = wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4, 3 => Float32, 4 => Float32];
+        let attrs =
+            wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4, 3 => Float32, 4 => Float32, 5 => Float32];
         let mut pipelines = HashMap::new();
         for mode in [
             BlendMode::Normal,
@@ -195,7 +215,11 @@ impl Renderer {
             BlendMode::Behind,
             BlendMode::Min,
             BlendMode::Max,
-        ] {
+        ]
+        .into_iter()
+        .flat_map(|b| [DepthMode::Off, DepthMode::Test, DepthMode::TestWrite].map(|d| (b, d)))
+        {
+            let (mode, depth) = mode;
             let p = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("sprite"),
                 layout: Some(&layout),
@@ -210,11 +234,21 @@ impl Renderer {
                     })],
                 },
                 primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(depth == DepthMode::TestWrite),
+                    depth_compare: Some(if depth == DepthMode::Off {
+                        wgpu::CompareFunction::Always
+                    } else {
+                        wgpu::CompareFunction::LessEqual
+                    }),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
                 multisample: wgpu::MultisampleState::default(),
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
-                    entry_point: Some("fs"),
+                    entry_point: Some(if depth == DepthMode::TestWrite { "fs_depth" } else { "fs" }),
                     compilation_options: Default::default(),
                     targets: &[Some(wgpu::ColorTargetState {
                         format: config.format,
@@ -225,7 +259,7 @@ impl Renderer {
                 multiview_mask: None,
                 cache: None,
             });
-            pipelines.insert(mode, p);
+            pipelines.insert((mode, depth), p);
         }
 
         let vbuf_cap = 1 << 20;
@@ -244,6 +278,7 @@ impl Renderer {
             queue,
             config,
             pipelines,
+            depth: None,
             globals,
             globals_buf: ubuf,
             white,
@@ -362,7 +397,9 @@ impl Renderer {
         let bg = th_anm::DrawBatch {
             texture: None,
             blend: BlendMode::Replace,
+            depth: DepthMode::Off,
             layer: i32::MIN,
+            clip: None,
             vertices: canvas_quad([background[0], background[1], background[2], 1.0]),
         };
         let list: Vec<&th_anm::DrawBatch> = std::iter::once(&bg).chain(list.iter()).collect();
@@ -398,6 +435,20 @@ impl Renderer {
             offset += data.len() as u64;
         }
 
+        if !matches!(self.depth, Some((_, w, h)) if w == target_w && h == target_h) {
+            let tex = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("depth"),
+                size: wgpu::Extent3d { width: target_w, height: target_h, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: DEPTH_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+            self.depth = Some((tex.create_view(&Default::default()), target_w, target_h));
+        }
+        let depth_view = &self.depth.as_ref().unwrap().0;
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -411,7 +462,11 @@ impl Renderer {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: depth_view,
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Discard }),
+                    stencil_ops: None,
+                }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
                 multiview_mask: None,
@@ -422,17 +477,23 @@ impl Renderer {
             let scale = (ww / CANVAS_W).min(wh / CANVAS_H);
             let (vw, vh) = (CANVAS_W * scale, CANVAS_H * scale);
             pass.set_viewport((ww - vw) * 0.5, (wh - vh) * 0.5, vw, vh, 0.0, 1.0);
-            pass.set_scissor_rect(
-                ((ww - vw) * 0.5) as u32,
-                ((wh - vh) * 0.5) as u32,
-                (vw as u32).max(1),
-                (vh as u32).max(1),
-            );
+            let (ox, oy) = ((ww - vw) * 0.5, (wh - vh) * 0.5);
+            // Canvas rectangle -> target pixels, clamped to the target.
+            let scissor = |r: [f32; 4]| {
+                let x0 = (ox + r[0] * scale).clamp(0.0, ww);
+                let y0 = (oy + r[1] * scale).clamp(0.0, wh);
+                let x1 = (ox + (r[0] + r[2]) * scale).clamp(0.0, ww);
+                let y1 = (oy + (r[1] + r[3]) * scale).clamp(0.0, wh);
+                (x0 as u32, y0 as u32, ((x1 - x0) as u32).max(1), ((y1 - y0) as u32).max(1))
+            };
+            let full = [0.0, 0.0, CANVAS_W, CANVAS_H];
 
             pass.set_bind_group(0, &self.globals, &[]);
             for (b, &(off, count)) in list.iter().zip(&ranges) {
+                let (sx, sy, sw, sh) = scissor(b.clip.unwrap_or(full));
+                pass.set_scissor_rect(sx, sy, sw, sh);
                 let tex = b.texture.and_then(|t| self.textures.get(&t)).unwrap_or(&self.white);
-                pass.set_pipeline(&self.pipelines[&b.blend]);
+                pass.set_pipeline(&self.pipelines[&(b.blend, b.depth)]);
                 pass.set_bind_group(1, tex, &[]);
                 pass.set_vertex_buffer(0, self.vbuf.slice(off..off + count as u64 * std::mem::size_of::<Vertex>() as u64));
                 pass.draw(0..count, 0..1);
@@ -485,6 +546,6 @@ fn make_texture(
 }
 
 fn canvas_quad(color: [f32; 4]) -> Vec<Vertex> {
-    let v = |x: f32, y: f32| Vertex { pos: [x, y], uv: [0.0; 2], color, w: 1.0, fog: 0.0 };
+    let v = |x: f32, y: f32| Vertex { pos: [x, y], uv: [0.0; 2], color, w: 1.0, fog: 0.0, depth: 0.0 };
     vec![v(0.0, 0.0), v(CANVAS_W, 0.0), v(CANVAS_W, CANVAS_H), v(0.0, 0.0), v(CANVAS_W, CANVAS_H), v(0.0, CANVAS_H)]
 }

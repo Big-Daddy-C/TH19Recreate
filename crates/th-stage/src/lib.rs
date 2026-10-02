@@ -35,6 +35,10 @@ pub struct Stage {
     i_fog: Interp<6>,
 
     vms: Vec<VmId>,
+    /// STD sprite slots (`ins_14`): 2D backdrop sprites, at most 8 at a time.
+    slots: [Option<VmId>; 8],
+    /// Canvas position backdrop sprites are placed relative to (centre of the stage view).
+    pub backdrop_origin: [f32; 2],
     pub unknown_ops: HashMap<u16, u32>,
 }
 
@@ -90,9 +94,12 @@ impl Stage {
             i_up: Interp::default(),
             i_fog: Interp::default(),
             vms,
+            slots: [None; 8],
+            // APPROX: the real anchor is the playfield's stage viewport; confirm with th19.exe.
+            backdrop_origin: [320.0, 240.0],
             unknown_ops: HashMap::new(),
         };
-        stage.run(world);
+        stage.run(world, lib);
         stage
     }
 
@@ -110,7 +117,7 @@ impl Stage {
     }
 
     /// Advance the stage one frame. The caller ticks the ANM `world` separately.
-    pub fn tick(&mut self, world: &mut World) {
+    pub fn tick(&mut self, world: &mut World, lib: &AnmLibrary) {
         if let Some(v) = self.i_pos.step() {
             self.pos = v;
         }
@@ -125,10 +132,10 @@ impl Stage {
             self.fog_range = [near, far];
         }
         self.time += 1;
-        self.run(world);
+        self.run(world, lib);
     }
 
-    fn run(&mut self, world: &mut World) {
+    fn run(&mut self, world: &mut World, lib: &AnmLibrary) {
         if let Some(n) = self.pending_interrupt.take() {
             if let Some(at) = self.file.script.iter().position(|i| i.opcode == 16 && i.arg_i32(0) == n) {
                 self.ip = at + 1;
@@ -147,11 +154,11 @@ impl Stage {
                 break;
             }
             self.ip += 1;
-            self.exec(&ins, world);
+            self.exec(&ins, world, lib);
         }
     }
 
-    fn exec(&mut self, ins: &Instr, world: &mut World) {
+    fn exec(&mut self, ins: &Instr, world: &mut World, lib: &AnmLibrary) {
         let i = |n| ins.arg_i32(n);
         let f = |n| ins.arg_f32(n);
         let v3 = |k: usize| [ins.arg_f32(k), ins.arg_f32(k + 1), ins.arg_f32(k + 2)];
@@ -185,10 +192,23 @@ impl Stage {
                 let c = argb(i(0));
                 self.clear_color = [c[0], c[1], c[2]];
             }
+            14 => {
+                // sprite(slot, script, layer): replace the 2D backdrop sprite in `slot`.
+                // APPROX: every slot is drawn behind the 3D scene; how the layer argument
+                // interleaves with stage geometry is not modelled yet.
+                if let Some(cell) = usize::try_from(i(0)).ok().and_then(|s| self.slots.get_mut(s)) {
+                    if let Some(old) = cell.take() {
+                        world.delete(old);
+                    }
+                    if i(1) >= 0 {
+                        *cell = Some(world.spawn_backdrop(lib, self.anm_file, i(1) as usize, self.backdrop_origin));
+                    }
+                }
+            }
             16 => {} // interrupt label: no-op when reached normally
             18 => self.i_up.start(self.up, v3(2), i(0), i(1)),
             19 => world.interrupt_3d(i(0) + 7),
-            // 12 rock (camera shake), 14 2D sprite slots, 17 distortion, 20 draw distance, 21 TH19-only.
+            // 12 rock (camera shake), 17 distortion, 20 draw distance, 21 TH19-only.
             op => *self.unknown_ops.entry(op).or_default() += 1,
         }
     }
@@ -200,7 +220,7 @@ impl Stage {
 
     /// Remove this stage's VMs from the world.
     pub fn despawn(&mut self, world: &mut World) {
-        for id in self.vms.drain(..) {
+        for id in self.vms.drain(..).chain(self.slots.iter_mut().filter_map(Option::take)) {
             world.delete(id);
         }
     }

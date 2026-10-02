@@ -55,6 +55,20 @@ pub struct Vertex {
     pub w: f32,
     /// Fog factor 0..1 towards the stage fog colour (0.0 for 2D).
     pub fog: f32,
+    /// Normalised depth 0..1 (0.0 for 2D, which is drawn without depth testing).
+    pub depth: f32,
+}
+
+/// How a batch interacts with the depth buffer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub enum DepthMode {
+    /// 2D UI/game layers: always drawn, no depth.
+    #[default]
+    Off,
+    /// 3D, depth-tested but not written (translucent layers; ANM `zWriteDisable(1)`).
+    Test,
+    /// 3D, depth-tested and written.
+    TestWrite,
 }
 
 /// Consecutive triangles sharing a texture and blend mode.
@@ -63,11 +77,41 @@ pub struct DrawBatch {
     /// `None` = untextured (solid colour primitives).
     pub texture: Option<u32>,
     pub blend: BlendMode,
+    pub depth: DepthMode,
     pub layer: i32,
+    /// Restrict drawing to this canvas rectangle `[x, y, w, h]` (e.g. one playfield).
+    pub clip: Option<[f32; 4]>,
     pub vertices: Vec<Vertex>,
 }
 
+impl DrawBatch {
+    /// An untextured rectangle in canvas space.
+    pub fn solid_rect(rect: [f32; 4], color: [f32; 4]) -> Self {
+        let [x, y, w, h] = rect;
+        let v = |px: f32, py: f32| Vertex { pos: [px, py], uv: [0.0; 2], color, w: 1.0, fog: 0.0, depth: 0.0 };
+        Self {
+            texture: None,
+            blend: BlendMode::Replace,
+            depth: DepthMode::Off,
+            layer: i32::MIN,
+            clip: Some(rect),
+            vertices: vec![v(x, y), v(x + w, y), v(x + w, y + h), v(x, y), v(x + w, y + h), v(x, y + h)],
+        }
+    }
+}
+
 pub type DrawList = Vec<DrawBatch>;
+
+/// Which group of VMs to draw. A stage frame is drawn as `Backdrop`, then `Stage`, then `Ui`.
+#[derive(Clone, Copy)]
+pub enum Pass<'a> {
+    /// 2D sprites placed behind the 3D stage (STD sprite slots, e.g. distant scenery).
+    Backdrop,
+    /// 3D stage geometry seen through a camera.
+    Stage(&'a Camera),
+    /// Ordinary 2D layers (game field, UI, the ANM viewer).
+    Ui,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RunState {
@@ -115,6 +159,8 @@ pub struct Vm {
 
     pub sprite: i32,
     pub blend: BlendMode,
+    /// ANM `zWriteDisable`: 3D sprites that should not occlude what is drawn after them.
+    pub z_write_disable: bool,
     pub render_mode: i32,
     pub layer: i32,
     pub visible: bool,
@@ -144,6 +190,8 @@ pub struct Vm {
     pub space_3d: bool,
     /// Draw the sprite at this size instead of its own (STD quads specify their size).
     pub size_override: Option<[f32; 2]>,
+    /// 2D sprite belonging to the stage background (drawn in [`Pass::Backdrop`]).
+    pub backdrop: bool,
 }
 
 impl Vm {
@@ -173,6 +221,7 @@ impl Vm {
             color_mode: 0,
             sprite: -1,
             blend: BlendMode::Normal,
+            z_write_disable: false,
             render_mode: 0,
             layer: 0,
             visible: true,
@@ -197,6 +246,7 @@ impl Vm {
             origin: [0.0; 3],
             space_3d: false,
             size_override: None,
+            backdrop: false,
         }
     }
 
@@ -308,6 +358,18 @@ impl World {
     /// Create a root VM running `script` of `file` at `pos`, executing its first instructions immediately.
     pub fn spawn(&mut self, lib: &AnmLibrary, file: usize, script: usize, pos: [f32; 2]) -> VmId {
         self.spawn_inner(lib, file, script, None, [pos[0], pos[1], 0.0], false)
+    }
+
+    /// Create a 2D VM drawn behind the 3D stage ([`Pass::Backdrop`]).
+    pub fn spawn_backdrop(&mut self, lib: &AnmLibrary, file: usize, script: usize, pos: [f32; 2]) -> VmId {
+        // Flag it before its first instructions run so any children inherit it.
+        let mut vm = Vm::new(file, script, self.next_order);
+        self.next_order += 1;
+        vm.origin = [pos[0], pos[1], 0.0];
+        vm.backdrop = true;
+        let id = self.insert(vm);
+        self.run(lib, id);
+        id
     }
 
     /// Create a root VM positioned in 3D stage space (drawn only through a [`Camera`]).
@@ -435,19 +497,25 @@ impl World {
             delete
         };
 
-        let (file, base, is_3d) = {
+        let (file, base, is_3d, backdrop) = {
             let vm = self.slots[id.index as usize].vm.as_ref().unwrap();
-            (vm.file, world_pos(self, vm), vm.space_3d)
+            (vm.file, world_pos(self, vm), vm.space_3d, vm.backdrop)
         };
         for s in spawns {
             match s {
                 Spawn::Child { script, offset } if script >= 0 => {
                     let o = [offset[0], offset[1], 0.0];
-                    self.spawn_inner(lib, file, script as usize, Some(id), o, is_3d);
+                    let child = self.spawn_inner(lib, file, script as usize, Some(id), o, is_3d);
+                    if let Some(c) = self.get_mut(child) {
+                        c.backdrop = backdrop;
+                    }
                 }
                 Spawn::Root { script, offset } if script >= 0 => {
                     let o = [base[0] + offset[0], base[1] + offset[1], base[2]];
-                    self.spawn_inner(lib, file, script as usize, None, o, is_3d);
+                    let root = self.spawn_inner(lib, file, script as usize, None, o, is_3d);
+                    if let Some(c) = self.get_mut(root) {
+                        c.backdrop = backdrop;
+                    }
                 }
                 _ => {}
             }
@@ -457,14 +525,21 @@ impl World {
         }
     }
 
-    /// Build triangles for every visible VM, sorted by layer then creation order.
-    /// With a camera, only 3D (stage) VMs are drawn; without one, only 2D VMs.
-    pub fn draw_list(&self, lib: &AnmLibrary, camera: Option<&Camera>) -> DrawList {
+    /// Build triangles for the VMs in `pass`, sorted by layer then creation order.
+    pub fn draw_list(&self, lib: &AnmLibrary, pass: Pass) -> DrawList {
+        let camera = match pass {
+            Pass::Stage(c) => Some(c),
+            _ => None,
+        };
         let mut vms: Vec<&Vm> = self
             .slots
             .iter()
             .filter_map(|s| s.vm.as_ref())
-            .filter(|v| v.space_3d == camera.is_some())
+            .filter(|v| match pass {
+                Pass::Backdrop => !v.space_3d && v.backdrop,
+                Pass::Stage(_) => v.space_3d,
+                Pass::Ui => !v.space_3d && !v.backdrop,
+            })
             .collect();
         vms.sort_by_key(|v| (v.layer, v.order));
 
@@ -479,11 +554,25 @@ impl World {
             if verts.is_empty() {
                 continue;
             }
+            // APPROX: render mode 4 behaves like a flat layer that does not write depth
+            // (stage 1's coplanar tree layers z-fight otherwise); confirm against th19.exe.
+            let depth = match (camera.is_some(), vm.z_write_disable || vm.render_mode == 4) {
+                (false, _) => DepthMode::Off,
+                (true, true) => DepthMode::Test,
+                (true, false) => DepthMode::TestWrite,
+            };
             match out.last_mut() {
-                Some(b) if b.texture == texture && b.blend == vm.blend && b.layer == vm.layer => {
+                Some(b) if b.texture == texture && b.blend == vm.blend && b.layer == vm.layer && b.depth == depth => {
                     b.vertices.extend_from_slice(&verts)
                 }
-                _ => out.push(DrawBatch { texture, blend: vm.blend, layer: vm.layer, vertices: verts.clone() }),
+                _ => out.push(DrawBatch {
+                    texture,
+                    blend: vm.blend,
+                    depth,
+                    layer: vm.layer,
+                    clip: None,
+                    vertices: verts.clone(),
+                }),
             }
         }
         out
@@ -832,7 +921,8 @@ fn exec(
         302 => vm.render_mode = i!(0),
         303 => vm.blend = BlendMode::from_id(i!(0)),
         304 => vm.layer = i!(0),
-        305 | 306 | 307 | 311 | 312 | 313 | 314 | 315 | 316 | 317 | 318 | 319 => {} // no visual effect modelled yet
+        305 => vm.z_write_disable = i!(0) != 0,
+        306 | 307 | 311 | 312 | 313 | 314 | 315 | 316 | 317 | 318 | 319 => {} // no visual effect modelled yet
         308 => vm.scale[0] = -vm.scale[0],
         309 => vm.scale[1] = -vm.scale[1],
         310 => vm.visible = i!(0) != 0,
@@ -1020,7 +1110,7 @@ impl Placer<'_> {
     fn place_2d(&self, x: f32, y: f32, uv: [f32; 2], color: [f32; 4]) -> Vertex {
         let (s, c) = self.rot[2].sin_cos();
         let pos = [self.origin[0] + x * c - y * s, self.origin[1] + x * s + y * c];
-        Vertex { pos, uv, color, w: 1.0, fog: 0.0 }
+        Vertex { pos, uv, color, w: 1.0, fog: 0.0, depth: 0.0 }
     }
 
     fn finish_3d(&self, cam: &Camera, v: &Clipped) -> Vertex {
@@ -1032,7 +1122,7 @@ impl Placer<'_> {
         } else {
             (v.color, fog)
         };
-        Vertex { pos, uv: v.uv, color, w, fog }
+        Vertex { pos, uv: v.uv, color, w, fog, depth: v.clip[2] / v.clip[3] }
     }
 
     /// Push a triangle. In 3D it is clipped against the camera's near plane first,

@@ -186,6 +186,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("t={:<5} op={:<3} ints={ints:?} floats={floats:?}", i.time, i.opcode);
             }
         }
+        "anm-textures" => {
+            // Writes the embedded PNG/JPEG images of one .anm file (for local debugging only).
+            let name = args.get(2).ok_or("anm-textures <file.anm> [out_dir]")?;
+            let out = PathBuf::from(args.get(3).map(String::as_str).unwrap_or("data/textures"));
+            std::fs::create_dir_all(&out)?;
+            let a = th_formats::anm::AnmFile::parse(&archive.read(name)?)?;
+            for e in &a.entries {
+                if let Some(t) = &e.texture {
+                    let ext = magic(&t.data);
+                    let file = out.join(format!("{}.{ext}", e.name.replace(['/', '\\'], "_")));
+                    std::fs::write(&file, &t.data)?;
+                    println!("{}", file.display());
+                }
+            }
+        }
         other => return Err(format!("unknown command {other}").into()),
     }
     Ok(())

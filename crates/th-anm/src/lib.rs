@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use th_formats::anm::{AnmFile, Script};
 
 pub use camera::Camera;
-pub use vm::{BlendMode, DrawList, DrawBatch, Vertex, VmId, World};
+pub use vm::{BlendMode, DepthMode, Pass, DrawList, DrawBatch, Vertex, VmId, World};
 
 /// A decoded RGBA8 texture owned by the library. Index into `AnmLibrary::textures` is the texture id.
 pub struct TextureImage {
