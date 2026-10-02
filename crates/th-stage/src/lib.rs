@@ -44,7 +44,8 @@ pub struct Stage {
     pub fog_range: [f32; 2],
     /// Background clear colour `[r, g, b]` in 0..255.
     pub clear_color: [f32; 3],
-    /// Squared draw distance (`ins_20`); not used for culling yet.
+    /// Squared draw distance (`ins_20`). th19.exe stores it but never reads it, so it
+    /// does not cull anything.
     pub draw_distance_sq: f32,
 
     i_pos: Interp<3>,
@@ -112,7 +113,7 @@ impl Stage {
                     // mirrors it), e.g. a 512x256 mist sprite tiled at 1024x512, or stage 13's
                     // blossoms at -640x640.
                     let size = (q.size[0] != 0.0 || q.size[1] != 0.0).then_some(q.size);
-                    vms.push(world.spawn_3d(lib, anm_file, q.script as usize, p, size));
+                    vms.push(world.spawn_3d(lib, anm_file, q.script as usize, p, size, layer as u8));
                 }
             }
         }
@@ -142,8 +143,11 @@ impl Stage {
             distortion_phase: [[0.0; 2]; 2],
             vms,
             slots: [None; 8],
-            // APPROX: anchor of sprite-slot sprites; confirm against th19.exe.
-            backdrop_origin: [320.0, 240.0],
+            // Sprite-slot sprites are drawn through the stage viewport's 2D screen camera.
+            // APPROX: horizontal origin at the viewport centre, vertical at its top; the game
+            // adds a runtime offset (camera fields 0x57/0x58) not visible statically. This
+            // placement makes stage 11's centred sky band cover the full width above the horizon.
+            backdrop_origin: [320.0, 0.0],
             unknown_ops: HashMap::new(),
         };
         stage.run(world, lib);
@@ -328,7 +332,8 @@ impl Stage {
                         if let Some((old, _)) = cell.take() {
                             world.delete(old);
                         }
-                        let id = world.spawn_backdrop(lib, self.anm_file, s as usize, self.backdrop_origin);
+                        let layer = i(2).clamp(0, 255) as u8;
+                        let id = world.spawn_backdrop(lib, self.anm_file, s as usize, self.backdrop_origin, layer);
                         *cell = Some((id, i(2)));
                     }
                     _ => {}

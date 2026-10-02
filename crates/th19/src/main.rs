@@ -133,9 +133,6 @@ impl Viewer {
             Err(e) => return log::error!("{anm_name}: {e}"),
         };
         let mut stage = Stage::new(std, anm, &self.lib, &mut self.world);
-        // Backdrop sprites are positioned relative to the top-centre of the screen.
-        // APPROX: confirm the anchor against th19.exe.
-        stage.backdrop_origin = [render::CANVAS_W * 0.5, 0.0];
         self.stage = Some(stage);
     }
 
@@ -184,11 +181,9 @@ impl Viewer {
                 // windows laid over that single shared background.
                 let rect = [0.0, 0.0, render::CANVAS_W, render::CANVAS_H];
                 let mut list = vec![th_anm::DrawBatch::solid_rect(rect, [sky[0], sky[1], sky[2], 1.0])];
-                // Sprite-slot sprites (e.g. stage 11's sky) sit behind the 3D scene; the scene's
-                // draw distance keeps far geometry from covering them.
-                list.extend(self.world.draw_list(&self.lib, th_anm::Pass::Backdrop));
+                // The stage, layer by layer as the game draws it (sprite slots interleaved).
                 let cam = st.camera(rect);
-                list.extend(self.world.draw_list(&self.lib, th_anm::Pass::Stage(&cam)));
+                list.extend(self.world.draw_stage(&self.lib, &cam));
                 if self.show_fields {
                     // Stand-in for the real frame from front.anm: darken the strip between fields.
                     let gap_x = FIELDS[0][0] + FIELDS[0][2];

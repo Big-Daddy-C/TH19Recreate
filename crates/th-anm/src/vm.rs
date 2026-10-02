@@ -312,6 +312,8 @@ pub struct Vm {
     pub backdrop: bool,
     /// Built-in effect attached by `effectNew`, drawn instead of the sprite.
     pub effect: Option<Ribbon>,
+    /// STD layer this stage sprite is drawn in (stage quads and sprite slots).
+    pub stage_layer: u8,
 }
 
 impl Vm {
@@ -369,6 +371,7 @@ impl Vm {
             size_override: None,
             backdrop: false,
             effect: None,
+            stage_layer: 0,
         }
     }
 
@@ -483,12 +486,20 @@ impl World {
     }
 
     /// Create a 2D VM drawn behind the 3D stage ([`Pass::Backdrop`]).
-    pub fn spawn_backdrop(&mut self, lib: &AnmLibrary, file: usize, script: usize, pos: [f32; 2]) -> VmId {
+    pub fn spawn_backdrop(
+        &mut self,
+        lib: &AnmLibrary,
+        file: usize,
+        script: usize,
+        pos: [f32; 2],
+        stage_layer: u8,
+    ) -> VmId {
         // Flag it before its first instructions run so any children inherit it.
         let mut vm = Vm::new(file, script, self.next_order);
         self.next_order += 1;
         vm.origin = [pos[0], pos[1], 0.0];
         vm.backdrop = true;
+        vm.stage_layer = stage_layer;
         let id = self.insert(vm);
         self.run(lib, id);
         id
@@ -503,10 +514,12 @@ impl World {
         script: usize,
         pos: [f32; 3],
         size: Option<[f32; 2]>,
+        stage_layer: u8,
     ) -> VmId {
         let id = self.spawn_inner(lib, file, script, None, pos, true);
         if let Some(vm) = self.get_mut(id) {
             vm.size_override = size;
+            vm.stage_layer = stage_layer;
         }
         id
     }
@@ -624,9 +637,9 @@ impl World {
             delete
         };
 
-        let (file, base, is_3d, backdrop) = {
+        let (file, base, is_3d, backdrop, stage_layer) = {
             let vm = self.slots[id.index as usize].vm.as_ref().unwrap();
-            (vm.file, world_pos(self, vm), vm.space_3d, vm.backdrop)
+            (vm.file, world_pos(self, vm), vm.space_3d, vm.backdrop, vm.stage_layer)
         };
         for s in spawns {
             match s {
@@ -635,6 +648,7 @@ impl World {
                     let child = self.spawn_inner(lib, file, script as usize, Some(id), o, is_3d);
                     if let Some(c) = self.get_mut(child) {
                         c.backdrop = backdrop;
+                        c.stage_layer = stage_layer;
                     }
                 }
                 Spawn::Root { script, offset } if script >= 0 => {
@@ -642,6 +656,7 @@ impl World {
                     let root = self.spawn_inner(lib, file, script as usize, None, o, is_3d);
                     if let Some(c) = self.get_mut(root) {
                         c.backdrop = backdrop;
+                        c.stage_layer = stage_layer;
                     }
                 }
                 _ => {}
@@ -650,6 +665,40 @@ impl World {
         if delete {
             self.delete(id);
         }
+    }
+
+    /// Build the whole stage background the way th19.exe draws it: STD layers 0, 1, 2... in
+    /// turn; within each layer, first that layer's sprite-slot sprites (2D, through the
+    /// screen camera), then its 3D quads in spawn order.
+    pub fn draw_stage(&self, lib: &AnmLibrary, camera: &Camera) -> DrawList {
+        let mut vms: Vec<&Vm> =
+            self.slots.iter().filter_map(|s| s.vm.as_ref()).filter(|v| v.space_3d || v.backdrop).collect();
+        vms.sort_by_key(|v| (v.stage_layer, v.space_3d, v.order));
+        let mut out: DrawList = Vec::new();
+        let mut verts = Vec::new();
+        for vm in vms {
+            if !vm.visible || vm.alpha <= 0.0 && vm.color_mode == 0 {
+                continue;
+            }
+            verts.clear();
+            let cam = vm.space_3d.then_some(camera);
+            let texture = emit(self, lib, vm, cam, &mut verts);
+            if verts.is_empty() {
+                continue;
+            }
+            let depth = match (vm.space_3d, vm.z_write_disable || vm.effect.is_some()) {
+                (false, _) => DepthMode::Off,
+                (true, true) => DepthMode::Test,
+                (true, false) => DepthMode::TestWrite,
+            };
+            match out.last_mut() {
+                Some(b) if b.texture == texture && b.blend == vm.blend && b.depth == depth => {
+                    b.vertices.extend_from_slice(&verts)
+                }
+                _ => out.push(DrawBatch { texture, blend: vm.blend, depth, layer: vm.layer, clip: None, vertices: verts.clone() }),
+            }
+        }
+        out
     }
 
     /// Build triangles for the VMs in `pass`, sorted by layer then creation order.
@@ -664,12 +713,7 @@ impl World {
             .filter_map(|s| s.vm.as_ref())
             .filter(|v| match pass {
                 Pass::Backdrop => !v.space_3d && v.backdrop,
-                // Radial draw distance: stage sprites beyond it are not drawn at all.
-                Pass::Stage(cam) => v.space_3d && {
-                    let p = world_pos(self, v);
-                    let d2: f32 = p.iter().zip(&cam.eye).map(|(a, b)| (a - b) * (a - b)).sum();
-                    d2 <= cam.draw_distance_sq
-                },
+                Pass::Stage(_) => v.space_3d,
                 Pass::Ui => !v.space_3d && !v.backdrop,
             })
             .collect();
