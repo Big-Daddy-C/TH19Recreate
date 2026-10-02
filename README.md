@@ -18,7 +18,7 @@ Right now the `th19` binary is an **ANM + stage viewer** used to validate the pi
 
 | Key | Action |
 | --- | --- |
-| Tab | switch between ANM viewer and stage (STD) viewer |
+| Tab | cycle ANM viewer → stage (STD) viewer → game (stage + waves) |
 | ← / → | previous / next `.anm` file, or stage |
 | ↑ / ↓ | step through individual scripts |
 | A | toggle "all scripts at once" |
@@ -36,6 +36,8 @@ cargo run --release -p th-extract -- th19.dat extract data/raw   # dump everythi
 cargo run --release -p th-extract -- th19.dat anm-info           # parse every .anm, summary
 cargo run --release -p th-extract -- th19.dat anm-dump title.anm # entries / sprites / bytecode
 cargo run --release -p th-extract -- th19.dat ecl-info           # also: std-info, msg-info, bgm-info
+cargo run --release -p th-extract -- th19.dat ecl-dump wave01.ecl  # ECL bytecode ([sub] [opcode] filters)
+cargo run --release -p th-game --example side_trace -- th19.dat  # run the wave system headless
 cargo run --release -p th-anm --example anm_smoke -- th19.dat    # run every ANM script headless
 cargo run --release -p th-stage --example stage_smoke -- th19.dat  # run every stage headless
 cargo test   # includes a real-data test that parses every file in your th19.dat (set TH19_DAT)
@@ -48,6 +50,8 @@ cargo test   # includes a real-data test that parses every file in your th19.dat
 | `th-formats` | Pure parsers: THA1 archive, ANM, ECL, STD (`stage`), MSG, SHT, `thbgm.fmt` (`bgm`). |
 | `th-anm` | ANM virtual machine + interpolators + 3D camera; emits renderer-agnostic triangle batches. |
 | `th-stage` | STD player: camera/fog script, spawns stage quads as 3D ANM VMs. |
+| `th-ecl` | ECL VM core: typed stack, variables, sub calls, threads, interpolators (opcodes 0–99). |
+| `th-game` | Gameplay: enemies (movement, sprites, ECL host for opcodes 300+), the TH19 wave system, the two sides. |
 | `th-extract` | CLI for inspecting / extracting your game data. |
 | `th19` | The game binary: winit window, wgpu renderer, fixed 60 Hz loop. |
 
@@ -68,7 +72,8 @@ deterministic (needed for replays and netplay).
 | SHT (19 characters; layout reverse-engineered, some fields `UNCONFIRMED`) | ✅ parsed |
 | `thbgm.fmt` (24 tracks, intro/loop points) | ✅ verified against `thbgm.dat` size |
 | STD playback (camera/fog script, 3D quads, perspective + fog) | 🟡 all 17 stages run; camera shake, skybox sprites, distortion not yet |
-| ECL VM (enemies, bullets, spell cards) | ⬜ |
+| ECL VM core (opcodes 0–97) | ✅ checked against the decompiled interpreter |
+| Enemies + TH19 wave system (movement, directional sprites, wave pool/sequence, level tables) | 🟡 waves run on both fields; no bullets, deaths or boss/charge attacks yet |
 | Player / shot types (`plXX.sht`, `plXX.ecl`) | ⬜ |
 | Bullet manager, lasers, items, collision | ⬜ |
 | MSG dialogue, menus, story/VS flow, CPU opponent | ⬜ |
@@ -79,7 +84,7 @@ deterministic (needed for replays and netplay).
 
 1. ~~**Formats**~~ — done; all parsers are checked against every file in `th19.dat` by `cargo test`.
 2. ~~**Stage backgrounds**~~ — STD player + 3D camera done; shake/skybox/distortion remain.
-3. **ECL VM** — sub/thread model, enemy/bullet instructions, `default.ecl` / `common.ecl` / `waveNN.ecl`.
+3. **ECL VM** — ~~core VM~~, ~~waves~~; bullet instructions (600s), bosses/charge attacks (`plXX.ecl`, `default.ecl`).
 4. **Gameplay core** — playfields (two of them — TH19 is a VS shooter), player movement/focus,
    shots from `.sht`, bullet manager, hitboxes, graze, charge attacks.
 5. **Game flow** — title → character select → story/VS, MSG dialogue, results.

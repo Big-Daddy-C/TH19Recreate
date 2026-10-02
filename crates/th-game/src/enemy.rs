@@ -1,0 +1,637 @@
+//! Enemies: an ECL thread group plus position, movement, sprites and collision data.
+//!
+//! The opcode and variable semantics follow th19.exe's enemy instruction handler
+//! (`FUN_004fecc0`, opcodes 300+) and its variable getters (`FUN_004fd720` int,
+//! `FUN_004fc530` float), reimplemented.
+
+use std::f32::consts::PI;
+
+use th_anm::{AnmLibrary, VmId, World};
+use th_ecl::{Args, Context, Flow, Host, Program, Threads};
+use th_formats::ecl::Instr;
+
+use crate::motion::{wrap_angle, Mode, Motion, KEEP};
+use crate::side::{SideState, SpawnRequest};
+
+/// Enemy flags set by `ins_502` / cleared by `ins_503`.
+pub mod flag {
+    /// Not hit by player shots.
+    pub const NO_HURTBOX: u32 = 1;
+    /// Does not hurt the player on contact.
+    pub const NO_HITBOX: u32 = 2;
+    /// Survives leaving the field horizontally.
+    pub const OFFSCREEN_LR: u32 = 4;
+    /// Survives leaving the field vertically.
+    pub const OFFSCREEN_UD: u32 = 8;
+    /// Takes no damage.
+    pub const INVINCIBLE: u32 = 0x10;
+    /// Sprites hidden.
+    pub const HIDDEN: u32 = 0x20;
+}
+
+/// Reward parameters set by TH19's `ins_1028`..`ins_1033`, used when the enemy is destroyed.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Rewards {
+    pub a: f32,
+    pub b: i32,
+    pub c: i32,
+    pub d: i32,
+    pub e: i32,
+    pub f: i32,
+}
+
+/// The directional "main" sprite set up by `ins_306`.
+#[derive(Clone, Copy, Debug)]
+pub struct MainAnm {
+    pub file: usize,
+    pub base_script: usize,
+    pub slot: usize,
+    /// -1 moving left, 0 still, 1 moving right.
+    pub dir: i32,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct EnemyData {
+    pub id: i32,
+    /// Name of the sub the enemy was created with.
+    pub sub: String,
+    /// Final position (absolute + relative layers) in field coordinates.
+    pub pos: [f32; 2],
+    pub prev: [f32; 2],
+    pub delta: [f32; 2],
+    pub abs: Motion,
+    pub rel: Motion,
+    pub flags: u32,
+    pub mirrored: bool,
+    /// Has been inside the field (only then does leaving it delete the enemy).
+    pub entered: bool,
+    /// Counted by the wave's "enemies remaining" variable (`ins_1039`).
+    pub wave_member: bool,
+    pub hurtbox: [f32; 2],
+    pub hitbox: [f32; 2],
+    pub hp: i32,
+    pub score: i32,
+    pub item: i32,
+    pub ivars: [i32; 4],
+    pub fvars: [f32; 8],
+    pub anm_slot: usize,
+    pub vms: [Option<VmId>; 16],
+    pub main: Option<MainAnm>,
+    pub time: i32,
+    pub rewards: Rewards,
+    /// Size of the main sprite, used for the off-field test.
+    pub size: [f32; 2],
+    pub delete: bool,
+}
+
+pub struct Enemy {
+    pub threads: Threads,
+    pub data: EnemyData,
+}
+
+/// Field coordinates -> canvas coordinates for a field rectangle `[x, y, w, h]`.
+pub fn field_to_canvas(field: [f32; 4], p: [f32; 2]) -> [f32; 2] {
+    [field[0] + field[2] / 2.0 + p[0], field[1] + p[1]]
+}
+
+impl Enemy {
+    pub fn new(prog: &Program, req: &SpawnRequest, id: i32) -> Option<Self> {
+        let sub = prog.sub(&req.sub)?;
+        let mut data = EnemyData { id, sub: req.sub.clone(), hp: req.hp, score: req.score, item: req.item, ..Default::default() };
+        data.abs.pv.pos = req.pos;
+        data.pos = req.pos;
+        data.prev = req.pos;
+        data.mirrored = req.mirrored;
+        data.ivars = req.ivars;
+        data.fvars = req.fvars;
+        data.anm_slot = 2;
+        Some(Self { threads: Threads::new(Context::new(sub)), data })
+    }
+
+    /// One frame: script, movement, sprites, off-field check.
+    pub fn update(&mut self, prog: &Program, st: &mut SideState, world: &mut World, lib: &AnmLibrary) {
+        let mut host = EnemyHost { e: &mut self.data, st, world, lib };
+        if self.threads.run(prog, &mut host, 1.0) == Flow::End {
+            self.data.delete = true;
+        }
+        let e = &mut self.data;
+        e.time += 1;
+
+        e.abs.step();
+        e.rel.step();
+        e.prev = e.pos;
+        e.pos = [e.abs.pv.pos[0] + e.rel.pv.pos[0], e.abs.pv.pos[1] + e.rel.pv.pos[1]];
+        e.delta = [e.pos[0] - e.prev[0], e.pos[1] - e.prev[1]];
+
+        // Directional sprite: switch scripts when the horizontal direction changes.
+        if let Some(m) = &mut e.main {
+            let dir = if e.delta[0] < -0.03 {
+                -1
+            } else {
+                (e.delta[0] > 0.03) as i32
+            };
+            if dir != m.dir {
+                let offset = match (m.dir, dir) {
+                    (-1, 0) => 3,
+                    (-1, _) => 2,
+                    (0, 1) => 2,
+                    (0, _) => 1,
+                    (_, 0) => 4,
+                    _ => 1,
+                };
+                m.dir = dir;
+                let (file, script, slot) = (m.file, m.base_script + offset, m.slot);
+                set_vm(e, world, lib, st.field, slot, file, script);
+            }
+        }
+        e.size = main_size(e, world, lib);
+
+        // Leaving the field deletes an enemy that has been inside it.
+        let (hw, hh) = (e.size[0] / 2.0, e.size[1] / 2.0);
+        let out_x = e.pos[0] + hw < -148.0 || e.pos[0] - hw > 148.0;
+        let out_y = e.pos[1] + hh < 0.0 || e.pos[1] - hh > 448.0;
+        if out_x {
+            if e.entered && e.flags & flag::OFFSCREEN_LR == 0 {
+                e.delete = true;
+            }
+        } else if out_y {
+            if e.entered && e.flags & flag::OFFSCREEN_UD == 0 {
+                e.delete = true;
+            }
+        } else {
+            e.entered = true;
+        }
+
+        let origin = field_to_canvas(st.field, e.pos);
+        let hidden = e.flags & flag::HIDDEN != 0;
+        for id in e.vms.iter().flatten() {
+            if let Some(vm) = world.get_mut(*id) {
+                vm.origin = [origin[0], origin[1], 0.0];
+                vm.visible = !hidden;
+            }
+        }
+    }
+
+    pub fn remove_sprites(&mut self, world: &mut World) {
+        for id in self.data.vms.iter_mut() {
+            if let Some(id) = id.take() {
+                world.delete(id);
+            }
+        }
+    }
+}
+
+fn set_vm(e: &mut EnemyData, world: &mut World, lib: &AnmLibrary, field: [f32; 4], slot: usize, file: usize, script: usize) {
+    let Some(entry) = e.vms.get_mut(slot) else { return };
+    if let Some(old) = entry.take() {
+        world.delete(old);
+    }
+    let origin = field_to_canvas(field, e.pos);
+    let clip = field;
+    *entry = Some(world.spawn_clipped(lib, file, script, origin, clip));
+}
+
+fn main_size(e: &EnemyData, world: &World, lib: &AnmLibrary) -> [f32; 2] {
+    let Some(m) = e.main else { return [0.0; 2] };
+    let Some(vm) = e.vms.get(m.slot).copied().flatten().and_then(|id| world.get(id)) else { return [0.0; 2] };
+    let Some(s) = lib.files.get(vm.file).and_then(|f| f.sprites.get(vm.sprite.max(0) as usize)) else {
+        return [0.0; 2];
+    };
+    [(s.size[0] * vm.scale[0]).abs(), (s.size[1] * vm.scale[1]).abs()]
+}
+
+/// Variable ids (the ECL "globals" an enemy can read).
+pub mod var {
+    pub const RAND: i32 = -10000;
+    pub const RANDF: i32 = -9999;
+    pub const RAND_ANGLE: i32 = -9998;
+    pub const X: i32 = -9997;
+    pub const Y: i32 = -9996;
+    pub const ABS_X: i32 = -9995;
+    pub const ABS_Y: i32 = -9994;
+    pub const REL_X: i32 = -9993;
+    pub const REL_Y: i32 = -9992;
+    pub const PLAYER_X: i32 = -9991;
+    pub const PLAYER_Y: i32 = -9990;
+    pub const ANGLE_TO_PLAYER: i32 = -9989;
+    pub const TIME: i32 = -9988;
+    pub const RANDF2: i32 = -9987;
+    pub const I0: i32 = -9985;
+    pub const F0: i32 = -9981;
+    pub const DX: i32 = -9977;
+    pub const DY: i32 = -9976;
+    pub const ABS_ANGLE: i32 = -9971;
+    pub const REL_ANGLE: i32 = -9970;
+    pub const ABS_SPEED: i32 = -9969;
+    pub const REL_SPEED: i32 = -9968;
+    pub const ABS_RADIUS: i32 = -9967;
+    pub const REL_RADIUS: i32 = -9966;
+    pub const PLAYER_X2: i32 = -9965;
+    pub const PLAYER_Y2: i32 = -9964;
+    pub const SPEED: i32 = -9958;
+    pub const ONE: i32 = -9957;
+    pub const LEVEL_IS_0: i32 = -9953;
+    pub const DIST_TO_PLAYER: i32 = -9944;
+    pub const F4: i32 = -9935;
+    pub const LAST_ENEMY_ID: i32 = -9931;
+    pub const WAVE_REMAINING: i32 = -9889;
+    pub const LEVEL: i32 = -9885;
+}
+
+/// The ECL host for one enemy.
+pub struct EnemyHost<'a> {
+    pub e: &'a mut EnemyData,
+    pub st: &'a mut SideState,
+    pub world: &'a mut World,
+    pub lib: &'a AnmLibrary,
+}
+
+impl EnemyHost<'_> {
+    fn angle_to_player(&self) -> f32 {
+        let p = self.st.player_pos;
+        (p[1] - self.e.pos[1]).atan2(p[0] - self.e.pos[0])
+    }
+
+    fn var(&mut self, id: i32) -> f32 {
+        use var::*;
+        let e = &*self.e;
+        match id {
+            RAND => (self.st.rand() & 0x7fff_ffff) as f32,
+            RANDF => self.st.randf(),
+            RAND_ANGLE => self.st.randf2() * PI,
+            X => e.pos[0],
+            Y => e.pos[1],
+            ABS_X => e.abs.pv.pos[0],
+            ABS_Y => e.abs.pv.pos[1],
+            REL_X => e.rel.pv.pos[0],
+            REL_Y => e.rel.pv.pos[1],
+            PLAYER_X | PLAYER_X2 => self.st.player_pos[0],
+            PLAYER_Y | PLAYER_Y2 => self.st.player_pos[1],
+            ANGLE_TO_PLAYER => self.angle_to_player(),
+            TIME => e.time as f32,
+            RANDF2 => self.st.randf2(),
+            -9985..=-9982 => e.ivars[(id - I0) as usize] as f32,
+            -9981..=-9978 => e.fvars[(id - F0) as usize],
+            DX => e.delta[0],
+            DY => e.delta[1],
+            ABS_ANGLE => e.abs.pv.angle,
+            REL_ANGLE => e.rel.pv.angle,
+            ABS_SPEED => e.abs.pv.speed,
+            REL_SPEED => e.rel.pv.speed,
+            ABS_RADIUS => e.abs.pv.radius,
+            REL_RADIUS => e.rel.pv.radius,
+            SPEED => (e.delta[0] * e.delta[0] + e.delta[1] * e.delta[1]).sqrt(),
+            ONE => 1.0,
+            -9953..=-9950 => (self.st.level == (id - LEVEL_IS_0) as usize) as i32 as f32,
+            DIST_TO_PLAYER => {
+                let p = self.st.player_pos;
+                ((p[0] - e.pos[0]).powi(2) + (p[1] - e.pos[1]).powi(2)).sqrt()
+            }
+            -9935..=-9932 => e.fvars[4 + (id - F4) as usize],
+            LAST_ENEMY_ID => self.st.last_enemy_id as f32,
+            WAVE_REMAINING => self.st.wave_members_alive() as f32,
+            LEVEL => self.st.level as f32,
+            _ => {
+                *self.st.unknown_vars.entry(id).or_default() += 1;
+                0.0
+            }
+        }
+    }
+
+    fn int_var(&mut self, id: i32) -> i32 {
+        use var::*;
+        match id {
+            RAND => (self.st.rand() & 0x7fff_ffff) as i32,
+            -9985..=-9982 => self.e.ivars[(id - I0) as usize],
+            _ => self.var(id) as i32,
+        }
+    }
+
+    fn set_var(&mut self, id: i32, v: f32) {
+        use var::*;
+        let e = &mut *self.e;
+        match id {
+            -9985..=-9982 => e.ivars[(id - I0) as usize] = v as i32,
+            -9981..=-9978 => e.fvars[(id - F0) as usize] = v,
+            -9935..=-9932 => e.fvars[4 + (id - F4) as usize] = v,
+            ABS_X => e.abs.pv.pos[0] = v,
+            ABS_Y => e.abs.pv.pos[1] = v,
+            REL_X => e.rel.pv.pos[0] = v,
+            REL_Y => e.rel.pv.pos[1] = v,
+            ABS_ANGLE => e.abs.pv.angle = wrap_angle(v),
+            REL_ANGLE => e.rel.pv.angle = wrap_angle(v),
+            ABS_SPEED => e.abs.pv.speed = v,
+            REL_SPEED => e.rel.pv.speed = v,
+            ABS_RADIUS => e.abs.pv.radius = v,
+            REL_RADIUS => e.rel.pv.radius = v,
+            _ => *self.st.unknown_vars.entry(id).or_default() += 1,
+        }
+    }
+
+    fn motion(&mut self, abs: bool) -> &mut Motion {
+        if abs {
+            &mut self.e.abs
+        } else {
+            &mut self.e.rel
+        }
+    }
+
+    /// Mirror an angle for mirrored enemies: `pi - a` (or `-a` for per-frame increments).
+    fn mirror_angle(&self, a: f32, additive: bool) -> f32 {
+        if !self.e.mirrored || a <= KEEP {
+            a
+        } else if additive {
+            -a
+        } else {
+            PI - a
+        }
+    }
+
+    fn create_enemy(&mut self, ctx: &Context, ins: &Instr) {
+        let op = ins.opcode;
+        let mut a = Args::new(ins);
+        let sub = a.string();
+        let mut x = a.float(ctx, self);
+        let mut y = a.float(ctx, self);
+        let hp = a.int(ctx, self);
+        let score = a.int(ctx, self);
+        let item = a.int(ctx, self);
+        let relative = matches!(op, 300 | 304 | 309 | 311 | 321);
+        if relative {
+            x += self.e.pos[0];
+            y += self.e.pos[1];
+        }
+        let mut mirrored = matches!(op, 304 | 305 | 312);
+        if self.e.mirrored {
+            x = -x;
+            mirrored = !mirrored;
+        }
+        self.st.request(SpawnRequest {
+            id: 0,
+            sub,
+            pos: [x, y],
+            hp,
+            score,
+            item,
+            mirrored,
+            ivars: self.e.ivars,
+            fvars: self.e.fvars,
+        });
+    }
+
+    fn exec_inner(&mut self, ctx: &mut Context, ins: &Instr) -> Flow {
+        let op = ins.opcode;
+        macro_rules! i {
+            ($n:expr) => {
+                ctx.int_arg(ins, $n, self)
+            };
+        }
+        macro_rules! f {
+            ($n:expr) => {
+                ctx.float_arg(ins, $n, self)
+            };
+        }
+        match op {
+            300 | 301 | 304 | 305 | 309 | 311 | 312 | 321 => self.create_enemy(ctx, ins),
+            // anmSelect(slot)
+            302 => self.e.anm_slot = i!(0).max(0) as usize,
+            // anmSet(vm_slot, script) / anmSetMain(vm_slot, script)
+            303 | 306 => {
+                let (slot, script) = (i!(0).max(0) as usize, i!(1));
+                let Some(file) = self.st.anm_files.get(self.e.anm_slot).copied().flatten() else {
+                    return Flow::Next;
+                };
+                if script < 0 {
+                    if let Some(id) = self.e.vms.get_mut(slot).and_then(Option::take) {
+                        self.world.delete(id);
+                    }
+                    return Flow::Next;
+                }
+                set_vm(self.e, self.world, self.lib, self.st.field, slot, file, script as usize);
+                if op == 306 {
+                    self.e.main = Some(MainAnm { file, base_script: script as usize, slot, dir: 0 });
+                }
+            }
+            // movePos(x, y)
+            400 | 402 => {
+                let (x, y) = (f!(0), f!(1));
+                let m = self.motion(op == 400);
+                m.i_pos.active = false;
+                if x > KEEP {
+                    m.pv.pos[0] = x;
+                }
+                if y > KEEP {
+                    m.pv.pos[1] = y;
+                }
+            }
+            // movePosTime(t, mode, x, y)
+            401 | 403 | 436 | 437 => {
+                let (t, mode) = (i!(0), i!(1));
+                let (mut x, y) = (f!(2), f!(3));
+                if matches!(op, 436 | 437) && self.e.mirrored && x > KEEP {
+                    x = -x;
+                }
+                let m = self.motion(matches!(op, 401 | 436));
+                if t < 1 {
+                    m.i_pos.active = false;
+                    return Flow::Next;
+                }
+                let cur = m.pv.pos;
+                let goal = [if x > KEEP { x } else { cur[0] }, if y > KEEP { y } else { cur[1] }];
+                m.pv.speed = 0.0;
+                m.i_pos.start(cur, goal, t, mode);
+            }
+            // moveVel(angle, speed); 428/430 never mirror
+            404 | 406 | 428 | 430 => {
+                let ang = f!(0);
+                let ang = if op < 428 { self.mirror_angle(ang, false) } else { ang };
+                let speed = f!(1);
+                let m = self.motion(matches!(op, 404 | 428));
+                m.i_angle.active = false;
+                m.i_speed.active = false;
+                if ang > KEEP {
+                    m.pv.angle = wrap_angle(ang);
+                }
+                if speed > KEEP {
+                    m.pv.speed = speed;
+                }
+            }
+            // moveVelTime(t, mode, angle, speed); 429/431 never mirror
+            405 | 407 | 429 | 431 => {
+                let (t, mode) = (i!(0), i!(1));
+                let ang = f!(2);
+                let ang = if op < 429 { self.mirror_angle(ang, mode == 7) } else { ang };
+                let speed = f!(3);
+                let m = self.motion(matches!(op, 405 | 429));
+                start_angle(m, t, mode, ang);
+                start_speed(m, t, mode, speed);
+            }
+            // moveCircle(angle, angular speed, radius, radius delta)
+            408 | 410 => {
+                let v = [f!(0), f!(1), f!(2), f!(3)];
+                let m = self.motion(op == 408);
+                m.enter_circle(Mode::Circle);
+                set_if(&mut m.pv.angle, v[0], true);
+                set_if(&mut m.pv.speed, v[1], false);
+                set_if(&mut m.pv.radius, v[2], false);
+                set_if(&mut m.pv.radius_delta, v[3], false);
+            }
+            // moveCircleTime(t, mode, angular speed, radius, radius delta)
+            409 | 411 => {
+                let (t, mode) = (i!(0), i!(1));
+                let (speed, radius, delta) = (f!(2), f!(3), f!(4));
+                let m = self.motion(op == 409);
+                m.enter_circle(Mode::Circle);
+                start_speed(m, t, mode, speed);
+                if t >= 1 {
+                    let cur = [m.pv.radius, m.pv.radius_delta];
+                    let goal = [keep_or(radius, cur[0]), keep_or(delta, cur[1])];
+                    m.i_radius.start(cur, goal, t, mode);
+                }
+            }
+            // moveEllipse(angle, angular speed, radius, radius delta, ellipse angle, ratio)
+            420 | 422 => {
+                let v = [f!(0), f!(1), f!(2), f!(3), f!(4), f!(5)];
+                let m = self.motion(op == 420);
+                m.enter_circle(Mode::Ellipse);
+                set_if(&mut m.pv.angle, v[0], true);
+                set_if(&mut m.pv.speed, v[1], false);
+                set_if(&mut m.pv.radius, v[2], false);
+                set_if(&mut m.pv.radius_delta, v[3], false);
+                set_if(&mut m.pv.ell_angle, v[4], true);
+                set_if(&mut m.pv.ell_ratio, v[5], false);
+            }
+            // setMirror(flag)
+            424 => self.e.mirrored = i!(0) != 0,
+            // moveStop: cancel all movement on both layers
+            427 => {
+                self.e.abs.stop();
+                self.e.rel.stop();
+            }
+            // moveAngleTime(t, mode, angle); 440/442 never mirror
+            440 | 441 | 442 | 443 => {
+                let (t, mode) = (i!(0), i!(1));
+                let ang = f!(2);
+                let ang = if matches!(op, 441 | 443) { self.mirror_angle(ang, mode == 7) } else { ang };
+                start_angle(self.motion(matches!(op, 440 | 441)), t, mode, ang);
+            }
+            // moveSpeedTime(t, mode, speed)
+            444 | 445 | 446 | 447 => {
+                let (t, mode, speed) = (i!(0), i!(1), f!(2));
+                start_speed(self.motion(matches!(op, 444 | 445)), t, mode, speed);
+            }
+            // setHurtbox(w, h) / setHitbox(w, h)
+            500 => self.e.hurtbox = [f!(0), f!(1)],
+            501 => self.e.hitbox = [f!(0), f!(1)],
+            502 => self.e.flags |= i!(0) as u32,
+            503 => self.e.flags &= !(i!(0) as u32),
+            // isEnemyAlive(&out, id)
+            549 => {
+                let id = i!(1);
+                let alive = self.st.alive.iter().any(|a| a.0 == id) as i32;
+                ctx.set_int_var(ins, 0, alive, self);
+            }
+            // Wave control (TH19): reset pool, add wave, spawn next wave, set level table.
+            1010 => self.st.wave_pool.clear(),
+            1011 => {
+                let (id, weight) = (i!(0), i!(1));
+                for _ in 0..weight.max(0) {
+                    if self.st.wave_pool.len() < 256 {
+                        self.st.wave_pool.push(id);
+                    }
+                }
+            }
+            1012 => self.st.spawn_wave(),
+            1013 => {
+                let slot = i!(0);
+                if (0..32).contains(&slot) {
+                    for k in 0..8 {
+                        self.st.level_table[slot as usize][k] = i!(1 + k);
+                    }
+                }
+            }
+            // levelValue(&out, slot)
+            1015 => {
+                let slot = i!(1).clamp(0, 31) as usize;
+                let v = self.st.level_table[slot][self.st.level.min(7)];
+                ctx.set_int_var(ins, 0, v, self);
+            }
+            1023 => self.st.wave_param = i!(0),
+            1028 => self.e.rewards.a = f!(0),
+            1029 => self.e.rewards.b = i!(0),
+            1030 => self.e.rewards.c = i!(0),
+            1031 => self.e.rewards.d = i!(0),
+            1032 => self.e.rewards.e = i!(0),
+            1033 => self.e.rewards.f = i!(0),
+            1039 => self.e.wave_member = i!(0) != 0,
+            _ => *self.st.unknown_ops.entry(op).or_default() += 1,
+        }
+        Flow::Next
+    }
+}
+
+fn keep_or(v: f32, cur: f32) -> f32 {
+    if v > KEEP {
+        v
+    } else {
+        cur
+    }
+}
+
+fn set_if(dst: &mut f32, v: f32, angle: bool) {
+    if v > KEEP {
+        *dst = if angle { wrap_angle(v) } else { v };
+    }
+}
+
+/// Interpolate the movement angle; mode 7 adds `angle` every frame. Takes the short way round.
+fn start_angle(m: &mut Motion, t: i32, mode: i32, ang: f32) {
+    if t < 1 {
+        m.i_angle.active = false;
+        return;
+    }
+    let cur = m.pv.angle;
+    let goal = if mode == 7 {
+        if ang > KEEP { ang } else { 0.0 }
+    } else if ang > KEEP {
+        cur + wrap_angle(ang - cur)
+    } else {
+        cur
+    };
+    m.i_angle.start([cur], [goal], t, mode);
+}
+
+fn start_speed(m: &mut Motion, t: i32, mode: i32, speed: f32) {
+    if t < 1 {
+        m.i_speed.active = false;
+        return;
+    }
+    let cur = m.pv.speed;
+    let goal = if mode == 7 {
+        if speed > KEEP { speed } else { 0.0 }
+    } else {
+        keep_or(speed, cur)
+    };
+    m.i_speed.start([cur], [goal], t, mode);
+}
+
+impl Host for EnemyHost<'_> {
+    fn get_int(&mut self, id: i32) -> i32 {
+        self.int_var(id)
+    }
+    fn get_float(&mut self, id: i32) -> f32 {
+        self.var(id)
+    }
+    fn set_int(&mut self, id: i32, value: i32) {
+        self.set_var(id, value as f32)
+    }
+    fn set_float(&mut self, id: i32, value: f32) {
+        self.set_var(id, value)
+    }
+    fn rand(&mut self) -> u32 {
+        self.st.rand()
+    }
+    fn exec(&mut self, ctx: &mut Context, _prog: &Program, ins: &Instr) -> Flow {
+        self.exec_inner(ctx, ins)
+    }
+}

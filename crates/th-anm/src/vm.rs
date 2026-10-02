@@ -314,6 +314,8 @@ pub struct Vm {
     pub effect: Option<Ribbon>,
     /// STD layer this stage sprite is drawn in (stage quads and sprite slots).
     pub stage_layer: u8,
+    /// Scissor rectangle on the canvas (e.g. a playfield), inherited by spawned VMs.
+    pub clip: Option<[f32; 4]>,
 }
 
 impl Vm {
@@ -372,6 +374,7 @@ impl Vm {
             backdrop: false,
             effect: None,
             stage_layer: 0,
+            clip: None,
         }
     }
 
@@ -483,6 +486,17 @@ impl World {
     /// Create a root VM running `script` of `file` at `pos`, executing its first instructions immediately.
     pub fn spawn(&mut self, lib: &AnmLibrary, file: usize, script: usize, pos: [f32; 2]) -> VmId {
         self.spawn_inner(lib, file, script, None, [pos[0], pos[1], 0.0], false)
+    }
+
+    /// Create a root 2D VM whose drawing (and its children's) is scissored to `clip`.
+    pub fn spawn_clipped(&mut self, lib: &AnmLibrary, file: usize, script: usize, pos: [f32; 2], clip: [f32; 4]) -> VmId {
+        let mut vm = Vm::new(file, script, self.next_order);
+        self.next_order += 1;
+        vm.origin = [pos[0], pos[1], 0.0];
+        vm.clip = Some(clip);
+        let id = self.insert(vm);
+        self.run(lib, id);
+        id
     }
 
     /// Create a 2D VM drawn behind the 3D stage ([`Pass::Backdrop`]).
@@ -637,9 +651,9 @@ impl World {
             delete
         };
 
-        let (file, base, is_3d, backdrop, stage_layer) = {
+        let (file, base, is_3d, backdrop, stage_layer, clip) = {
             let vm = self.slots[id.index as usize].vm.as_ref().unwrap();
-            (vm.file, world_pos(self, vm), vm.space_3d, vm.backdrop, vm.stage_layer)
+            (vm.file, world_pos(self, vm), vm.space_3d, vm.backdrop, vm.stage_layer, vm.clip)
         };
         for s in spawns {
             match s {
@@ -649,6 +663,7 @@ impl World {
                     if let Some(c) = self.get_mut(child) {
                         c.backdrop = backdrop;
                         c.stage_layer = stage_layer;
+                        c.clip = clip;
                     }
                 }
                 Spawn::Root { script, offset } if script >= 0 => {
@@ -657,6 +672,7 @@ impl World {
                     if let Some(c) = self.get_mut(root) {
                         c.backdrop = backdrop;
                         c.stage_layer = stage_layer;
+                        c.clip = clip;
                     }
                 }
                 _ => {}
@@ -741,7 +757,13 @@ impl World {
                 (true, false) => DepthMode::TestWrite,
             };
             match out.last_mut() {
-                Some(b) if b.texture == texture && b.blend == vm.blend && b.layer == vm.layer && b.depth == depth => {
+                Some(b)
+                    if b.texture == texture
+                        && b.blend == vm.blend
+                        && b.layer == vm.layer
+                        && b.depth == depth
+                        && b.clip == vm.clip =>
+                {
                     b.vertices.extend_from_slice(&verts)
                 }
                 _ => out.push(DrawBatch {
@@ -749,7 +771,7 @@ impl World {
                     blend: vm.blend,
                     depth,
                     layer: vm.layer,
-                    clip: None,
+                    clip: vm.clip,
                     vertices: verts.clone(),
                 }),
             }

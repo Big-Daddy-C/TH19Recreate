@@ -1955,6 +1955,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "th-ecl"
+version = "0.1.0"
+dependencies = [
+ "th-anm",
+ "th-formats",
+]
+
+[[package]]
 name = "th-extract"
 version = "0.1.0"
 dependencies = [
@@ -1966,6 +1974,15 @@ name = "th-formats"
 version = "0.1.0"
 dependencies = [
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "th-game"
+version = "0.1.0"
+dependencies = [
+ "th-anm",
+ "th-ecl",
+ "th-formats",
 ]
 
 [[package]]
@@ -1986,7 +2003,9 @@ dependencies = [
  "log",
  "pollster",
  "th-anm",
+ "th-ecl",
  "th-formats",
+ "th-game",
  "th-stage",
  "wgpu",
  "winit",

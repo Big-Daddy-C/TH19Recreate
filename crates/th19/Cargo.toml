@@ -9,6 +9,8 @@ default-run = "th19"
 th-formats = { path = "../th-formats" }
 th-anm = { path = "../th-anm" }
 th-stage = { path = "../th-stage" }
+th-ecl = { path = "../th-ecl" }
+th-game = { path = "../th-game" }
 wgpu = "30"
 winit = "0.30"
 pollster = "0.4"

@@ -47,12 +47,17 @@ fn find_dat() -> Option<PathBuf> {
 enum Mode {
     Anm,
     Stage,
+    /// Stage background plus both fields running the wave scripts.
+    Game,
 }
 
-/// The two side-by-side playfields, as canvas rectangles `[x, y, w, h]`.
-/// APPROX: inferred from the 16-unit border strips in front.anm (left, centre, right);
-/// the exact rectangles live in th19.exe.
-const FIELDS: [[f32; 4]; 2] = [[16.0, 0.0, 296.0, 480.0], [328.0, 0.0, 296.0, 480.0]];
+use th_game::FIELDS;
+
+/// Gameplay state for game mode: the ECL program and the two sides.
+struct Game {
+    prog: th_ecl::Program,
+    sides: Vec<th_game::Side>,
+}
 
 struct Viewer {
     mode: Mode,
@@ -71,6 +76,7 @@ struct Viewer {
     paused: bool,
     centered: bool,
     show_all: bool,
+    game: Option<Game>,
 }
 
 impl Viewer {
@@ -98,6 +104,7 @@ impl Viewer {
             paused: false,
             centered: false,
             show_all: true,
+            game: None,
         };
         v.restart();
         v
@@ -132,8 +139,43 @@ impl Viewer {
             },
             Err(e) => return log::error!("{anm_name}: {e}"),
         };
-        let mut stage = Stage::new(std, anm, &self.lib, &mut self.world);
+        let stage = Stage::new(std, anm, &self.lib, &mut self.world);
         self.stage = Some(stage);
+        self.game = None;
+        if self.mode == Mode::Game {
+            self.game = self.load_game();
+        }
+    }
+
+    /// Load the ECL scripts and their sprites and start both sides' stage scripts.
+    fn load_game(&mut self) -> Option<Game> {
+        let dat = &mut self.dat;
+        let prog = th_ecl::Program::load("pl00.ecl", |n| dat.read(n).ok())
+            .map_err(|e| log::error!("pl00.ecl: {e}"))
+            .ok()?;
+        // The ECL file's anim list fills enemy sprite slots from 2 upwards.
+        let mut anm_files = [None; 8];
+        for (i, name) in prog.files[0].1.anim.clone().iter().enumerate() {
+            let id = match self.lib.file_id(name) {
+                Some(id) => id,
+                None => {
+                    let bytes = self.dat.read(name).map_err(|e| log::error!("{name}: {e}")).ok()?;
+                    self.lib.load(name, &bytes).map_err(|e| log::error!("{name}: {e}")).ok()?
+                }
+            };
+            anm_files[i + 2] = Some(id);
+        }
+        // Both players face the same wave order.
+        let seq = th_game::side::roll_wave_sequence(0x1234_5678);
+        let mut sides: Vec<th_game::Side> = FIELDS
+            .iter()
+            .enumerate()
+            .map(|(i, &f)| th_game::Side::new(f, 0x9e37_79b9 ^ i as u32, seq, anm_files))
+            .collect();
+        for s in &mut sides {
+            s.start(&prog);
+        }
+        Some(Game { prog, sides })
     }
 
     fn tick(&mut self) {
@@ -141,12 +183,17 @@ impl Viewer {
             if let Some(st) = &mut self.stage {
                 st.tick(&mut self.world, &self.lib);
             }
+            if let Some(g) = &mut self.game {
+                for s in &mut g.sides {
+                    s.tick(&g.prog, &mut self.world, &self.lib);
+                }
+            }
             self.world.tick(&self.lib);
         }
     }
 
     fn restart(&mut self) {
-        if self.mode == Mode::Stage {
+        if self.mode != Mode::Anm {
             return self.load_stage();
         }
         self.world.clear();
@@ -207,8 +254,18 @@ impl Viewer {
     }
 
     fn title(&mut self) -> String {
-        if self.mode == Mode::Stage {
+        if self.mode != Mode::Anm {
             let name = self.stage_files.get(self.stage_idx).cloned().unwrap_or_default();
+            if let Some(g) = &self.game {
+                let n: Vec<String> = g.sides.iter().map(|s| s.enemies.len().to_string()).collect();
+                return format!(
+                    "th19-rs - {name} - enemies {} - {} VMs{}{}",
+                    n.join(" / "),
+                    self.world.len(),
+                    if self.fast { " - x8" } else { "" },
+                    if self.paused { " - PAUSED" } else { "" }
+                );
+            }
             let (t, cam) = self.stage.as_ref().map_or((0, [0.0; 3]), |s| (s.time(), s.pos));
             return format!(
                 "th19-rs stage viewer - {name} ({}/{}) - frame {t} - camera ({:.0}, {:.0}, {:.0}) - {} VMs{}{}",
@@ -237,13 +294,17 @@ impl Viewer {
     fn key(&mut self, code: KeyCode) {
         match code {
             KeyCode::Tab => {
-                self.mode = if self.mode == Mode::Anm { Mode::Stage } else { Mode::Anm };
+                self.mode = match self.mode {
+                    Mode::Anm => Mode::Stage,
+                    Mode::Stage => Mode::Game,
+                    Mode::Game => Mode::Anm,
+                };
                 self.stage = None;
                 self.restart();
             }
             KeyCode::KeyF => self.fast = !self.fast,
             KeyCode::KeyV => self.show_fields = !self.show_fields,
-            KeyCode::ArrowRight | KeyCode::ArrowLeft if self.mode == Mode::Stage => {
+            KeyCode::ArrowRight | KeyCode::ArrowLeft if self.mode != Mode::Anm => {
                 let n = self.stage_files.len().max(1);
                 self.stage_idx =
                     if code == KeyCode::ArrowRight { (self.stage_idx + 1) % n } else { (self.stage_idx + n - 1) % n };
@@ -412,17 +473,18 @@ fn main() {
     };
     log::info!("using {} ({} files)", dat_path.display(), dat.entries().len());
     println!(
-        "Controls: Tab = switch ANM / stage viewer, Left/Right = file or stage, Up/Down = single script,\n\
+        "Controls: Tab = switch ANM viewer / stage viewer / game, Left/Right = file or stage, Up/Down = single script,\n\
          A = all scripts, C = toggle centre origin, F = fast-forward x8, V = toggle field divider,\n\
          R = restart, Space = pause,\n\
          . = step frame, 0-9 = send interrupt, Esc = quit"
     );
 
     let mut viewer = Viewer::new(dat);
-    // `--stage N` starts in the stage viewer on worldNN.std.
+    // `--stage N` starts in the stage viewer on worldNN.std; `--game N` also runs the waves.
     let args: Vec<String> = std::env::args().collect();
-    if let Some(n) = args.iter().position(|a| a == "--stage").and_then(|i| args.get(i + 1)?.parse::<usize>().ok()) {
-        viewer.mode = Mode::Stage;
+    let start = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)?.parse::<usize>().ok());
+    if let Some((n, mode)) = start("--game").map(|n| (n, Mode::Game)).or(start("--stage").map(|n| (n, Mode::Stage))) {
+        viewer.mode = mode;
         viewer.stage_idx = n.saturating_sub(1).min(viewer.stage_files.len().saturating_sub(1));
         viewer.restart();
     }

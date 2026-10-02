@@ -1,0 +1,9 @@
+[package]
+name = "th-ecl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+th-formats = { path = "../th-formats" }
+th-anm = { path = "../th-anm" }

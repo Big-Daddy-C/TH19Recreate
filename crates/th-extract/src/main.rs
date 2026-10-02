@@ -167,6 +167,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
         }
+        "ecl-dump" => {
+            // ecl-dump <file.ecl> [sub] [opcode]: instructions with each argument shown as
+            // int and float; `$` marks variable references.
+            let name = args.get(2).ok_or("ecl-dump <file.ecl> [sub|*] [opcode]")?;
+            let e = th_formats::ecl::EclFile::parse(&archive.read(name)?)?;
+            let want_sub = args.get(3).filter(|s| *s != "*");
+            let want_op: Option<u16> = args.get(4).and_then(|s| s.parse().ok());
+            for s in &e.subs {
+                if want_sub.is_some_and(|w| *w != s.name) {
+                    continue;
+                }
+                if want_op.is_none() {
+                    println!("sub {}", s.name);
+                }
+                for i in &s.instrs {
+                    if want_op.is_some_and(|o| o != i.opcode) {
+                        continue;
+                    }
+                    let a: Vec<String> = (0..i.args.len() / 4)
+                        .map(|n| {
+                            let (iv, fv) = (i.arg_i32(n), i.arg_f32(n));
+                            let v = if iv.unsigned_abs() < 1_000_000 { format!("{iv}") } else { format!("{fv}f") };
+                            if i.is_var(n) { format!("${v}") } else { v }
+                        })
+                        .collect();
+                    let tag = if want_op.is_some() { format!("{}: ", s.name) } else { String::new() };
+                    println!("  {tag}@{:<5} t={:<5} op={:<4} mask={:#x} rank={:#04x} pop={} [{}]", i.offset, i.time, i.opcode, i.param_mask, i.rank_mask, i.stack_refs & 0xff, a.join(", "));
+                }
+            }
+        }
         "std-dump" => {
             let name = args.get(2).ok_or("std-dump <file.std>")?;
             let s = th_formats::stage::StdFile::parse(&archive.read(name)?)?;
