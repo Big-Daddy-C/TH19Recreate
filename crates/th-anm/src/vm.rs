@@ -161,6 +161,8 @@ pub struct Vm {
     pub blend: BlendMode,
     /// ANM `zWriteDisable`: 3D sprites that should not occlude what is drawn after them.
     pub z_write_disable: bool,
+    /// ANM `rotationMode` (437): order the X/Y/Z rotations are applied in for 3D sprites.
+    pub rotation_mode: u8,
     pub render_mode: i32,
     pub layer: i32,
     pub visible: bool,
@@ -222,6 +224,7 @@ impl Vm {
             sprite: -1,
             blend: BlendMode::Normal,
             z_write_disable: false,
+            rotation_mode: 0,
             render_mode: 0,
             layer: 0,
             visible: true,
@@ -1003,7 +1006,8 @@ fn exec(
             let g = [f!(2), f!(3)];
             vm.i_uv_scale.start(vm.uv_scale, g, i!(0), i!(1));
         }
-        431 | 432 | 437 | 438 | 439 | 440 => {}
+        437 => vm.rotation_mode = i!(0).clamp(0, 5) as u8,
+        431 | 432 | 438 | 439 | 440 => {}
         434 => vm.scale2 = [f!(0), f!(1)],
         435 => {
             let g = [f!(2), f!(3)];
@@ -1087,8 +1091,10 @@ fn clip_near(poly: &[Clipped], near: f32) -> Vec<Clipped> {
 /// Maps a VM-local point (relative to its anchor, in pixels) to a screen vertex.
 struct Placer<'a> {
     origin: [f32; 3],
-    /// 2D: rotation about the screen normal. 3D: Euler rotation applied X, then Y, then Z.
+    /// 2D: rotation about the screen normal. 3D: Euler angles, applied in `order`.
     rot: [f32; 3],
+    /// Rotation order for 3D sprites (ANM `rotationMode`): 0 XYZ, 1 XZY, 2 YXZ, 3 YZX, 4 ZXY, 5 ZYX.
+    order: u8,
     camera: Option<&'a Camera>,
     additive: bool,
     /// Stage fog applies to this sprite (only render modes 8 and 24 are fogged in th19).
@@ -1096,17 +1102,32 @@ struct Placer<'a> {
 }
 
 impl Placer<'_> {
-    /// VM-local point to 3D world position (rotation applied X, then Y, then Z).
+    /// VM-local point to 3D world position. Rotations use Direct3D's left-handed
+    /// conventions (`D3DXMatrixRotationX/Y/Z`, row vectors) in the order given by `order`.
     fn to_world(&self, x: f32, y: f32) -> [f32; 3] {
-        // APPROX: rotation order for 3D sprites is not yet confirmed against th19.exe.
+        let rot_x = |[x, y, z]: [f32; 3], a: f32| {
+            let (s, c) = a.sin_cos();
+            [x, y * c - z * s, y * s + z * c]
+        };
+        let rot_y = |[x, y, z]: [f32; 3], a: f32| {
+            let (s, c) = a.sin_cos();
+            [x * c + z * s, y, -x * s + z * c]
+        };
+        let rot_z = |[x, y, z]: [f32; 3], a: f32| {
+            let (s, c) = a.sin_cos();
+            [x * c - y * s, x * s + y * c, z]
+        };
         let [rx, ry, rz] = self.rot;
-        let (sx, cx) = rx.sin_cos();
-        let (sy, cy) = ry.sin_cos();
-        let (sz, cz) = rz.sin_cos();
-        let (x1, y1, z1) = (x, y * cx, y * sx);
-        let (x2, y2, z2) = (x1 * cy + z1 * sy, y1, -x1 * sy + z1 * cy);
-        let (x3, y3, z3) = (x2 * cz - y2 * sz, x2 * sz + y2 * cz, z2);
-        [self.origin[0] + x3, self.origin[1] + y3, self.origin[2] + z3]
+        let p = [x, y, 0.0];
+        let p = match self.order {
+            1 => rot_y(rot_z(rot_x(p, rx), rz), ry),
+            2 => rot_z(rot_x(rot_y(p, ry), rx), rz),
+            3 => rot_x(rot_z(rot_y(p, ry), rz), rx),
+            4 => rot_y(rot_x(rot_z(p, rz), rx), ry),
+            5 => rot_x(rot_y(rot_z(p, rz), ry), rx),
+            _ => rot_z(rot_y(rot_x(p, rx), ry), rz),
+        };
+        [self.origin[0] + p[0], self.origin[1] + p[1], self.origin[2] + p[2]]
     }
 
     fn place_2d(&self, x: f32, y: f32, uv: [f32; 2], color: [f32; 4]) -> Vertex {
@@ -1167,6 +1188,7 @@ fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, camera: Option<&Camera>, out: 
     let pl = Placer {
         origin: world_pos(world, vm),
         rot,
+        order: vm.rotation_mode,
         camera,
         additive: matches!(vm.blend, BlendMode::Add | BlendMode::Max),
         // th19.exe enables fog while drawing stage sprites only for render modes 8 and 24.
