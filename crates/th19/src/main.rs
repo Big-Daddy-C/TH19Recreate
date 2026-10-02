@@ -57,6 +57,7 @@ use th_game::FIELDS;
 struct Game {
     prog: th_ecl::Program,
     sides: Vec<th_game::Side>,
+    round: th_game::round::Round,
 }
 
 struct Viewer {
@@ -204,7 +205,7 @@ impl Viewer {
                 s.player = Some(p);
             }
         }
-        Some(Game { prog, sides })
+        Some(Game { prog, sides, round: Default::default() })
     }
 
     fn tick(&mut self) {
@@ -218,11 +219,14 @@ impl Viewer {
             }
             let keys = self.player_keys();
             if let Some(g) = &mut self.game {
-                for (i, s) in g.sides.iter_mut().enumerate() {
+                for (i, s) in g.sides.iter_mut().enumerate().filter(|_| g.round.outcome.is_none()) {
                     // Side 2 has no controller yet: it just holds the shot button.
                     let k = if i == 0 { keys } else { th_game::player::input::SHOT };
                     s.tick(&g.prog, k, &mut self.world, &self.lib);
                 }
+                let defeated = std::array::from_fn(|i| g.sides[i].player.as_ref()
+                    .is_some_and(|p| p.state == th_game::player::State::GameOver));
+                g.round.resolve(defeated);
             }
             self.world.tick(&self.lib);
         }
@@ -302,11 +306,12 @@ impl Viewer {
                     })
                     .collect();
                 return format!(
-                    "th19-rs - {name} - {} - {} VMs{}{}",
+                    "th19-rs - {name} - {} - {} VMs{}{} - points {}:{} {:?}",
                     n.join(" | "),
                     self.world.len(),
                     if self.fast { " - x8" } else { "" },
-                    if self.paused { " - PAUSED" } else { "" }
+                    if self.paused { " - PAUSED" } else { "" },
+                    g.round.points[0], g.round.points[1], g.round.outcome
                 );
             }
             let (t, cam) = self.stage.as_ref().map_or((0, [0.0; 3]), |s| (s.time(), s.pos));

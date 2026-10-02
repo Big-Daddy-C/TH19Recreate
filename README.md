@@ -107,3 +107,16 @@ the executable. Suggested pipeline:
 - [thtk](https://github.com/thpatch/thtk) (BSD-2-Clause) — archive crypto/LZSS and ANM layouts were ported from it.
 - [ExpHP's thpages](https://exphp.github.io/thpages/) — instruction and interpolation reference (used as documentation only).
 - Touhou Project © ZUN / Team Shanghai Alice. This project is unofficial and requires a legitimately owned copy of the game.
+
+### Gameplay progress
+
+The player starts with two hearts and a barrier. Breaking the barrier grants 100 frames
+of invulnerability; losing a heart restores it. Final defeat finishes the round and awards
+one point to the opponent. The title displays round points and the outcome. R resets the
+viewer, including the score; full multi-round match progression remains to be implemented.
+
+The charge gauge core is ported from `FUN_004e79e0`, with character thresholds loaded
+from SHT offsets 0x2c..0x38 as in `FUN_005478f0`. It is tested but not connected to input
+or attack callbacks yet. X remains the debug EX injection into the left field. Remaining
+charge work: original starting meter and gains/costs, Reimu's aura/local attack callbacks,
+EX/boss dispatch, and meter visuals. No character threshold defaults are guessed.
