@@ -207,24 +207,18 @@ impl EnemyData {
         }
     }
 
-    /// Death effect `(anm slot, script)`: chosen when the enemy is set up (`FUN_0050be30`'s
-    /// tail): colour variants for some `enemy.anm` fairies, otherwise `bullet.anm` script 37.
-    pub fn death_effect(&self) -> (usize, usize) {
-        if let Some(m) = self.main.filter(|m| m.anm_slot == 2) {
-            let s = match m.base_script {
-                5 | 25 | 53 | 91 => Some(0x21),
-                10 | 56 | 96 => Some(0x29),
-                15 | 106 => Some(0x2d),
-                30 => Some(0x33),
-                35 => Some(0x32),
-                40 => Some(0x31),
-                _ => None,
-            };
-            if let Some(s) = s {
-                return (1, s);
-            }
+    /// Death effect script in `effect.anm` (ANM slot 1), chosen when the enemy is set up
+    /// (`FUN_0050be30`'s tail): colour variants for some `enemy.anm` fairies, otherwise 0x25.
+    pub fn death_effect(&self) -> usize {
+        match self.main.filter(|m| m.anm_slot == 2).map(|m| m.base_script) {
+            Some(5 | 25 | 53 | 91) => 0x21,
+            Some(10 | 56 | 96) => 0x29,
+            Some(15 | 106) => 0x2d,
+            Some(30) => 0x33,
+            Some(35) => 0x32,
+            Some(40) => 0x31,
+            _ => 0x25,
         }
-        (0, 0x25)
     }
 }
 

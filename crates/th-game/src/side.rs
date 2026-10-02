@@ -88,6 +88,27 @@ pub struct SideState {
     pub bullet_types: Rc<Vec<BulletType>>,
     /// `ins_613`: cancel every bullet this frame.
     pub cancel_bullets: bool,
+    /// `ghost.anm` (kill explosions).
+    pub ghost_anm: Option<usize>,
+    /// Kill explosions in progress.
+    pub explosions: Vec<Explosion>,
+}
+
+/// The explosion a destroyed enemy leaves (GhostCtrl, th19.exe `FUN_0051d4e0` /
+/// `FUN_0051cc70` / `FUN_0051c8c0`): a circle growing from radius 1 to `size` (interpolation
+/// mode 5) over `duration` frames that damages enemies it touches (so kills chain) and
+/// cancels small bullets. Its parameters are the enemy's kill rewards (`ins_1028`: size,
+/// `ins_1031`: duration, `ins_1029`: damage).
+pub struct Explosion {
+    pub pos: [f32; 2],
+    pub time: i32,
+    pub duration: i32,
+    pub radius: f32,
+    pub damage: i32,
+    radius_interp: th_anm::interp::Interp<1>,
+    /// The collider skips the enemy it hit most recently (`+0xa8`).
+    last_enemy: Option<i32>,
+    vm: Option<th_anm::VmId>,
 }
 
 impl SideState {
@@ -211,11 +232,56 @@ impl Side {
                 bullets: Vec::new(),
                 bullet_types: Rc::new(Vec::new()),
                 cancel_bullets: false,
+                ghost_anm: None,
+                explosions: Vec::new(),
             },
             enemies: Vec::new(),
             stage: None,
             player: None,
         }
+    }
+
+    /// Explosions grow, hit enemies (`FUN_00520450`'s collider rules) and cancel bullets.
+    fn update_explosions(&mut self, world: &mut World) {
+        let st = &mut self.st;
+        for x in st.explosions.iter_mut() {
+            if x.time == x.duration - 10 {
+                if let Some(id) = x.vm {
+                    world.interrupt(id, 1);
+                }
+            }
+            if let Some([r]) = x.radius_interp.step() {
+                x.radius = r;
+            }
+            // Damage: circle against each enemy's hurtbox rectangle.
+            if x.damage != 0 {
+                for e in self.enemies.iter_mut() {
+                    let d = &mut e.data;
+                    if d.delete || d.flags & crate::enemy::flag::NO_HURTBOX != 0 || d.hurtbox[0] <= 0.0 {
+                        continue;
+                    }
+                    if x.last_enemy == Some(d.id) {
+                        continue;
+                    }
+                    let (hw, hh) = (d.hurtbox[0] / 2.0, d.hurtbox[1] / 2.0);
+                    let cx = x.pos[0].clamp(d.pos[0] - hw, d.pos[0] + hw);
+                    let cy = x.pos[1].clamp(d.pos[1] - hh, d.pos[1] + hh);
+                    if (x.pos[0] - cx).powi(2) + (x.pos[1] - cy).powi(2) <= x.radius * x.radius {
+                        x.last_enemy = Some(d.id);
+                        d.damage(x.damage, x.pos);
+                    }
+                }
+            }
+            // Small live bullets (types 0..3) inside the circle are cancelled.
+            for b in st.bullets.iter_mut() {
+                let (dx, dy) = (b.pos[0] - x.pos[0], b.pos[1] - x.pos[1]);
+                if b.state == 1 && (0..4).contains(&b.kind) && dx * dx + dy * dy <= (x.radius + 1.0).powi(2) {
+                    b.delete = true;
+                }
+            }
+            x.time += 1;
+        }
+        st.explosions.retain(|x| x.time < x.duration);
     }
 
     fn update_bullets(&mut self, world: &mut World, lib: &AnmLibrary) {
@@ -278,14 +344,32 @@ impl Side {
             }
             _ => -std::f32::consts::FRAC_PI_2,
         };
-        let (slot, script) = e.death_effect();
-        if let Some(file) = st.anm_files.get(slot).copied().flatten() {
+        if let Some(file) = st.anm_files[1] {
             let at = crate::enemy::field_to_canvas(st.field, e.pos);
-            let id = world.spawn_clipped(lib, file, script, at, st.field);
-            if let Some(vm) = world.get_mut(id) {
-                vm.rot[2] = angle;
-            }
+            // The angle is the effect's rotation from its very first instruction.
+            world.spawn_rotated(lib, file, e.death_effect(), at, st.field, angle);
         }
+        // The kill explosion.
+        let mut interp = th_anm::interp::Interp::<1>::default();
+        interp.start([1.0], [e.rewards.a], e.rewards.d, 5);
+        let vm = st.ghost_anm.map(|file| {
+            let at = crate::enemy::field_to_canvas(st.field, e.pos);
+            let id = world.spawn_clipped(lib, file, 16, at, st.field);
+            if let Some(v) = world.get_mut(id) {
+                v.interp_scale([e.rewards.a, e.rewards.a], e.rewards.d, 5);
+            }
+            id
+        });
+        st.explosions.push(Explosion {
+            pos: e.pos,
+            time: 0,
+            duration: e.rewards.d,
+            radius: 1.0,
+            damage: e.rewards.b,
+            radius_interp: interp,
+            last_enemy: None,
+            vm,
+        });
         // Chain: each kill adds its reward (ins_1032) to a timer capped at 60 frames.
         st.chain_timer = (st.chain_timer + e.rewards.e).min(60);
         st.chain += 1;
@@ -342,6 +426,7 @@ impl Side {
             self.st.player_pos = p.pos;
         }
         self.update_bullets(world, lib);
+        self.update_explosions(world);
         for e in &mut self.enemies {
             if std::mem::take(&mut e.data.killed) && !e.data.delete {
                 Self::kill(&mut self.st, &mut e.data, world, lib);

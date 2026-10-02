@@ -321,6 +321,8 @@ pub struct Vm {
     /// Sprite numbers 0..4 set by the script are replaced by these (bullets: the colour's
     /// sprites, th19.exe `FUN_004f66a0`).
     pub sprite_remap: Option<[i32; 5]>,
+    /// Sum of the ancestors' z rotations, refreshed before the VM runs (variable 10026).
+    inherited_rot: f32,
 }
 
 impl Vm {
@@ -382,6 +384,7 @@ impl Vm {
             stage_layer: 0,
             clip: None,
             sprite_remap: None,
+            inherited_rot: 0.0,
         }
     }
 
@@ -390,6 +393,11 @@ impl Vm {
             Some(m) if (0..5).contains(&n) => m[n as usize],
             _ => n,
         }
+    }
+
+    /// Interpolate the scale from its current value to `goal` over `time` frames.
+    pub fn interp_scale(&mut self, goal: [f32; 2], time: i32, mode: i32) {
+        self.i_scale.start(self.scale, goal, time, mode);
     }
 
     pub fn is_stopped(&self) -> bool {
@@ -508,6 +516,19 @@ impl World {
         self.next_order += 1;
         vm.origin = [pos[0], pos[1], 0.0];
         vm.clip = Some(clip);
+        let id = self.insert(vm);
+        self.run(lib, id);
+        id
+    }
+
+    /// Create a root 2D VM with its z rotation set before its first instructions run (the
+    /// game passes an angle when creating effects, and scripts read it right away).
+    pub fn spawn_rotated(&mut self, lib: &AnmLibrary, file: usize, script: usize, pos: [f32; 2], clip: [f32; 4], rot_z: f32) -> VmId {
+        let mut vm = Vm::new(file, script, self.next_order);
+        self.next_order += 1;
+        vm.origin = [pos[0], pos[1], 0.0];
+        vm.clip = Some(clip);
+        vm.rot[2] = rot_z;
         let id = self.insert(vm);
         self.run(lib, id);
         id
@@ -633,6 +654,18 @@ impl World {
 
     fn run(&mut self, lib: &AnmLibrary, id: VmId) {
         let mut spawns = Vec::new();
+        let mut inherited = 0.0;
+        let mut p = self.slots[id.index as usize].vm.as_ref().and_then(|v| v.parent);
+        let mut depth = 0;
+        while let (Some(pid), true) = (p, depth < 32) {
+            let Some(pv) = self.get(pid) else { break };
+            inherited += pv.rot[2];
+            p = pv.parent;
+            depth += 1;
+        }
+        if let Some(vm) = self.slots[id.index as usize].vm.as_mut() {
+            vm.inherited_rot = inherited;
+        }
         // ANM `copyParentVars` (509) needs the parent's variables while the child runs.
         let parent_vars = self.slots[id.index as usize]
             .vm
@@ -897,7 +930,6 @@ fn update_motion(vm: &mut Vm) {
 // Variables
 
 fn read_var(vm: &Vm, id: i32, rng: &mut u32) -> f32 {
-    use std::f32::consts::PI;
     match id {
         10000..=10003 => vm.ivars[(id - 10000) as usize] as f32,
         10004..=10007 => vm.fvars[(id - 10004) as usize],
@@ -905,13 +937,15 @@ fn read_var(vm: &Vm, id: i32, rng: &mut u32) -> f32 {
         10029 => vm.ivars[6] as f32,
         10033..=10035 => vm.fvars[(id - 10029) as usize],
         10027 | 10028 => vm.fvars[(id - 10020) as usize],
-        10010 | 10030 => randf01(rng) * 2.0 * PI - PI,
-        10011 | 10031 => randf01(rng),
-        10012 | 10032 => randf01(rng) * 2.0 - 1.0,
+        // Random values scaled by variables 10028 (default pi) and 10027 (default 1).
+        10010 | 10030 => (randf01(rng) * 2.0 - 1.0) * vm.fvars[8],
+        10011 | 10031 => randf01(rng) * vm.fvars[7],
+        10012 | 10032 => (randf01(rng) * 2.0 - 1.0) * vm.fvars[7],
         10013..=10015 => vm.pos[(id - 10013) as usize],
         10022 => next_rand(rng) as i32 as f32,
         10023..=10025 => vm.rot[(id - 10023) as usize],
-        10026 => vm.rot[2],
+        // World rotation: own plus the ancestors' (FUN_00404ae0).
+        10026 => vm.rot[2] + vm.inherited_rot,
         _ => 0.0,
     }
 }
@@ -1451,6 +1485,15 @@ impl Placer<'_> {
     }
 }
 
+/// Sprites are drawn scaled by their creating VM's scale too (th19.exe, sprite vertex setup
+/// around 0x4c8a17: own scale * scale2 * parent's scale * scale2).
+fn parent_scale(world: &World, vm: &Vm) -> [f32; 2] {
+    match vm.parent.and_then(|p| world.get(p)) {
+        Some(p) => [p.scale[0] * p.scale2[0], p.scale[1] * p.scale2[1]],
+        None => [1.0, 1.0],
+    }
+}
+
 /// Emit triangles for one VM; returns the texture it needs.
 fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, camera: Option<&Camera>, out: &mut Vec<Vertex>) -> Option<u32> {
     let c1 = rgba(vm.color, vm.alpha);
@@ -1473,9 +1516,10 @@ fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, camera: Option<&Camera>, out: 
     };
     let z = [0.0f32; 2];
 
+    let ps = parent_scale(world, vm);
     if let Some(prim) = vm.primitive {
-        let sx = vm.scale[0] * vm.scale2[0];
-        let sy = vm.scale[1] * vm.scale2[1];
+        let sx = vm.scale[0] * vm.scale2[0] * ps[0];
+        let sy = vm.scale[1] * vm.scale2[1] * ps[1];
         let rect = |out: &mut Vec<Vertex>, x0: f32, y0: f32, x1: f32, y1: f32, l: [f32; 4], r: [f32; 4]| {
             pl.quad(out, [(x0, y0), (x1, y0), (x1, y1), (x0, y1)], [z; 4], [l, r, r, l]);
         };
@@ -1566,8 +1610,8 @@ fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, camera: Option<&Camera>, out: 
         ],
         _ => sprite.size,
     };
-    let w = base[0] * vm.scale[0] * vm.scale2[0];
-    let h = base[1] * vm.scale[1] * vm.scale2[1];
+    let w = base[0] * vm.scale[0] * vm.scale2[0] * ps[0];
+    let h = base[1] * vm.scale[1] * vm.scale2[1] * ps[1];
     // Anchor: 0 = centre, 1 = left/top, 2 = right/bottom.
     let ax = match vm.anchor[0] {
         1 => 0.0,

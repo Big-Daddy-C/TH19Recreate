@@ -190,8 +190,13 @@ impl Viewer {
             Some(id) => Some(id),
             None => self.dat.read("pl00.anm").ok().and_then(|b| self.lib.load("pl00.anm", &b).ok()),
         };
+        let ghost = match self.lib.file_id("ghost.anm") {
+            Some(id) => Some(id),
+            None => self.dat.read("ghost.anm").ok().and_then(|b| self.lib.load("ghost.anm", &b).ok()),
+        };
         for s in &mut sides {
             s.st.bullet_types = self.bullet_types.clone();
+            s.st.ghost_anm = ghost;
             s.start(&prog);
             if let (Some(sht), Some(anm)) = (&sht, pl_anm) {
                 s.player = Some(th_game::player::Player::new(sht.clone(), anm));
