@@ -257,8 +257,10 @@ pub struct Vm {
     return_point: Option<(usize, i32)>,
     order: u64,
 
-    pub ivars: [i32; 6],
-    pub fvars: [f32; 4],
+    /// Int variables: I0-I3 (10000-10003), 10008, 10009, 10029.
+    pub ivars: [i32; 7],
+    /// Float variables: F0-F3 (10004-10007), F4-F6 (10033-10035), 10027, 10028.
+    pub fvars: [f32; 9],
 
     pub pos: [f32; 3],
     pub rot: [f32; 3],
@@ -330,8 +332,9 @@ impl Vm {
             pending_interrupt: None,
             return_point: None,
             order,
-            ivars: [0; 6],
-            fvars: [0.0; 4],
+            // 10027, 10028 and 10029 start as 1.0, pi and 0x10000 (th19.exe VM reset).
+            ivars: [0, 0, 0, 0, 0, 0, 0x10000],
+            fvars: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, std::f32::consts::PI],
             pos: [0.0; 3],
             rot: [0.0; 3],
             angle_vel: [0.0; 3],
@@ -599,6 +602,13 @@ impl World {
 
     fn run(&mut self, lib: &AnmLibrary, id: VmId) {
         let mut spawns = Vec::new();
+        // ANM `copyParentVars` (509) needs the parent's variables while the child runs.
+        let parent_vars = self.slots[id.index as usize]
+            .vm
+            .as_ref()
+            .and_then(|v| v.parent)
+            .and_then(|p| self.get(p))
+            .map(|p| (p.ivars, p.fvars));
         let delete = {
             let rng = &mut self.rng;
             let unknown = &mut self.unknown_ops;
@@ -632,7 +642,7 @@ impl World {
                     break;
                 }
                 vm.ip += 1;
-                match exec(vm, ins, rng, unknown, &mut spawns) {
+                match exec(vm, ins, rng, unknown, &mut spawns, parent_vars) {
                     Flow::Next => {}
                     Flow::Yield => break,
                     Flow::Delete => {
@@ -861,6 +871,9 @@ fn read_var(vm: &Vm, id: i32, rng: &mut u32) -> f32 {
         10000..=10003 => vm.ivars[(id - 10000) as usize] as f32,
         10004..=10007 => vm.fvars[(id - 10004) as usize],
         10008 | 10009 => vm.ivars[(id - 10004) as usize] as f32,
+        10029 => vm.ivars[6] as f32,
+        10033..=10035 => vm.fvars[(id - 10029) as usize],
+        10027 | 10028 => vm.fvars[(id - 10020) as usize],
         10010 | 10030 => randf01(rng) * 2.0 * PI - PI,
         10011 | 10031 => randf01(rng),
         10012 | 10032 => randf01(rng) * 2.0 - 1.0,
@@ -868,9 +881,6 @@ fn read_var(vm: &Vm, id: i32, rng: &mut u32) -> f32 {
         10022 => next_rand(rng) as i32 as f32,
         10023..=10025 => vm.rot[(id - 10023) as usize],
         10026 => vm.rot[2],
-        10027 => 1.0,
-        10028 => PI,
-        10029 => 1.0,
         _ => 0.0,
     }
 }
@@ -879,6 +889,7 @@ fn read_ivar(vm: &Vm, id: i32, rng: &mut u32) -> i32 {
     match id {
         10000..=10003 => vm.ivars[(id - 10000) as usize],
         10008 | 10009 => vm.ivars[(id - 10004) as usize],
+        10029 => vm.ivars[6],
         10022 => next_rand(rng) as i32,
         _ => read_var(vm, id, rng) as i32,
     }
@@ -888,6 +899,7 @@ fn write_ivar(vm: &mut Vm, id: i32, v: i32) {
     match id {
         10000..=10003 => vm.ivars[(id - 10000) as usize] = v,
         10008 | 10009 => vm.ivars[(id - 10004) as usize] = v,
+        10029 => vm.ivars[6] = v,
         _ => write_fvar(vm, id, v as f32),
     }
 }
@@ -895,7 +907,9 @@ fn write_ivar(vm: &mut Vm, id: i32, v: i32) {
 fn write_fvar(vm: &mut Vm, id: i32, v: f32) {
     match id {
         10004..=10007 => vm.fvars[(id - 10004) as usize] = v,
-        10000..=10003 | 10008 | 10009 => write_ivar(vm, id, v as i32),
+        10033..=10035 => vm.fvars[(id - 10029) as usize] = v,
+        10027 | 10028 => vm.fvars[(id - 10020) as usize] = v,
+        10000..=10003 | 10008 | 10009 | 10029 => write_ivar(vm, id, v as i32),
         10013..=10015 => vm.pos[(id - 10013) as usize] = v,
         10023..=10025 => vm.rot[(id - 10023) as usize] = v,
         _ => {}
@@ -942,6 +956,7 @@ fn exec(
     rng: &mut u32,
     unknown: &mut HashMap<u16, u32>,
     spawns: &mut Vec<Spawn>,
+    parent_vars: Option<([i32; 7], [f32; 9])>,
 ) -> Flow {
     let a = Args { ins };
     macro_rules! i {
@@ -1222,7 +1237,14 @@ fn exec(
             Some(r) => vm.effect = Some(r),
             None => *unknown.entry(508).or_default() += 1,
         },
-        507 | 509 => {}
+        // copyParentVars: the whole variable block (th19.exe copies +0x460..+0x49c).
+        509 => {
+            if let Some((iv, fv)) = parent_vars {
+                vm.ivars = iv;
+                vm.fvars = fv;
+            }
+        }
+        507 => {}
 
         // --- special drawing ---
         603 => vm.primitive = Some(Primitive::Rect { w: f!(0), h: f!(1), rotated: false, gradient: false }),

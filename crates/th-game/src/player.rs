@@ -348,12 +348,7 @@ impl Player {
                     let overlap = (b.pos[0] - d.pos[0]).abs() * 2.0 < b.hitbox[0] + d.hurtbox[0]
                         && (b.pos[1] - d.pos[1]).abs() * 2.0 < b.hitbox[1] + d.hurtbox[1];
                     if overlap {
-                        if d.flags & flag::INVINCIBLE == 0 {
-                            d.hp -= b.damage;
-                            if d.hp <= 0 {
-                                d.delete = true;
-                            }
-                        }
+                        d.damage(b.damage, b.pos);
                         dead = true;
                         break;
                     }

@@ -156,9 +156,12 @@ impl Viewer {
         let prog = th_ecl::Program::load("pl00.ecl", |n| dat.read(n).ok())
             .map_err(|e| log::error!("pl00.ecl: {e}"))
             .ok()?;
-        // The ECL file's anim list fills enemy sprite slots from 2 upwards.
+        // Enemy sprite slots: 0 = bullet.anm, 1 = effect.anm (FUN_0050d380), then the ECL
+        // file's anim list from 2 upwards.
         let mut anm_files = [None; 8];
-        for (i, name) in prog.files[0].1.anim.clone().iter().enumerate() {
+        let names: Vec<String> =
+            ["bullet.anm".to_string(), "effect.anm".to_string()].into_iter().chain(prog.files[0].1.anim.clone()).collect();
+        for (i, name) in names.iter().enumerate() {
             let id = match self.lib.file_id(name) {
                 Some(id) => id,
                 None => {
@@ -166,7 +169,7 @@ impl Viewer {
                     self.lib.load(name, &bytes).map_err(|e| log::error!("{name}: {e}")).ok()?
                 }
             };
-            anm_files[i + 2] = Some(id);
+            anm_files[i] = Some(id);
         }
         // Both players face the same wave order.
         let seq = th_game::side::roll_wave_sequence(0x1234_5678);

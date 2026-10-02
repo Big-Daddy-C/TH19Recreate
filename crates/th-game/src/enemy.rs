@@ -27,6 +27,8 @@ pub mod flag {
     pub const INVINCIBLE: u32 = 0x10;
     /// Sprites hidden.
     pub const HIDDEN: u32 = 0x20;
+    /// Reaching 0 HP does not kill.
+    pub const NO_DEATH: u32 = 0x80;
 }
 
 /// Reward parameters set by TH19's `ins_1028`..`ins_1033`, used when the enemy is destroyed.
@@ -43,6 +45,8 @@ pub struct Rewards {
 /// The directional "main" sprite set up by `ins_306`.
 #[derive(Clone, Copy, Debug)]
 pub struct MainAnm {
+    /// ECL anm slot the sprite came from (`ins_302`) and the loaded file.
+    pub anm_slot: usize,
     pub file: usize,
     pub base_script: usize,
     pub slot: usize,
@@ -82,6 +86,10 @@ pub struct EnemyData {
     /// Size of the main sprite, used for the off-field test.
     pub size: [f32; 2],
     pub delete: bool,
+    /// HP reached 0 this frame; the side runs the death routine.
+    pub killed: bool,
+    /// Where the last damaging shot was (the death effect faces away from it).
+    pub last_hit: Option<[f32; 2]>,
 }
 
 pub struct Enemy {
@@ -178,6 +186,40 @@ impl Enemy {
                 world.delete(id);
             }
         }
+    }
+}
+
+impl EnemyData {
+    /// Apply shot damage (the hit handling in th19.exe `FUN_00509980`).
+    pub fn damage(&mut self, amount: i32, from: [f32; 2]) {
+        if self.flags & flag::INVINCIBLE != 0 {
+            return;
+        }
+        self.hp -= amount;
+        self.last_hit = Some(from);
+        if self.hp < 1 && self.flags & flag::NO_DEATH == 0 {
+            self.killed = true;
+        }
+    }
+
+    /// Death effect `(anm slot, script)`: chosen when the enemy is set up (`FUN_0050be30`'s
+    /// tail): colour variants for some `enemy.anm` fairies, otherwise `bullet.anm` script 37.
+    pub fn death_effect(&self) -> (usize, usize) {
+        if let Some(m) = self.main.filter(|m| m.anm_slot == 2) {
+            let s = match m.base_script {
+                5 | 25 | 53 | 91 => Some(0x21),
+                10 | 56 | 96 => Some(0x29),
+                15 | 106 => Some(0x2d),
+                30 => Some(0x33),
+                35 => Some(0x32),
+                40 => Some(0x31),
+                _ => None,
+            };
+            if let Some(s) = s {
+                return (1, s);
+            }
+        }
+        (0, 0x25)
     }
 }
 
@@ -409,7 +451,8 @@ impl EnemyHost<'_> {
                 }
                 set_vm(self.e, self.world, self.lib, self.st.field, slot, file, script as usize);
                 if op == 306 {
-                    self.e.main = Some(MainAnm { file, base_script: script as usize, slot, dir: 0 });
+                    let anm_slot = self.e.anm_slot;
+                    self.e.main = Some(MainAnm { anm_slot, file, base_script: script as usize, slot, dir: 0 });
                 }
             }
             // movePos(x, y)

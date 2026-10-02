@@ -69,6 +69,12 @@ pub struct SideState {
     rng: u32,
     pub unknown_ops: HashMap<u16, u32>,
     pub unknown_vars: HashMap<i32, u32>,
+    /// Kill chain (`FUN_00549780`): a timer topped up by each kill (capped at 60 frames),
+    /// the current chain length and the best chain. APPROX: the timer counting down by one
+    /// per frame and the chain ending at 0 is assumed; that code hasn't been located yet.
+    pub chain_timer: i32,
+    pub chain: i32,
+    pub chain_max: i32,
 }
 
 impl SideState {
@@ -157,11 +163,38 @@ impl Side {
                 rng: seed | 1,
                 unknown_ops: HashMap::new(),
                 unknown_vars: HashMap::new(),
+                chain_timer: 0,
+                chain: 0,
+                chain_max: 0,
             },
             enemies: Vec::new(),
             stage: None,
             player: None,
         }
+    }
+
+    /// The enemy death routine (`FUN_0050c1f0`): death effect, chain, removal.
+    fn kill(st: &mut SideState, e: &mut crate::enemy::EnemyData, world: &mut World, lib: &AnmLibrary) {
+        // The effect is turned to face away from the shot that landed the kill.
+        let angle = match e.last_hit {
+            Some(h) if (e.pos[0] - h[0]).powi(2) + (e.pos[1] - h[1]).powi(2) >= 0.04 => {
+                (e.pos[1] - h[1]).atan2(e.pos[0] - h[0])
+            }
+            _ => -std::f32::consts::FRAC_PI_2,
+        };
+        let (slot, script) = e.death_effect();
+        if let Some(file) = st.anm_files.get(slot).copied().flatten() {
+            let at = crate::enemy::field_to_canvas(st.field, e.pos);
+            let id = world.spawn_clipped(lib, file, script, at, st.field);
+            if let Some(vm) = world.get_mut(id) {
+                vm.rot[2] = angle;
+            }
+        }
+        // Chain: each kill adds its reward (ins_1032) to a timer capped at 60 frames.
+        st.chain_timer = (st.chain_timer + e.rewards.e).min(60);
+        st.chain += 1;
+        st.chain_max = st.chain_max.max(st.chain);
+        e.delete = true;
     }
 
     /// Start the stage script (`main`).
@@ -209,6 +242,17 @@ impl Side {
         if let Some(p) = &mut self.player {
             p.update(keys, &mut self.enemies, world, lib, self.st.field);
             self.st.player_pos = p.pos;
+        }
+        for e in &mut self.enemies {
+            if std::mem::take(&mut e.data.killed) && !e.data.delete {
+                Self::kill(&mut self.st, &mut e.data, world, lib);
+            }
+        }
+        if self.st.chain_timer > 0 {
+            self.st.chain_timer -= 1;
+            if self.st.chain_timer == 0 {
+                self.st.chain = 0;
+            }
         }
         let mut k = 0;
         while k < self.enemies.len() {
