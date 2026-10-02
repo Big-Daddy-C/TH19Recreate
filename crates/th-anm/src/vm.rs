@@ -557,9 +557,8 @@ impl World {
             if verts.is_empty() {
                 continue;
             }
-            // APPROX: render mode 4 behaves like a flat layer that does not write depth
-            // (stage 1's coplanar tree layers z-fight otherwise); confirm against th19.exe.
-            let depth = match (camera.is_some(), vm.z_write_disable || vm.render_mode == 4) {
+            // Depth writes depend only on the sprite's zWriteDisable flag (as in th19.exe).
+            let depth = match (camera.is_some(), vm.z_write_disable) {
                 (false, _) => DepthMode::Off,
                 (true, true) => DepthMode::Test,
                 (true, false) => DepthMode::TestWrite,
@@ -1281,6 +1280,39 @@ fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, camera: Option<&Camera>, out: 
         3 => (c1, c1, c2, c2),
         _ => (c1, c1, c1, c1),
     };
+
+    // Render mode 4: a camera-facing billboard. The sprite's 3D position is projected to
+    // the screen and a screen-aligned quad is drawn there, sized by how many pixels one
+    // world unit covers at that depth and rotated only about the screen axis.
+    if let (Some(cam), 4) = (camera, vm.render_mode) {
+        let centre = pl.origin;
+        let c = cam.clip(centre);
+        if c[3] < Camera::NEAR || !(0.0..=1.0).contains(&(c[2] / c[3])) {
+            return None;
+        }
+        let (p, _, _) = cam.to_screen(c);
+        let edge = [centre[0] + cam.right[0], centre[1] + cam.right[1], centre[2] + cam.right[2]];
+        let (q, _, _) = cam.to_screen(cam.clip(edge));
+        let px_per_unit = ((q[0] - p[0]).powi(2) + (q[1] - p[1]).powi(2)).sqrt();
+        // th19.exe sizes billboards at half the projected scale (it projects into the same
+        // 640x480 space used here).
+        let (sx, sy) = (px_per_unit * 0.5, px_per_unit * 0.5);
+        let (s, cz) = vm.rot[2].sin_cos();
+        let depth = c[2] / c[3];
+        let corner = |x: f32, y: f32, uv: [f32; 2], color: [f32; 4]| {
+            let (x, y) = (x * sx, y * sy);
+            Vertex { pos: [p[0] + x * cz - y * s, p[1] + x * s + y * cz], uv, color, w: 1.0, fog: 0.0, depth }
+        };
+        let v = [
+            corner(ax, ay, [u0, v0], tl),
+            corner(ax + w, ay, [u1, v0], tr),
+            corner(ax + w, ay + h, [u1, v1], br),
+            corner(ax, ay + h, [u0, v1], bl),
+        ];
+        out.extend_from_slice(&[v[0], v[1], v[2], v[0], v[2], v[3]]);
+        return Some(sprite.texture);
+    }
+
     pl.quad(
         out,
         [(ax, ay), (ax + w, ay), (ax + w, ay + h), (ax, ay + h)],

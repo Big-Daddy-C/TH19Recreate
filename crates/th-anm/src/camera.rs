@@ -62,6 +62,8 @@ pub fn transform(p: Vec3, m: &Mat4) -> [f32; 4] {
 #[derive(Clone, Debug)]
 pub struct Camera {
     pub view_proj: Mat4,
+    /// Unit vector pointing to the camera's right in world space (for billboards).
+    pub right: Vec3,
     /// Destination rectangle on the 640x480 canvas: `[x, y, w, h]`.
     pub viewport: [f32; 4],
     pub fog_near: f32,
@@ -74,7 +76,9 @@ impl Camera {
         let view = look_at_lh(eye, at, up);
         // Near/far planes as used by th19.exe's stage camera.
         let proj = perspective_fov_lh(fovy, viewport[2] / viewport[3], Self::NEAR, 8000.0);
-        Self { view_proj: mul(&view, &proj), viewport, fog_near: fog.0, fog_far: fog.1 }
+        // The view matrix's first column is the camera's right axis.
+        let right = [view[0][0], view[1][0], view[2][0]];
+        Self { view_proj: mul(&view, &proj), right, viewport, fog_near: fog.0, fog_far: fog.1 }
     }
 
     /// Minimum view depth; geometry closer than this is clipped away.
