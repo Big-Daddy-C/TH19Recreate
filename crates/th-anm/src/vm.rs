@@ -673,7 +673,11 @@ impl World {
                 Pass::Ui => !v.space_3d && !v.backdrop,
             })
             .collect();
-        vms.sort_by_key(|v| (v.layer, v.order));
+        // The stage loop draws its sprites in spawn order regardless of their ANM layer.
+        match pass {
+            Pass::Stage(_) => vms.sort_by_key(|v| v.order),
+            _ => vms.sort_by_key(|v| (v.layer, v.order)),
+        }
 
         let mut out: DrawList = Vec::new();
         let mut verts = Vec::new();

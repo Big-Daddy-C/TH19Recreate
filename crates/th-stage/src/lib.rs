@@ -92,14 +92,17 @@ impl Stage {
         let only: Option<Vec<u16>> = std::env::var("TH19_STD_SCRIPTS")
             .ok()
             .map(|v| v.split(',').filter_map(|x| x.trim().parse().ok()).collect());
-        // Draw order: each object (objects are listed in layer order: ground, trees, canopy...)
-        // across all of its instances, rather than instance by instance. Going instance by
-        // instance lets a nearer row's lower layer paint over a farther row's upper layer,
-        // which shows up as seams between repeating tiles.
-        // APPROX: the exact order in th19.exe still needs confirming.
+        // Draw order, as in th19.exe: stage layers 0, 1, 2... in turn (an object's layer is the
+        // low byte of its flags); within a layer, instances in file order, each drawing its
+        // object's quads. Coplanar surfaces rely on this order (later wins on equal depth).
+        let layer_of = |id: u16| file.objects.iter().find(|o| o.id == id).map(|o| o.flags & 0xff);
+        let mut layers: Vec<u16> = file.objects.iter().map(|o| o.flags & 0xff).collect();
+        layers.sort_unstable();
+        layers.dedup();
         let mut vms = Vec::new();
-        for obj in &file.objects {
-            for inst in file.instances.iter().filter(|i| i.object == obj.id) {
+        for layer in layers {
+            for inst in file.instances.iter().filter(|i| layer_of(i.object) == Some(layer)) {
+                let Some(obj) = file.objects.iter().find(|o| o.id == inst.object) else { continue };
                 for q in &obj.quads {
                     if only.as_ref().is_some_and(|o| !o.contains(&q.script)) {
                         continue;
