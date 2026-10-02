@@ -64,6 +64,10 @@ pub struct Camera {
     pub view_proj: Mat4,
     /// Unit vector pointing to the camera's right in world space (for billboards).
     pub right: Vec3,
+    /// Eye position in world space.
+    pub eye: Vec3,
+    /// Fog colour (0..1), for sprites that fog themselves (render mode 6).
+    pub fog_color: [f32; 3],
     /// Destination rectangle on the 640x480 canvas: `[x, y, w, h]`.
     pub viewport: [f32; 4],
     pub fog_near: f32,
@@ -78,7 +82,15 @@ impl Camera {
         let proj = perspective_fov_lh(fovy, viewport[2] / viewport[3], Self::NEAR, 8000.0);
         // The view matrix's first column is the camera's right axis.
         let right = [view[0][0], view[1][0], view[2][0]];
-        Self { view_proj: mul(&view, &proj), right, viewport, fog_near: fog.0, fog_far: fog.1 }
+        Self {
+            view_proj: mul(&view, &proj),
+            right,
+            eye,
+            fog_color: [0.0; 3],
+            viewport,
+            fog_near: fog.0,
+            fog_far: fog.1,
+        }
     }
 
     /// Minimum view depth; geometry closer than this is clipped away.

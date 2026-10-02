@@ -191,6 +191,7 @@ pub struct Vm {
     /// Positioned in 3D stage space and drawn through a [`Camera`] (STD quads).
     pub space_3d: bool,
     /// Draw the sprite at this size instead of its own (STD quads specify their size).
+    /// A zero component keeps the sprite's own size on that axis; negative mirrors.
     pub size_override: Option<[f32; 2]>,
     /// 2D sprite belonging to the stage background (drawn in [`Pass::Backdrop`]).
     pub backdrop: bool,
@@ -1253,7 +1254,14 @@ fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, camera: Option<&Camera>, out: 
         return None;
     }
 
-    let base = vm.size_override.unwrap_or(sprite.size);
+    // As in th19.exe, a stage quad's size only applies to render modes above 3.
+    let base = match vm.size_override {
+        Some(o) if vm.render_mode > 3 => [
+            if o[0] != 0.0 { o[0] } else { sprite.size[0] },
+            if o[1] != 0.0 { o[1] } else { sprite.size[1] },
+        ],
+        _ => sprite.size,
+    };
     let w = base[0] * vm.scale[0] * vm.scale2[0];
     let h = base[1] * vm.scale[1] * vm.scale2[1];
     // Anchor: 0 = centre, 1 = left/top, 2 = right/bottom.
@@ -1281,10 +1289,13 @@ fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, camera: Option<&Camera>, out: 
         _ => (c1, c1, c1, c1),
     };
 
-    // Render mode 4: a camera-facing billboard. The sprite's 3D position is projected to
-    // the screen and a screen-aligned quad is drawn there, sized by how many pixels one
+    // Render modes 4 and 6: camera-facing billboards. The sprite's 3D position is projected
+    // to the screen and a screen-aligned quad is drawn there, sized by how many pixels one
     // world unit covers at that depth and rotated only about the screen axis.
-    if let (Some(cam), 4) = (camera, vm.render_mode) {
+    // Mode 6 additionally fogs itself: past the fog start its colour blends toward the fog
+    // colour and its alpha fades with the cube of the fog fraction; past the fog end it is
+    // not drawn.
+    if let (Some(cam), 4 | 6) = (camera, vm.render_mode) {
         let centre = pl.origin;
         let c = cam.clip(centre);
         if c[3] < Camera::NEAR || !(0.0..=1.0).contains(&(c[2] / c[3])) {
@@ -1299,6 +1310,27 @@ fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, camera: Option<&Camera>, out: 
         let (sx, sy) = (px_per_unit * 0.5, px_per_unit * 0.5);
         let (s, cz) = vm.rot[2].sin_cos();
         let depth = c[2] / c[3];
+        let fogged = |col: [f32; 4]| -> Option<[f32; 4]> {
+            if vm.render_mode != 6 {
+                return Some(col);
+            }
+            let d = centre.iter().zip(&cam.eye).map(|(a, b)| (a - b) * (a - b)).sum::<f32>().sqrt();
+            if d <= cam.fog_near || cam.fog_far <= cam.fog_near {
+                return Some(col);
+            }
+            let t = (d - cam.fog_near) / (cam.fog_far - cam.fog_near);
+            if t >= 1.0 {
+                return None;
+            }
+            let f = cam.fog_color;
+            Some([
+                col[0] + (f[0] - col[0]) * t,
+                col[1] + (f[1] - col[1]) * t,
+                col[2] + (f[2] - col[2]) * t,
+                col[3] * (1.0 - t * t * t),
+            ])
+        };
+        let (tl, tr, br, bl) = (fogged(tl)?, fogged(tr)?, fogged(br)?, fogged(bl)?);
         let corner = |x: f32, y: f32, uv: [f32; 2], color: [f32; 4]| {
             let (x, y) = (x * sx, y * sy);
             Vertex { pos: [p[0] + x * cz - y * s, p[1] + x * s + y * cz], uv, color, w: 1.0, fog: 0.0, depth }

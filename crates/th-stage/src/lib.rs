@@ -99,8 +99,10 @@ impl Stage {
                         continue;
                     }
                     let p = [inst.pos[0] + q.pos[0], inst.pos[1] + q.pos[1], inst.pos[2] + q.pos[2]];
-                    // The quad's size stretches the sprite (e.g. a 512x256 mist sprite tiled at 1024x512).
-                    let size = (q.size[0] > 0.0 && q.size[1] > 0.0).then_some(q.size);
+                    // A non-zero quad width/height stretches the sprite on that axis (negative
+                    // mirrors it), e.g. a 512x256 mist sprite tiled at 1024x512, or stage 13's
+                    // blossoms at -640x640.
+                    let size = (q.size[0] != 0.0 || q.size[1] != 0.0).then_some(q.size);
                     vms.push(world.spawn_3d(lib, anm_file, q.script as usize, p, size));
                 }
             }
@@ -378,7 +380,9 @@ impl Stage {
         if len >= 0.01 {
             dir = dir.map(|v| v / len);
         }
-        Camera::new(eye, dir, self.up, self.fov, viewport, (self.fog_range[0], self.fog_range[1]))
+        let mut cam = Camera::new(eye, dir, self.up, self.fov, viewport, (self.fog_range[0], self.fog_range[1]));
+        cam.fog_color = [self.fog_color[0] / 255.0, self.fog_color[1] / 255.0, self.fog_color[2] / 255.0];
+        cam
     }
 
     /// Remove this stage's VMs from the world.
