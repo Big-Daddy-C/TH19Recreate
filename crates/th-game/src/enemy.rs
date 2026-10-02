@@ -575,6 +575,10 @@ impl EnemyHost<'_> {
                 if y > KEEP {
                     m.pv.pos[1] = y;
                 }
+                // The game recomputes the final position right away (case 22 of
+                // FUN_004fecc0), so instructions later this frame see the new position.
+                let e = &mut *self.e;
+                e.pos = [e.abs.pv.pos[0] + e.rel.pv.pos[0], e.abs.pv.pos[1] + e.rel.pv.pos[1]];
             }
             // movePosTime(t, mode, x, y)
             401 | 403 | 436 | 437 => {

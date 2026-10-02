@@ -475,9 +475,16 @@ impl World {
         }
     }
 
+    /// Send interrupt `n` to a VM and its children (th19.exe `FUN_004cb830` walks the
+    /// VM's child list too).
     pub fn interrupt(&mut self, id: VmId, n: i32) {
         if let Some(vm) = self.get_mut(id) {
             vm.pending_interrupt = Some(n);
+        }
+        for s in self.slots.iter_mut() {
+            if let Some(vm) = s.vm.as_mut().filter(|v| v.parent == Some(id)) {
+                vm.pending_interrupt = Some(n);
+            }
         }
     }
 
