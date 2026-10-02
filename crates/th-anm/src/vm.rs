@@ -269,10 +269,11 @@ pub struct Vm {
     scale2: [f32; 2],
     scale_growth: [f32; 2],
     pub color: [f32; 3],
-    color2: [f32; 3],
+    pub color2: [f32; 3],
     pub alpha: f32,
-    alpha2: f32,
-    color_mode: i32,
+    pub alpha2: f32,
+    /// ANM `423`: 0 colour 1, 1 colour 2, 2/3 gradients.
+    pub color_mode: i32,
 
     pub sprite: i32,
     pub blend: BlendMode,
@@ -323,6 +324,8 @@ pub struct Vm {
     pub sprite_remap: Option<[i32; 5]>,
     /// Sum of the ancestors' z rotations, refreshed before the VM runs (variable 10026).
     inherited_rot: f32,
+    /// ANM `424`: the owning bullet sets the z rotation from its direction.
+    pub auto_rotate: bool,
 }
 
 impl Vm {
@@ -385,6 +388,7 @@ impl Vm {
             clip: None,
             sprite_remap: None,
             inherited_rot: 0.0,
+            auto_rotate: false,
         }
     }
 
@@ -1275,7 +1279,8 @@ fn exec(
             vm.anchor = [raw as i16, (raw >> 16) as i16];
         }
         423 => vm.color_mode = i!(0),
-        424 => {} // rotateAuto: only meaningful for bullets; handled by the owner
+        // rotateAuto: a bullet's sprite turns to its direction of travel (th19.exe FUN_004f4990).
+        424 => vm.auto_rotate = i!(0) != 0,
         425 => vm.uv_vel[0] = f!(0),
         426 => vm.uv_vel[1] = f!(0),
         427 => {

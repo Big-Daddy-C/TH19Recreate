@@ -480,7 +480,9 @@ impl Bullet {
         let at = field_to_canvas(ctx.field, self.pos);
         if let Some(vm) = self.vm.and_then(|id| ctx.world.get_mut(id)) {
             vm.origin = [at[0], at[1], 0.0];
-            vm.rot[2] = self.angle + FRAC_PI_2;
+            if vm.auto_rotate {
+                vm.rot[2] = wrap_angle(self.angle + FRAC_PI_2);
+            }
         }
     }
 

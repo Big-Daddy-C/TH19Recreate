@@ -92,6 +92,10 @@ pub struct EnemyData {
     pub last_hit: Option<[f32; 2]>,
     /// Bullet shooters (`ins_600`..).
     pub ets: Vec<crate::bullet::Et>,
+    /// Took damage since the last update (flag 0x20 of the enemy's state).
+    pub damaged: bool,
+    /// Frames the hit flash stays off after flashing.
+    pub flash_hold: i32,
 }
 
 pub struct Enemy {
@@ -159,6 +163,23 @@ impl Enemy {
         }
         e.size = main_size(e, world, lib);
 
+        // Hit flash (FUN_00509980's tail): a damaged enemy's main sprite is drawn in
+        // colour 2 = 0xff0000ff for one frame, then normally for at least 4 frames.
+        if let Some(vm) = e.main.and_then(|m| e.vms[m.slot]).and_then(|id| world.get_mut(id)) {
+            if e.flash_hold > 0 {
+                vm.color_mode = 0;
+                e.flash_hold -= 1;
+            } else if std::mem::take(&mut e.damaged) {
+                vm.color2 = [0.0, 0.0, 255.0];
+                vm.alpha2 = 255.0;
+                vm.color_mode = 1;
+                e.flash_hold = 4;
+            } else {
+                vm.color_mode = 0;
+            }
+        }
+        e.damaged = false;
+
         // Leaving the field deletes an enemy that has been inside it.
         let (hw, hh) = (e.size[0] / 2.0, e.size[1] / 2.0);
         let out_x = e.pos[0] + hw < -148.0 || e.pos[0] - hw > 148.0;
@@ -201,6 +222,7 @@ impl EnemyData {
             return;
         }
         self.hp -= amount;
+        self.damaged = amount > 0;
         self.last_hit = Some(from);
         if self.hp < 1 && self.flags & flag::NO_DEATH == 0 {
             self.killed = true;
