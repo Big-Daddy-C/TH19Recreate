@@ -1969,6 +1969,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "th-stage"
+version = "0.1.0"
+dependencies = [
+ "th-anm",
+ "th-formats",
+]
+
+[[package]]
 name = "th19"
 version = "0.1.0"
 dependencies = [
@@ -1978,6 +1986,7 @@ dependencies = [
  "pollster",
  "th-anm",
  "th-formats",
+ "th-stage",
  "wgpu",
  "winit",
 ]

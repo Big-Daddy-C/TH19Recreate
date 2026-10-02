@@ -27,7 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             for _ in 0..300 {
                 world.tick(&lib);
             }
-            tris += world.draw_list(&lib).iter().map(|b| b.vertices.len() / 3).sum::<usize>();
+            tris += world.draw_list(&lib, None).iter().map(|b| b.vertices.len() / 3).sum::<usize>();
             scripts += 1;
         }
     }

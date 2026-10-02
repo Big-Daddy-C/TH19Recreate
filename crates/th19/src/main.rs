@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use th_anm::{AnmLibrary, World};
+use th_stage::Stage;
 use th_formats::dat::Archive;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
@@ -42,7 +43,18 @@ fn find_dat() -> Option<PathBuf> {
     candidates.into_iter().find(|p| p.is_file())
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Anm,
+    Stage,
+}
+
 struct Viewer {
+    mode: Mode,
+    stage: Option<Stage>,
+    stage_files: Vec<String>,
+    stage_idx: usize,
+    fast: bool,
     dat: Archive,
     lib: AnmLibrary,
     world: World,
@@ -60,7 +72,15 @@ impl Viewer {
             dat.entries().iter().map(|e| e.name.clone()).filter(|n| n.ends_with(".anm")).collect();
         files.sort();
         let file_idx = files.iter().position(|f| f == "title.anm").unwrap_or(0);
+        let mut stage_files: Vec<String> =
+            dat.entries().iter().map(|e| e.name.clone()).filter(|n| n.ends_with(".std")).collect();
+        stage_files.sort();
         let mut v = Self {
+            mode: Mode::Anm,
+            stage: None,
+            stage_files,
+            stage_idx: 0,
+            fast: false,
             dat,
             lib: AnmLibrary::default(),
             world: World::default(),
@@ -88,7 +108,38 @@ impl Viewer {
         self.file_id().map_or(0, |f| self.lib.files[f].script_count())
     }
 
+    fn load_stage(&mut self) {
+        self.world.clear();
+        self.stage = None;
+        let Some(name) = self.stage_files.get(self.stage_idx).cloned() else { return };
+        let std = match self.dat.read(&name).map(|b| th_formats::stage::StdFile::parse(&b)) {
+            Ok(Ok(s)) => s,
+            Ok(Err(e)) | Err(e) => return log::error!("{name}: {e}"),
+        };
+        let anm_name = std.anm_name.clone();
+        let anm = match self.dat.read(&anm_name) {
+            Ok(b) => match self.lib.load(&anm_name, &b) {
+                Ok(id) => id,
+                Err(e) => return log::error!("{anm_name}: {e}"),
+            },
+            Err(e) => return log::error!("{anm_name}: {e}"),
+        };
+        self.stage = Some(Stage::new(std, anm, &self.lib, &mut self.world));
+    }
+
+    fn tick(&mut self) {
+        for _ in 0..if self.fast { 8 } else { 1 } {
+            if let Some(st) = &mut self.stage {
+                st.tick(&mut self.world);
+            }
+            self.world.tick(&self.lib);
+        }
+    }
+
     fn restart(&mut self) {
+        if self.mode == Mode::Stage {
+            return self.load_stage();
+        }
         self.world.clear();
         let Some(f) = self.file_id() else { return };
         let n = self.lib.files[f].script_count();
@@ -108,6 +159,21 @@ impl Viewer {
     }
 
     fn title(&mut self) -> String {
+        if self.mode == Mode::Stage {
+            let name = self.stage_files.get(self.stage_idx).cloned().unwrap_or_default();
+            let (t, cam) = self.stage.as_ref().map_or((0, [0.0; 3]), |s| (s.time(), s.pos));
+            return format!(
+                "th19-rs stage viewer - {name} ({}/{}) - frame {t} - camera ({:.0}, {:.0}, {:.0}) - {} VMs{}{}",
+                self.stage_idx + 1,
+                self.stage_files.len(),
+                cam[0],
+                cam[1],
+                cam[2],
+                self.world.len(),
+                if self.fast { " - x8" } else { "" },
+                if self.paused { " - PAUSED" } else { "" }
+            );
+        }
         let n = self.script_count();
         let name = self.files.get(self.file_idx).cloned().unwrap_or_default();
         let what = if self.show_all { "all scripts".to_string() } else { format!("script {}/{}", self.script, n) };
@@ -122,6 +188,18 @@ impl Viewer {
 
     fn key(&mut self, code: KeyCode) {
         match code {
+            KeyCode::Tab => {
+                self.mode = if self.mode == Mode::Anm { Mode::Stage } else { Mode::Anm };
+                self.stage = None;
+                self.restart();
+            }
+            KeyCode::KeyF => self.fast = !self.fast,
+            KeyCode::ArrowRight | KeyCode::ArrowLeft if self.mode == Mode::Stage => {
+                let n = self.stage_files.len().max(1);
+                self.stage_idx =
+                    if code == KeyCode::ArrowRight { (self.stage_idx + 1) % n } else { (self.stage_idx + n - 1) % n };
+                self.load_stage();
+            }
             KeyCode::ArrowRight | KeyCode::ArrowLeft => {
                 let n = self.files.len();
                 self.file_idx = if code == KeyCode::ArrowRight { (self.file_idx + 1) % n } else { (self.file_idx + n - 1) % n };
@@ -144,7 +222,11 @@ impl Viewer {
             }
             KeyCode::KeyR => self.restart(),
             KeyCode::Space => self.paused = !self.paused,
-            KeyCode::Period if self.paused => self.world.tick(&self.lib),
+            KeyCode::Period if self.paused => {
+                let fast = std::mem::replace(&mut self.fast, false);
+                self.tick();
+                self.fast = fast;
+            }
             KeyCode::Digit0 | KeyCode::Digit1 | KeyCode::Digit2 | KeyCode::Digit3 | KeyCode::Digit4
             | KeyCode::Digit5 | KeyCode::Digit6 | KeyCode::Digit7 | KeyCode::Digit8 | KeyCode::Digit9 => {
                 let n = code as i32 - KeyCode::Digit0 as i32;
@@ -193,9 +275,9 @@ impl ApplicationHandler for App {
                 if code == KeyCode::Escape {
                     event_loop.exit();
                 }
-                let before = self.viewer.file_idx;
+                let before = (self.viewer.file_idx, self.viewer.stage_idx, self.viewer.mode);
                 self.viewer.key(code);
-                if before != self.viewer.file_idx {
+                if before != (self.viewer.file_idx, self.viewer.stage_idx, self.viewer.mode) {
                     if let Some(r) = &mut self.renderer {
                         r.forget_textures();
                     }
@@ -207,7 +289,7 @@ impl ApplicationHandler for App {
                 let mut steps = 0;
                 while self.next_frame <= now && steps < 4 {
                     if !self.viewer.paused {
-                        self.viewer.world.tick(&self.viewer.lib);
+                        self.viewer.tick();
                     }
                     self.next_frame += FRAME;
                     steps += 1;
@@ -215,9 +297,20 @@ impl ApplicationHandler for App {
                 if self.next_frame < now {
                     self.next_frame = now;
                 }
-                let list = self.viewer.world.draw_list(&self.viewer.lib);
+                let v = &self.viewer;
+                let (mut list, bg, fog) = match &v.stage {
+                    Some(st) => {
+                        let cam = st.camera([0.0, 0.0, render::CANVAS_W, render::CANVAS_H]);
+                        let c = st.clear_color.map(|x| x / 255.0);
+                        let f = [st.fog_color[0] / 255.0, st.fog_color[1] / 255.0, st.fog_color[2] / 255.0];
+                        // Distant geometry fades into the fog, so fill the background with it too.
+                        (v.world.draw_list(&v.lib, Some(&cam)), if st.fog_range[1] > 0.0 { f } else { c }, f)
+                    }
+                    None => (Vec::new(), [0.0; 3], [0.0; 3]),
+                };
+                list.extend(v.world.draw_list(&v.lib, None));
                 if let Some(r) = &mut self.renderer {
-                    r.render(&self.viewer.lib, &list);
+                    r.render(&v.lib, &list, bg, fog);
                 }
                 if now.duration_since(self.last_title) > Duration::from_millis(250) {
                     self.last_title = now;

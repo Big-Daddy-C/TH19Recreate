@@ -37,6 +37,8 @@ pub struct Instance {
 pub struct Instr {
     pub time: i32,
     pub opcode: u16,
+    /// Byte offset from the start of the script (jump targets use these).
+    pub offset: u32,
     pub args: Vec<u8>,
 }
 
@@ -131,6 +133,7 @@ impl StdFile {
             script.push(Instr {
                 time: h.peek_i32(p)?,
                 opcode: h.peek_u16(p + 4)?,
+                offset: (p - script_offset) as u32,
                 args: h.peek_bytes(p + 8, size - 8)?.to_vec(),
             });
             p += size;

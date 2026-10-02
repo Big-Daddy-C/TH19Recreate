@@ -4,6 +4,7 @@
 //! This crate knows nothing about the GPU. A renderer uploads [`AnmLibrary::textures`]
 //! once, then each frame calls [`World::tick`] and draws [`World::draw_list`].
 
+pub mod camera;
 pub mod interp;
 pub mod vm;
 
@@ -11,6 +12,7 @@ use std::collections::HashMap;
 
 use th_formats::anm::{AnmFile, Script};
 
+pub use camera::Camera;
 pub use vm::{BlendMode, DrawList, DrawBatch, Vertex, VmId, World};
 
 /// A decoded RGBA8 texture owned by the library. Index into `AnmLibrary::textures` is the texture id.

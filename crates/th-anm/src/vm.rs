@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use bytemuck::{Pod, Zeroable};
 use th_formats::anm::Instr;
 
+use crate::camera::Camera;
 use crate::interp::Interp;
 use crate::AnmLibrary;
 
@@ -46,9 +47,14 @@ impl BlendMode {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
 pub struct Vertex {
+    /// Canvas position (already perspective-divided for 3D VMs).
     pub pos: [f32; 2],
     pub uv: [f32; 2],
     pub color: [f32; 4],
+    /// Clip-space w, for perspective-correct texturing (1.0 for 2D).
+    pub w: f32,
+    /// Fog factor 0..1 towards the stage fog colour (0.0 for 2D).
+    pub fog: f32,
 }
 
 /// Consecutive triangles sharing a texture and blend mode.
@@ -133,7 +139,9 @@ pub struct Vm {
 
     pub parent: Option<VmId>,
     /// Extra offset applied on top of `pos` (spawn position for roots, offset for scriptNewPos).
-    pub origin: [f32; 2],
+    pub origin: [f32; 3],
+    /// Positioned in 3D stage space and drawn through a [`Camera`] (STD quads).
+    pub space_3d: bool,
 }
 
 impl Vm {
@@ -184,7 +192,8 @@ impl Vm {
             i_uv_vel_y: Interp::default(),
             i_uv_scale: Interp::default(),
             parent: None,
-            origin: [0.0; 2],
+            origin: [0.0; 3],
+            space_3d: false,
         }
     }
 
@@ -269,6 +278,13 @@ impl World {
         }
     }
 
+    /// Interrupt every VM in 3D stage space (STD `ins_19`).
+    pub fn interrupt_3d(&mut self, n: i32) {
+        for vm in self.slots.iter_mut().filter_map(|s| s.vm.as_mut()).filter(|v| v.space_3d) {
+            vm.pending_interrupt = Some(n);
+        }
+    }
+
     pub fn interrupt_all(&mut self, n: i32) {
         for vm in self.slots.iter_mut().filter_map(|s| s.vm.as_mut()) {
             vm.pending_interrupt = Some(n);
@@ -288,7 +304,12 @@ impl World {
 
     /// Create a root VM running `script` of `file` at `pos`, executing its first instructions immediately.
     pub fn spawn(&mut self, lib: &AnmLibrary, file: usize, script: usize, pos: [f32; 2]) -> VmId {
-        self.spawn_inner(lib, file, script, None, pos)
+        self.spawn_inner(lib, file, script, None, [pos[0], pos[1], 0.0], false)
+    }
+
+    /// Create a root VM positioned in 3D stage space (drawn only through a [`Camera`]).
+    pub fn spawn_3d(&mut self, lib: &AnmLibrary, file: usize, script: usize, pos: [f32; 3]) -> VmId {
+        self.spawn_inner(lib, file, script, None, pos, true)
     }
 
     fn spawn_inner(
@@ -297,12 +318,14 @@ impl World {
         file: usize,
         script: usize,
         parent: Option<VmId>,
-        origin: [f32; 2],
+        origin: [f32; 3],
+        space_3d: bool,
     ) -> VmId {
         let mut vm = Vm::new(file, script, self.next_order);
         self.next_order += 1;
         vm.parent = parent;
         vm.origin = origin;
+        vm.space_3d = space_3d;
         let id = self.insert(vm);
         self.run(lib, id);
         id
@@ -397,18 +420,19 @@ impl World {
             delete
         };
 
-        let (file, base) = {
+        let (file, base, is_3d) = {
             let vm = self.slots[id.index as usize].vm.as_ref().unwrap();
-            (vm.file, world_pos(self, vm))
+            (vm.file, world_pos(self, vm), vm.space_3d)
         };
         for s in spawns {
             match s {
                 Spawn::Child { script, offset } if script >= 0 => {
-                    self.spawn_inner(lib, file, script as usize, Some(id), offset);
+                    let o = [offset[0], offset[1], 0.0];
+                    self.spawn_inner(lib, file, script as usize, Some(id), o, is_3d);
                 }
                 Spawn::Root { script, offset } if script >= 0 => {
-                    let o = [base[0] + offset[0], base[1] + offset[1]];
-                    self.spawn_inner(lib, file, script as usize, None, o);
+                    let o = [base[0] + offset[0], base[1] + offset[1], base[2]];
+                    self.spawn_inner(lib, file, script as usize, None, o, is_3d);
                 }
                 _ => {}
             }
@@ -419,8 +443,14 @@ impl World {
     }
 
     /// Build triangles for every visible VM, sorted by layer then creation order.
-    pub fn draw_list(&self, lib: &AnmLibrary) -> DrawList {
-        let mut vms: Vec<&Vm> = self.slots.iter().filter_map(|s| s.vm.as_ref()).collect();
+    /// With a camera, only 3D (stage) VMs are drawn; without one, only 2D VMs.
+    pub fn draw_list(&self, lib: &AnmLibrary, camera: Option<&Camera>) -> DrawList {
+        let mut vms: Vec<&Vm> = self
+            .slots
+            .iter()
+            .filter_map(|s| s.vm.as_ref())
+            .filter(|v| v.space_3d == camera.is_some())
+            .collect();
         vms.sort_by_key(|v| (v.layer, v.order));
 
         let mut out: DrawList = Vec::new();
@@ -430,7 +460,7 @@ impl World {
                 continue;
             }
             verts.clear();
-            let texture = emit(self, lib, vm, &mut verts);
+            let texture = emit(self, lib, vm, camera, &mut verts);
             if verts.is_empty() {
                 continue;
             }
@@ -459,14 +489,15 @@ fn randf01(rng: &mut u32) -> f32 {
     (next_rand(rng) >> 8) as f32 / (1u32 << 24) as f32
 }
 
-fn world_pos(world: &World, vm: &Vm) -> [f32; 2] {
-    let mut p = [vm.pos[0] + vm.origin[0], vm.pos[1] + vm.origin[1]];
+fn world_pos(world: &World, vm: &Vm) -> [f32; 3] {
+    let mut p = [vm.pos[0] + vm.origin[0], vm.pos[1] + vm.origin[1], vm.pos[2] + vm.origin[2]];
     let mut parent = vm.parent;
     let mut depth = 0;
     while let (Some(pid), true) = (parent, depth < 32) {
         let Some(pv) = world.get(pid) else { break };
-        p[0] += pv.pos[0] + pv.origin[0];
-        p[1] += pv.pos[1] + pv.origin[1];
+        for i in 0..3 {
+            p[i] += pv.pos[i] + pv.origin[i];
+        }
         parent = pv.parent;
         depth += 1;
     }
@@ -916,68 +947,124 @@ fn rgba(c: [f32; 3], a: f32) -> [f32; 4] {
     [c[0] / 255.0, c[1] / 255.0, c[2] / 255.0, (a / 255.0).clamp(0.0, 1.0)]
 }
 
+/// Maps a VM-local point (relative to its anchor, in pixels) to a screen vertex.
+struct Placer<'a> {
+    origin: [f32; 3],
+    /// 2D: rotation about the screen normal. 3D: Euler rotation applied X, then Y, then Z.
+    rot: [f32; 3],
+    camera: Option<&'a Camera>,
+    additive: bool,
+}
+
+impl Placer<'_> {
+    fn place(&self, x: f32, y: f32, uv: [f32; 2], color: [f32; 4]) -> Option<Vertex> {
+        let [rx, ry, rz] = self.rot;
+        let Some(cam) = self.camera else {
+            let (s, c) = rz.sin_cos();
+            let pos = [self.origin[0] + x * c - y * s, self.origin[1] + x * s + y * c];
+            return Some(Vertex { pos, uv, color, w: 1.0, fog: 0.0 });
+        };
+        // APPROX: rotation order for 3D sprites is not yet confirmed against th19.exe.
+        let (sx, cx) = rx.sin_cos();
+        let (sy, cy) = ry.sin_cos();
+        let (sz, cz) = rz.sin_cos();
+        let (x1, y1, z1) = (x, y * cx, y * sx);
+        let (x2, y2, z2) = (x1 * cy + z1 * sy, y1, -x1 * sy + z1 * cy);
+        let (x3, y3, z3) = (x2 * cz - y2 * sz, x2 * sz + y2 * cz, z2);
+        let world = [self.origin[0] + x3, self.origin[1] + y3, self.origin[2] + z3];
+        let (pos, w, fog) = cam.project(world)?;
+        // Fogging an additive sprite towards a colour would brighten it; fade it out instead.
+        let (color, fog) = if self.additive {
+            let k = 1.0 - fog;
+            ([color[0] * k, color[1] * k, color[2] * k, color[3]], 0.0)
+        } else {
+            (color, fog)
+        };
+        Some(Vertex { pos, uv, color, w, fog })
+    }
+
+    /// Push a triangle, dropping it entirely if any corner is behind the camera.
+    fn tri(&self, out: &mut Vec<Vertex>, v: [(f32, f32, [f32; 2], [f32; 4]); 3]) {
+        let a = self.place(v[0].0, v[0].1, v[0].2, v[0].3);
+        let b = self.place(v[1].0, v[1].1, v[1].2, v[1].3);
+        let c = self.place(v[2].0, v[2].1, v[2].2, v[2].3);
+        if let (Some(a), Some(b), Some(c)) = (a, b, c) {
+            out.extend_from_slice(&[a, b, c]);
+        }
+    }
+
+    fn quad(&self, out: &mut Vec<Vertex>, p: [(f32, f32); 4], uv: [[f32; 2]; 4], col: [[f32; 4]; 4]) {
+        // Corners in order: top-left, top-right, bottom-right, bottom-left.
+        self.tri(out, [(p[0].0, p[0].1, uv[0], col[0]), (p[1].0, p[1].1, uv[1], col[1]), (p[2].0, p[2].1, uv[2], col[2])]);
+        self.tri(out, [(p[0].0, p[0].1, uv[0], col[0]), (p[2].0, p[2].1, uv[2], col[2]), (p[3].0, p[3].1, uv[3], col[3])]);
+    }
+}
+
 /// Emit triangles for one VM; returns the texture it needs.
-fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, out: &mut Vec<Vertex>) -> Option<u32> {
-    let [cx, cy] = world_pos(world, vm);
+fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, camera: Option<&Camera>, out: &mut Vec<Vertex>) -> Option<u32> {
     let c1 = rgba(vm.color, vm.alpha);
     let c2 = rgba(vm.color2, vm.alpha2);
-    let rot_z = if matches!(vm.render_mode, 0 | 2) { 0.0 } else { vm.rot[2] };
-    let (s, c) = rot_z.sin_cos();
-    let xf = |x: f32, y: f32| [cx + x * c - y * s, cy + x * s + y * c];
-    let solid = |out: &mut Vec<Vertex>, p: [f32; 2], col: [f32; 4]| out.push(Vertex { pos: p, uv: [0.0; 2], color: col });
+    let rot = if camera.is_some() {
+        vm.rot
+    } else if matches!(vm.render_mode, 0 | 2) {
+        [0.0; 3]
+    } else {
+        [0.0, 0.0, vm.rot[2]]
+    };
+    let pl = Placer {
+        origin: world_pos(world, vm),
+        rot,
+        camera,
+        additive: matches!(vm.blend, BlendMode::Add | BlendMode::Max),
+    };
+    let z = [0.0f32; 2];
 
     if let Some(prim) = vm.primitive {
         let sx = vm.scale[0] * vm.scale2[0];
         let sy = vm.scale[1] * vm.scale2[1];
+        let rect = |out: &mut Vec<Vertex>, x0: f32, y0: f32, x1: f32, y1: f32, l: [f32; 4], r: [f32; 4]| {
+            pl.quad(out, [(x0, y0), (x1, y0), (x1, y1), (x0, y1)], [z; 4], [l, r, r, l]);
+        };
+        let ring_pt = |k: i32, n: i32, rr: f32| {
+            let t = k as f32 / n as f32 * std::f32::consts::TAU;
+            (t.cos() * rr, t.sin() * rr)
+        };
         match prim {
             Primitive::Rect { w, h, rotated, gradient } => {
                 let (hw, hh) = (w * sx * 0.5, h * sy * 0.5);
                 let (l, r) = if gradient { (c1, c2) } else { (c1, c1) };
-                let f = |x, y| if rotated { xf(x, y) } else { [cx + x, cy + y] };
-                for (p, col) in [((-hw, -hh), l), ((hw, -hh), r), ((hw, hh), r), ((-hw, -hh), l), ((hw, hh), r), ((-hw, hh), l)] {
-                    solid(out, f(p.0, p.1), col);
+                if rotated {
+                    rect(out, -hw, -hh, hw, hh, l, r);
+                } else {
+                    Placer { rot: [0.0; 3], ..pl }.quad(out, [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)], [z; 4], [l, r, r, l]);
                 }
             }
             Primitive::RectBorder { w, h } => {
                 let (hw, hh, t) = (w * sx * 0.5, h * sy * 0.5, 1.0);
                 for (x0, y0, x1, y1) in [(-hw, -hh, hw, -hh + t), (-hw, hh - t, hw, hh), (-hw, -hh, -hw + t, hh), (hw - t, -hh, hw, hh)] {
-                    for p in [(x0, y0), (x1, y0), (x1, y1), (x0, y0), (x1, y1), (x0, y1)] {
-                        solid(out, xf(p.0, p.1), c1);
-                    }
+                    rect(out, x0, y0, x1, y1, c1, c1);
                 }
             }
             Primitive::Poly { radius, segments, border } => {
                 let n = segments.clamp(3, 256);
                 let r = radius * sx;
-                let pt = |k: i32, rr: f32| {
-                    let t = k as f32 / n as f32 * std::f32::consts::TAU;
-                    xf(t.cos() * rr, t.sin() * rr)
-                };
                 for k in 0..n {
+                    let (b0, b1) = (ring_pt(k, n, r), ring_pt(k + 1, n, r));
                     if border {
-                        let (a0, a1, b0, b1) = (pt(k, r - 1.0), pt(k + 1, r - 1.0), pt(k, r), pt(k + 1, r));
-                        for p in [a0, b0, b1, a0, b1, a1] {
-                            solid(out, p, c1);
-                        }
+                        let (a0, a1) = (ring_pt(k, n, r - 1.0), ring_pt(k + 1, n, r - 1.0));
+                        pl.quad(out, [a0, b0, b1, a1], [z; 4], [c1; 4]);
                     } else {
-                        solid(out, [cx, cy], c1);
-                        solid(out, pt(k, r), c2);
-                        solid(out, pt(k + 1, r), c2);
+                        pl.tri(out, [(0.0, 0.0, z, c1), (b0.0, b0.1, z, c2), (b1.0, b1.1, z, c2)]);
                     }
                 }
             }
             Primitive::Ring { radius, thickness, segments } => {
                 let n = segments.clamp(3, 256);
                 let (ri, ro) = ((radius - thickness * 0.5) * sx, (radius + thickness * 0.5) * sx);
-                let pt = |k: i32, rr: f32| {
-                    let t = k as f32 / n as f32 * std::f32::consts::TAU;
-                    xf(t.cos() * rr, t.sin() * rr)
-                };
                 for k in 0..n {
-                    let (a0, a1, b0, b1) = (pt(k, ri), pt(k + 1, ri), pt(k, ro), pt(k + 1, ro));
-                    for p in [a0, b0, b1, a0, b1, a1] {
-                        solid(out, p, c1);
-                    }
+                    let (a0, a1) = (ring_pt(k, n, ri), ring_pt(k + 1, n, ri));
+                    let (b0, b1) = (ring_pt(k, n, ro), ring_pt(k + 1, n, ro));
+                    pl.quad(out, [a0, b0, b1, a1], [z; 4], [c1; 4]);
                 }
             }
         }
@@ -1016,32 +1103,11 @@ fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, out: &mut Vec<Vertex>) -> Opti
         3 => (c1, c1, c2, c2),
         _ => (c1, c1, c1, c1),
     };
-
-    // 3D render modes: apply X/Y rotation and project orthographically. APPROX
-    let corner = |x: f32, y: f32| -> [f32; 2] {
-        if vm.render_mode >= 8 && (vm.rot[0] != 0.0 || vm.rot[1] != 0.0) {
-            let (sx, cxr) = vm.rot[0].sin_cos();
-            let (sy, cyr) = vm.rot[1].sin_cos();
-            let y1 = y * cxr;
-            let z1 = y * sx;
-            let x2 = x * cyr + z1 * sy;
-            xf(x2, y1)
-        } else {
-            xf(x, y)
-        }
-    };
-    let p_tl = corner(ax, ay);
-    let p_tr = corner(ax + w, ay);
-    let p_bl = corner(ax, ay + h);
-    let p_br = corner(ax + w, ay + h);
-    let v = |p, uv, color| Vertex { pos: p, uv, color };
-    out.extend_from_slice(&[
-        v(p_tl, [u0, v0], tl),
-        v(p_tr, [u1, v0], tr),
-        v(p_br, [u1, v1], br),
-        v(p_tl, [u0, v0], tl),
-        v(p_br, [u1, v1], br),
-        v(p_bl, [u0, v1], bl),
-    ]);
+    pl.quad(
+        out,
+        [(ax, ay), (ax + w, ay), (ax + w, ay + h), (ax, ay + h)],
+        [[u0, v0], [u1, v0], [u1, v1], [u0, v1]],
+        [tl, tr, br, bl],
+    );
     Some(sprite.texture)
 }

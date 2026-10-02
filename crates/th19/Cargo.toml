@@ -8,6 +8,7 @@ default-run = "th19"
 [dependencies]
 th-formats = { path = "../th-formats" }
 th-anm = { path = "../th-anm" }
+th-stage = { path = "../th-stage" }
 wgpu = "30"
 winit = "0.30"
 pollster = "0.4"

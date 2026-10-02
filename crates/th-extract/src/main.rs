@@ -167,6 +167,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
         }
+        "std-dump" => {
+            let name = args.get(2).ok_or("std-dump <file.std>")?;
+            let s = th_formats::stage::StdFile::parse(&archive.read(name)?)?;
+            println!("anm: {}", s.anm_name);
+            for o in &s.objects {
+                println!("object {} flags={} pos={:?} size={:?}", o.id, o.flags, o.pos, o.size);
+                for q in &o.quads {
+                    println!("   quad kind={} script={} pos={:?} size={:?}", q.kind, q.script, q.pos, q.size);
+                }
+            }
+            for i in s.instances.iter().take(12) {
+                println!("instance obj={} pos={:?}", i.object, i.pos);
+            }
+            for i in &s.script {
+                let ints: Vec<i32> = (0..i.args.len() / 4).map(|n| i.arg_i32(n)).collect();
+                let floats: Vec<f32> = (0..i.args.len() / 4).map(|n| i.arg_f32(n)).collect();
+                println!("t={:<5} op={:<3} ints={ints:?} floats={floats:?}", i.time, i.opcode);
+            }
+        }
         other => return Err(format!("unknown command {other}").into()),
     }
     Ok(())

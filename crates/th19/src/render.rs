@@ -13,7 +13,7 @@ pub const CANVAS_W: f32 = 640.0;
 pub const CANVAS_H: f32 = 480.0;
 
 const SHADER: &str = r#"
-struct Globals { canvas: vec2<f32>, _pad: vec2<f32> };
+struct Globals { canvas: vec2<f32>, _pad: vec2<f32>, fog: vec4<f32> };
 @group(0) @binding(0) var<uniform> g: Globals;
 @group(1) @binding(0) var tex: texture_2d<f32>;
 @group(1) @binding(1) var samp: sampler;
@@ -22,20 +22,32 @@ struct VOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
+    @location(2) fog: f32,
 };
 
 @vertex
-fn vs(@location(0) pos: vec2<f32>, @location(1) uv: vec2<f32>, @location(2) color: vec4<f32>) -> VOut {
+fn vs(
+    @location(0) pos: vec2<f32>,
+    @location(1) uv: vec2<f32>,
+    @location(2) color: vec4<f32>,
+    @location(3) w: f32,
+    @location(4) fog: f32,
+) -> VOut {
     var o: VOut;
-    o.pos = vec4<f32>(pos.x / g.canvas.x * 2.0 - 1.0, 1.0 - pos.y / g.canvas.y * 2.0, 0.0, 1.0);
+    // `pos` is already perspective-divided; multiply back by w so the GPU
+    // interpolates UVs perspective-correctly for 3D stage quads.
+    let ndc = vec2<f32>(pos.x / g.canvas.x * 2.0 - 1.0, 1.0 - pos.y / g.canvas.y * 2.0);
+    o.pos = vec4<f32>(ndc * w, 0.0, w);
     o.uv = uv;
     o.color = color;
+    o.fog = fog;
     return o;
 }
 
 @fragment
 fn fs(i: VOut) -> @location(0) vec4<f32> {
-    return textureSample(tex, samp, i.uv) * i.color;
+    let c = textureSample(tex, samp, i.uv) * i.color;
+    return vec4<f32>(mix(c.rgb, g.fog.rgb, i.fog), c.a);
 }
 "#;
 
@@ -47,6 +59,7 @@ pub struct Renderer {
     config: wgpu::SurfaceConfiguration,
     pipelines: HashMap<BlendMode, wgpu::RenderPipeline>,
     globals: wgpu::BindGroup,
+    globals_buf: wgpu::Buffer,
     tex_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     white: wgpu::BindGroup,
@@ -140,11 +153,11 @@ impl Renderer {
 
         let ubuf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("globals"),
-            size: 16,
+            size: 32,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        queue.write_buffer(&ubuf, 0, bytemuck::cast_slice(&[CANVAS_W, CANVAS_H, 0.0, 0.0]));
+        queue.write_buffer(&ubuf, 0, bytemuck::cast_slice(&[CANVAS_W, CANVAS_H, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]));
         let globals = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("globals"),
             layout: &globals_layout,
@@ -169,7 +182,7 @@ impl Renderer {
             bind_group_layouts: &[Some(&globals_layout), Some(&tex_layout)],
             immediate_size: 0,
         });
-        let attrs = wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4];
+        let attrs = wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4, 3 => Float32, 4 => Float32];
         let mut pipelines = HashMap::new();
         for mode in [
             BlendMode::Normal,
@@ -232,6 +245,7 @@ impl Renderer {
             config,
             pipelines,
             globals,
+            globals_buf: ubuf,
             white,
             tex_layout,
             sampler,
@@ -258,9 +272,22 @@ impl Renderer {
         self.textures.clear();
     }
 
-    pub fn render(&mut self, lib: &AnmLibrary, list: &DrawList) {
+    /// Draw one frame. `background` fills the canvas (0..1 RGB); `fog` is the stage fog colour.
+    pub fn render(&mut self, lib: &AnmLibrary, list: &DrawList, background: [f32; 3], fog: [f32; 3]) {
+        self.queue.write_buffer(
+            &self.globals_buf,
+            0,
+            bytemuck::cast_slice(&[CANVAS_W, CANVAS_H, 0.0, 0.0, fog[0], fog[1], fog[2], 1.0]),
+        );
+        let bg = th_anm::DrawBatch {
+            texture: None,
+            blend: BlendMode::Replace,
+            layer: i32::MIN,
+            vertices: canvas_quad([background[0], background[1], background[2], 1.0]),
+        };
+        let list: Vec<&th_anm::DrawBatch> = std::iter::once(&bg).chain(list.iter()).collect();
         // Upload any textures used for the first time.
-        for b in list {
+        for b in &list {
             if let Some(t) = b.texture {
                 if !self.textures.contains_key(&t) {
                     if let Some(img) = lib.textures.get(t as usize) {
@@ -284,7 +311,7 @@ impl Renderer {
         }
         let mut offset = 0u64;
         let mut ranges = Vec::with_capacity(list.len());
-        for b in list {
+        for b in &list {
             let data: &[u8] = bytemuck::cast_slice(&b.vertices);
             self.queue.write_buffer(&self.vbuf, offset, data);
             ranges.push((offset, b.vertices.len() as u32));
@@ -386,4 +413,9 @@ fn make_texture(
             wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(sampler) },
         ],
     })
+}
+
+fn canvas_quad(color: [f32; 4]) -> Vec<Vertex> {
+    let v = |x: f32, y: f32| Vertex { pos: [x, y], uv: [0.0; 2], color, w: 1.0, fog: 0.0 };
+    vec![v(0.0, 0.0), v(CANVAS_W, 0.0), v(CANVAS_W, CANVAS_H), v(0.0, 0.0), v(CANVAS_W, CANVAS_H), v(0.0, CANVAS_H)]
 }
