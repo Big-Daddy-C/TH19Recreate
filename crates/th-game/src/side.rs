@@ -304,7 +304,7 @@ impl Side {
         };
         let mut ctx =
             bullet::Ctx { world, lib, types: &types, anm, field: st.field, player: st.player_pos, rand: &mut rand };
-        let mut hit = false;
+        let mut hit: Option<[f32; 2]> = None;
         let player_r = self.player.as_ref().map_or(0.0, |p| p.hitbox_radius());
         let cancel = self.player.as_ref().and_then(|p| p.cancel_radius);
         for b in st.bullets.iter_mut() {
@@ -319,7 +319,7 @@ impl Side {
             }
             // FUN_00549e00: hit when d^2 < player_r^2 + bullet_r^2.
             if b.state == 1 && !b.delete && player_r > 0.0 && d2 < player_r * player_r + b.hitbox * b.hitbox {
-                hit = true;
+                hit = Some(b.pos);
             }
         }
         st.bullets.retain(|b| {
@@ -330,9 +330,9 @@ impl Side {
             }
             !b.delete
         });
-        if hit {
+        if let Some(from) = hit {
             if let Some(p) = &mut self.player {
-                p.hit(ctx.world, lib, st.field);
+                p.hit(from, ctx.world, lib, st.field);
             }
         }
     }

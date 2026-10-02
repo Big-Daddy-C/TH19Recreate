@@ -199,7 +199,9 @@ impl Viewer {
             s.st.ghost_anm = ghost;
             s.start(&prog);
             if let (Some(sht), Some(anm)) = (&sht, pl_anm) {
-                s.player = Some(th_game::player::Player::new(sht.clone(), anm));
+                let mut p = th_game::player::Player::new(sht.clone(), anm);
+                p.effect_anm = s.st.anm_files[1];
+                s.player = Some(p);
             }
         }
         Some(Game { prog, sides })

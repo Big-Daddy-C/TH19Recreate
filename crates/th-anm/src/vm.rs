@@ -238,7 +238,7 @@ enum RunState {
 }
 
 #[derive(Clone, Copy, Debug)]
-enum Primitive {
+pub enum Primitive {
     Rect { w: f32, h: f32, rotated: bool, gradient: bool },
     RectBorder { w: f32, h: f32 },
     Poly { radius: f32, segments: i32, border: bool },
@@ -289,7 +289,7 @@ pub struct Vm {
     uv_scroll: [f32; 2],
     uv_vel: [f32; 2],
     uv_scale: [f32; 2],
-    primitive: Option<Primitive>,
+    pub primitive: Option<Primitive>,
 
     i_pos: Interp<3>,
     i_rot: Interp<3>,
@@ -778,7 +778,7 @@ impl World {
         let mut out: DrawList = Vec::new();
         let mut verts = Vec::new();
         for vm in vms {
-            if !vm.visible || vm.alpha <= 0.0 && vm.color_mode == 0 {
+            if !vm.visible || vm.alpha <= 0.0 && vm.color_mode == 0 && (vm.primitive.is_none() || vm.alpha2 <= 0.0) {
                 continue;
             }
             verts.clear();
@@ -827,7 +827,7 @@ impl World {
         let mut out: DrawList = Vec::new();
         let mut verts = Vec::new();
         for vm in vms {
-            if !vm.visible || vm.alpha <= 0.0 && vm.color_mode == 0 {
+            if !vm.visible || vm.alpha <= 0.0 && vm.color_mode == 0 && (vm.primitive.is_none() || vm.alpha2 <= 0.0) {
                 continue;
             }
             verts.clear();
@@ -1330,7 +1330,8 @@ fn exec(
         608 => vm.primitive = Some(Primitive::Rect { w: f!(0), h: f!(1), rotated: true, gradient: true }),
         604 => vm.primitive = Some(Primitive::Poly { radius: f!(0), segments: i!(1), border: false }),
         605 => vm.primitive = Some(Primitive::Poly { radius: f!(0), segments: i!(1), border: true }),
-        611 => vm.primitive = Some(Primitive::Ring { radius: f!(0), thickness: f!(1), segments: i!(2) }),
+        // 611, 615 and 616 all draw rings (draw types 0x13 / 0x1d / 0x1e -> FUN_004c3b60).
+        611 | 615 | 616 => vm.primitive = Some(Primitive::Ring { radius: f!(0), thickness: f!(1), segments: i!(2) }),
         612 => vm.primitive = Some(Primitive::RectBorder { w: f!(0), h: f!(1) }),
 
         op => *unknown.entry(op).or_default() += 1,
@@ -1515,7 +1516,9 @@ fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, camera: Option<&Camera>, out: 
     } else if matches!(vm.render_mode, 0 | 2) {
         [0.0; 3]
     } else {
-        [0.0, 0.0, vm.rot[2]]
+        // Drawn at the world rotation: own plus the ancestors' (th19.exe sprite vertex
+        // setup, FUN_00404ae0), so child sprites turn with their parent.
+        [0.0, 0.0, vm.rot[2] + vm.inherited_rot]
     };
     let pl = Placer {
         origin: world_pos(world, vm),
@@ -1574,7 +1577,8 @@ fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, camera: Option<&Camera>, out: 
                 for k in 0..n {
                     let (a0, a1) = (ring_pt(k, n, ri), ring_pt(k + 1, n, ri));
                     let (b0, b1) = (ring_pt(k, n, ro), ring_pt(k + 1, n, ro));
-                    pl.quad(out, [a0, b0, b1, a1], [z; 4], [c1; 4]);
+                    // Inner edge in colour 1, outer edge in colour 2 (FUN_004c3b60).
+                    pl.quad(out, [a0, b0, b1, a1], [z; 4], [c1, c2, c2, c1]);
                 }
             }
         }

@@ -68,6 +68,8 @@ pub enum State {
     Normal,
     /// Just hit: a short window (8 frames) before the death is processed (state 4).
     Hit,
+    /// The barrier absorbed a hit: pushed away from the bullet for 40 frames (state 5).
+    Knockback,
     /// Dead, waiting 30 frames to respawn (state 2).
     Dead,
     /// Out of hearts.
@@ -118,11 +120,25 @@ pub struct Player {
     pub cancel_radius: Option<f32>,
     /// The death effect (script 21): a glow that bursts on interrupt 1.
     death_vm: Option<VmId>,
+    /// `effect.anm`, which holds the barrier sprite (script 1).
+    pub effect_anm: Option<usize>,
+    pub barrier: Barrier,
+    barrier_vm: Option<VmId>,
+    /// Direction of the knockback push.
+    knock_angle: f32,
 }
 
-/// Starting hearts. APPROX: the real value comes from the match settings (not yet decoded);
-/// the HUD supports up to 7.
-pub const DEFAULT_LIVES: i32 = 5;
+/// The barrier (th19.exe `FUN_00544be0` / `FUN_00544c90` / `FUN_00544dd0`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Barrier {
+    /// Up: absorbs the next hit.
+    Up,
+    /// Broken.
+    Broken,
+}
+
+/// Starting hearts: TH19's default match setting (configurable in the game's options).
+pub const DEFAULT_LIVES: i32 = 2;
 
 impl Player {
     pub fn new(sht: ShtFile, anm_file: usize) -> Self {
@@ -150,6 +166,10 @@ impl Player {
             max_lives: DEFAULT_LIVES,
             cancel_radius: None,
             death_vm: None,
+            effect_anm: None,
+            barrier: Barrier::Up,
+            barrier_vm: None,
+            knock_angle: 0.0,
         }
     }
 
@@ -159,10 +179,24 @@ impl Player {
         if self.state == State::Normal && self.invuln < 1 { 3.0 } else { 0.0 }
     }
 
-    /// Hit by a bullet (`FUN_00545e10`): hit effect, then an 8-frame window before death.
-    pub fn hit(&mut self, world: &mut World, lib: &AnmLibrary, field: [f32; 4]) -> bool {
+    /// Hit by a bullet at `from`. With the barrier up it breaks instead (`FUN_00544c90`):
+    /// 100 frames of invulnerability and a knockback away from the bullet. Otherwise
+    /// (`FUN_00545e10`): hit effect, then an 8-frame window before death.
+    pub fn hit(&mut self, from: [f32; 2], world: &mut World, lib: &AnmLibrary, field: [f32; 4]) -> bool {
         if self.state != State::Normal || self.invuln > 0 {
             return false;
+        }
+        if self.barrier == Barrier::Up {
+            self.barrier = Barrier::Broken;
+            if let Some(id) = self.barrier_vm.take() {
+                world.interrupt(id, 1);
+            }
+            self.invuln += 100;
+            let (dx, dy) = (self.pos[0] - from[0], self.pos[1] - from[1]);
+            self.knock_angle = dy.atan2(dx);
+            self.state = State::Knockback;
+            self.state_time = 0;
+            return true;
         }
         self.hits += 1;
         world.spawn_clipped(lib, self.anm_file, 22, field_to_canvas(field, self.pos), field);
@@ -185,6 +219,8 @@ impl Player {
                 world.interrupt(id, 1);
             }
         }
+        // Losing a heart restores the barrier (FUN_00549830 -> FUN_00544be0).
+        self.barrier = Barrier::Up;
         if let Some(id) = self.body.take() {
             world.delete(id);
         }
@@ -240,6 +276,18 @@ impl Player {
                 }
             }
             State::GameOver => {}
+            State::Knockback => {
+                // Case 5 of FUN_00546320: pushed along the angle at speed 2 -> 0 over 40 frames.
+                let speed = 2.0 - self.state_time as f32 * 2.0 / 40.0;
+                let (s, c) = self.knock_angle.sin_cos();
+                self.fixed[0] = (self.fixed[0] + (c * speed * 128.0) as i32).clamp(-0x4600, 0x4600);
+                self.fixed[1] = (self.fixed[1] + (s * speed * 128.0) as i32).clamp(0x1000, 0xd800);
+                self.state_time += 1;
+                if self.state_time >= 40 {
+                    self.state = State::Normal;
+                    self.state_time = 0;
+                }
+            }
             State::Entering => {
                 // Rise from y = 480 to y = 400 over 60 frames; from frame 30 bullets within
                 // 160 of the player are cancelled (case 0 of FUN_00546320).
@@ -288,8 +336,19 @@ impl Player {
             self.invuln -= 1;
         }
 
-        if matches!(self.state, State::Entering | State::Normal) {
+        if matches!(self.state, State::Entering | State::Normal | State::Knockback) {
             self.update_options(world, lib, field);
+        }
+        // Barrier sprite (effect.anm script 1) follows the player while the barrier is up.
+        let alive = matches!(self.state, State::Entering | State::Normal | State::Knockback);
+        if self.barrier == Barrier::Up && alive && self.barrier_vm.is_none() {
+            if let Some(file) = self.effect_anm {
+                self.barrier_vm = Some(world.spawn_clipped(lib, file, 1, field_to_canvas(field, self.pos), field));
+            }
+        }
+        if let Some(vm) = self.barrier_vm.and_then(|id| world.get_mut(id)) {
+            let at = field_to_canvas(field, self.pos);
+            vm.origin = [at[0], at[1], 0.0];
         }
         if self.state == State::Normal {
             self.update_shots(keys, world, lib, field, enemies);
@@ -299,8 +358,15 @@ impl Player {
         let at = field_to_canvas(field, self.pos);
         if let Some(vm) = self.body.and_then(|id| world.get_mut(id)) {
             vm.origin = [at[0], at[1], 0.0];
-            // Flash while invulnerable.
-            vm.visible = self.invuln == 0 || self.invuln % 4 < 2;
+            // While invulnerable the body is tinted 0xff0000ff every third frame
+            // (end of FUN_00546320).
+            if self.invuln > 0 && self.state_time % 3 == 0 {
+                vm.color2 = [0.0, 0.0, 255.0];
+                vm.alpha2 = 255.0;
+                vm.color_mode = 1;
+            } else {
+                vm.color_mode = 0;
+            }
         }
     }
 
