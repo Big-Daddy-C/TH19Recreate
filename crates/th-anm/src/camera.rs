@@ -72,13 +72,13 @@ impl Camera {
     pub fn new(eye: Vec3, facing: Vec3, up: Vec3, fovy: f32, viewport: [f32; 4], fog: (f32, f32)) -> Self {
         let at = [eye[0] + facing[0], eye[1] + facing[1], eye[2] + facing[2]];
         let view = look_at_lh(eye, at, up);
-        // APPROX: near/far planes chosen generously; the real values come from th19.exe.
-        let proj = perspective_fov_lh(fovy, viewport[2] / viewport[3], 1.0, 20000.0);
+        // Near/far planes as used by th19.exe's stage camera.
+        let proj = perspective_fov_lh(fovy, viewport[2] / viewport[3], Self::NEAR, 8000.0);
         Self { view_proj: mul(&view, &proj), viewport, fog_near: fog.0, fog_far: fog.1 }
     }
 
     /// Minimum view depth; geometry closer than this is clipped away.
-    pub const NEAR: f32 = 1.0;
+    pub const NEAR: f32 = 30.0;
 
     /// World point to homogeneous clip coordinates.
     pub fn clip(&self, p: Vec3) -> [f32; 4] {

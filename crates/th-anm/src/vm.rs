@@ -1091,6 +1091,8 @@ struct Placer<'a> {
     rot: [f32; 3],
     camera: Option<&'a Camera>,
     additive: bool,
+    /// Stage fog applies to this sprite (only render modes 8 and 24 are fogged in th19).
+    fogged: bool,
 }
 
 impl Placer<'_> {
@@ -1115,6 +1117,7 @@ impl Placer<'_> {
 
     fn finish_3d(&self, cam: &Camera, v: &Clipped) -> Vertex {
         let (pos, w, fog) = cam.to_screen(v.clip);
+        let fog = if self.fogged { fog } else { 0.0 };
         // Fogging an additive sprite towards a colour would brighten it; fade it out instead.
         let (color, fog) = if self.additive {
             let k = 1.0 - fog;
@@ -1166,6 +1169,8 @@ fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, camera: Option<&Camera>, out: 
         rot,
         camera,
         additive: matches!(vm.blend, BlendMode::Add | BlendMode::Max),
+        // th19.exe enables fog while drawing stage sprites only for render modes 8 and 24.
+        fogged: matches!(vm.render_mode, 8 | 24),
     };
     let z = [0.0f32; 2];
 
