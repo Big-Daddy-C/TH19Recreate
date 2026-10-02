@@ -1,6 +1,6 @@
 //! Charge gauge mechanics from AuraCtrlInf::update (FUN_004e79e0).
 //! Kept separate from character callbacks: no guessed thresholds or local attack effects.
-//! The viewer currently enables the first tier; higher tiers await their character callbacks.
+//! The viewer enables all four Reimu tiers with the meter economy bypassed for practice.
 #[derive(Clone, Copy, Debug)]
 pub struct Settings {
     /// Status +0x28, +0x2c, +0x30, +0x34.

@@ -19,7 +19,7 @@ Right now the `th19` binary is an **ANM + stage viewer** used to validate the pi
 | Key | Action |
 | --- | --- |
 | Tab | cycle ANM viewer → stage (STD) viewer → game (stage + waves) |
-| Game mode | arrows = move, Z = shot, X = hold/release first charge, B = debug EX on own field, Shift = focus, PgUp/PgDn = stage (`--game N` starts here) |
+| Game mode | arrows = move, Z = shot, X = hold/release charge (all four tiers), B = debug EX on own field, Shift = focus, PgUp/PgDn = stage (`--game N` starts here) |
 | ← / → | previous / next `.anm` file, or stage |
 | ↑ / ↓ | step through individual scripts |
 | A | toggle "all scripts at once" |
@@ -74,8 +74,8 @@ deterministic (needed for replays and netplay).
 | `thbgm.fmt` (24 tracks, intro/loop points) | ✅ verified against `thbgm.dat` size |
 | STD playback (camera/fog script, 3D quads, perspective + fog) | 🟡 all 17 stages run; camera shake, skybox sprites, distortion not yet |
 | ECL VM core (opcodes 0–97) | ✅ checked against the decompiled interpreter |
-| Enemies + TH19 wave system (movement, directional sprites, wave pool/sequence, level tables) | 🟡 waves, enemy bullets and death chains run on both fields; earned EX/boss dispatch remains |
-| Player: movement (fixed point, decoded clamps/speeds), options, shot timers + SHT records, shots vs enemies | 🟡 Reimu on both sides; hearts, barrier and first charge tier work; homing remains approximate; bombs/higher charge tiers pending |
+| Enemies + TH19 wave system (movement, directional sprites, wave pool/sequence, level tables) | 🟡 waves, enemy bullets and death chains run on both fields; Reimu EX/boss dispatch works; full boss opcode coverage remains |
+| Player: movement (fixed point, decoded clamps/speeds), options, shot timers + SHT records, shots vs enemies | 🟡 Reimu on both sides; hearts, barrier and all four charge tiers work in free-charge practice; homing and boss movement remain approximate |
 | Bullet manager, lasers, items, collision | ⬜ |
 | MSG dialogue, menus, story/VS flow, CPU opponent | ⬜ |
 | Audio: `thbgm.dat` looping BGM (via `thbgm.fmt`), SFX `.wav` | ⬜ |
@@ -120,11 +120,25 @@ of invulnerability; losing a heart restores it. Final defeat finishes the round 
 one point to the opponent. The title displays round points and the outcome. R resets the
 viewer, including the score; full multi-round match progression remains to be implemented.
 
-The first charge attack is playable: hold **X** until the bottom charge bar turns gold
-(50 normal-speed frames, about 0.83 seconds), then release. Reimu fires the four orbs from
-`pl00.sht` slot 10. It costs no meter. The blue bar is available meter; the lower bar is
-held charge. These bars are a provisional HUD. B retains the debug EX injection into the
-left field; it is not an earned attack sent to the opponent.
+All four Reimu charge tiers are playable. Hold **X** and release at the desired bottom-bar
+marker. The window title shows the ready tier and last released attack. Charging is free
+and all tiers are available; natural meter gain and spending are deferred for practice.
+
+| Tier | Hold time at 60 Hz | Release |
+| --- | --- | --- |
+| 1: Shot | 50 frames / 0.83 s | Existing four local charge orbs |
+| 2: Skill | 100 frames / 1.67 s | Three rotating skill effects, local damage and bullet cancellation |
+| 3: EX | 170 frames / 2.83 s | Restore shield and send Reimu's scripted EX attack to the opponent |
+| 4: Boss | 250 frames / 4.17 s | Restore shield and summon Reimu's scripted boss on the opponent's field |
+
+Every higher release also fires the basic local charge shot. A full release becomes EX
+if the opponent already has a boss. The blue bar shows the available practice capacity;
+the lower bar shows held charge. These bars and the boss HP bar are provisional. B still
+injects a debug EX on your own field. It is separate from X's opponent attack.
+
+For a reproducible local capture, use `--game 1 --preview-charge 2 --frames 183
+--screenshot data/reference/charge-skill.png` (join into one command). Preview tiers 1–4
+simulate holding X from frame 60; this option only applies with `--screenshot`.
 
 Starting meter and thresholds come from `FUN_005478f0` and the original SHT. Hold/release
 and cancellation use `FUN_004e79e0`; the local attack uses `FUN_0053b110` / `FUN_0053ac80`,
@@ -134,7 +148,13 @@ pierce enemies, slow to 0.2 then accelerate after 120 frames. Their callbacks at
 but absent as standalone functions from the current Ghidra export; they were checked
 using disassembly. Thus export/index parity does not establish complete function discovery.
 
-Higher charge tiers are deliberately gated: meter gains, Reimu's skill callback,
-earned EX/boss dispatch and EX-tier barrier recovery are still unimplemented. The first
-tier does not restore a broken barrier. Charge speed currently uses the unmodified
-100-percent setting; ability-card modifiers and aura gameplay interactions remain.
+The skill follows `FUN_0053b920` / `FUN_0053b3a0` and `pl00.anm` script 20. Opponent
+attacks run the original `ExtraAttack` / `BossAttack` ECL entries. Asset-backed tests cover
+skill lifetime/cancellation, shield recovery, dispatch in both directions, boss firing,
+defeat, timeout and the active-boss fallback.
+
+This is a playable increment, not verified full parity: exact replay RNG, boss random
+movement, ghost cancellation, some boss ECL globals/opcodes and presentation effects
+remain incomplete. Charge speed uses the unmodified 100-percent setting; ability-card
+modifiers and aura gameplay interactions remain. See `research/catalog.json` for the
+recorded gaps and comparison status.

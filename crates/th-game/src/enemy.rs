@@ -74,6 +74,13 @@ pub struct EnemyData {
     pub hurtbox: [f32; 2],
     pub hitbox: [f32; 2],
     pub hp: i32,
+    pub boss_slot: Option<i32>,
+    pub max_hp: i32,
+    pub script_rank: Option<u8>,
+    pub phase_time: i32,
+    pub phase_interrupt: Option<(i32,i32,String)>,
+    pub invuln_time: i32,
+    pub movement_limits: Option<[f32;4]>,
     pub score: i32,
     pub item: i32,
     pub ivars: [i32; 4],
@@ -127,6 +134,16 @@ impl Enemy {
 
     /// One frame: script, movement, sprites, off-field check.
     pub fn update(&mut self, prog: &Program, st: &mut SideState, world: &mut World, lib: &AnmLibrary) {
+        if self.data.phase_interrupt.as_ref().is_some_and(|(hp,time,_)|
+            self.data.hp<=*hp || (*time>=0 && self.data.phase_time>=*time)) {
+            let (_,_,name)=self.data.phase_interrupt.take().unwrap();
+            if let Some(sub)=prog.sub(&name) {
+                let mut ctx=Context::new(sub); ctx.rank_bit=1<<self.data.script_rank.unwrap_or(st.difficulty).min(7);
+                self.threads=Threads::new(ctx); self.data.killed=false;
+            }
+        }
+        self.data.phase_time+=1;
+        self.data.invuln_time=(self.data.invuln_time-1).max(0);
         let mut host = EnemyHost { e: &mut self.data, st, world, lib };
         if self.threads.run(prog, &mut host, 1.0) == Flow::End {
             self.data.delete = true;
@@ -138,6 +155,10 @@ impl Enemy {
         e.rel.step();
         e.prev = e.pos;
         e.pos = [e.abs.pv.pos[0] + e.rel.pv.pos[0], e.abs.pv.pos[1] + e.rel.pv.pos[1]];
+        if let Some([x,y,w,h])=e.movement_limits {
+            e.pos[0]=e.pos[0].clamp(x-w/2.0,x+w/2.0); e.pos[1]=e.pos[1].clamp(y-h/2.0,y+h/2.0);
+            e.abs.pv.pos=[e.pos[0]-e.rel.pv.pos[0],e.pos[1]-e.rel.pv.pos[1]];
+        }
         e.delta = [e.pos[0] - e.prev[0], e.pos[1] - e.prev[1]];
 
         // Directional sprite: switch scripts when the horizontal direction changes.
@@ -218,7 +239,7 @@ impl Enemy {
 impl EnemyData {
     /// Apply shot damage (the hit handling in th19.exe `FUN_00509980`).
     pub fn damage(&mut self, amount: i32, from: [f32; 2]) {
-        if self.flags & flag::INVINCIBLE != 0 {
+        if self.flags & flag::INVINCIBLE != 0 || self.invuln_time>0 {
             return;
         }
         self.hp -= amount;
@@ -352,6 +373,10 @@ impl EnemyHost<'_> {
             }
             -9935..=-9932 => e.fvars[4 + (id - F4) as usize],
             LAST_ENEMY_ID => self.st.last_enemy_id as f32,
+            -9986 => ((e.flags >> 8)&1) as f32,
+            -9949..=-9947 | -9923 | -9887 => *self.st.boss_globals.get(&id).unwrap_or(&0.0),
+            // APPROX: VS context flag; full story/match status is not yet modeled.
+            -9886 => 1.0,
             WAVE_REMAINING => self.st.wave_members_alive() as f32,
             LEVEL => self.st.level as f32,
             _ => {
@@ -377,6 +402,7 @@ impl EnemyHost<'_> {
             -9985..=-9982 => e.ivars[(id - I0) as usize] = v as i32,
             -9981..=-9978 => e.fvars[(id - F0) as usize] = v,
             -9935..=-9932 => e.fvars[4 + (id - F4) as usize] = v,
+            -9949..=-9947 | -9923 | -9887 => { self.st.boss_globals.insert(id,v); }
             ABS_X => e.abs.pv.pos[0] = v,
             ABS_Y => e.abs.pv.pos[1] = v,
             REL_X => e.rel.pv.pos[0] = v,
@@ -444,7 +470,7 @@ impl EnemyHost<'_> {
     }
 
     fn e_difficulty(&self) -> usize {
-        self.st.difficulty.min(7) as usize
+        self.e.script_rank.unwrap_or(self.st.difficulty).min(7) as usize
     }
 
     /// Bullet shooter instructions (handler cases 112..128 of `FUN_004fecc0`).
@@ -455,6 +481,13 @@ impl EnemyHost<'_> {
         let f = |s: &mut Self, ctx: &Context, n: usize| ctx.float_arg(ins, n, s);
         if op == 613 {
             self.st.cancel_bullets = true;
+            return;
+        }
+        if matches!(op,615|616) {
+            let r=f(self,ctx,0).max(0.0);
+            for b in &mut self.st.bullets {
+                if b.intersects_cancel(self.e.pos,r,self.world,self.lib) { b.delete=true; }
+            }
             return;
         }
         let et = i(self, ctx, 0);
@@ -586,6 +619,21 @@ impl EnemyHost<'_> {
                     self.e.main = Some(MainAnm { anm_slot, file, base_script: script as usize, slot, dir: 0 });
                 }
             }
+            // Detached ANM effect, using the selected file (307).
+            307 => {
+                let slot=i!(0).max(0) as usize; let script=i!(1);
+                if let Some(file)=self.st.anm_files.get(slot).copied().flatten() {
+                    if script>=0 { self.world.spawn_clipped(self.lib,file,script as usize,field_to_canvas(self.st.field,self.e.pos),self.st.field); }
+                }
+            }
+            316 => { let slot=i!(0).max(0) as usize; let label=i!(1); if let Some(id)=self.e.vms.get(slot).copied().flatten() { self.world.interrupt(id,label); } }
+            319 | 329 | 330 => {
+                let slot=i!(0).max(0) as usize;
+                let id=self.e.vms.get(slot).copied().flatten();
+                if op==319 { let angle=f!(1); if let Some(vm)=id.and_then(|id| self.world.get_mut(id)) {vm.rot[2]=angle;} }
+                else if op==329 { let scale=[f!(1),f!(2)]; if let Some(vm)=id.and_then(|id| self.world.get_mut(id)) {vm.scale=scale;} }
+                else { let (t,mode)=(i!(1),i!(2));let scale=[f!(3),f!(4)]; if let Some(vm)=id.and_then(|id|self.world.get_mut(id)){vm.interp_scale(scale,t,mode);} }
+            }
             // movePos(x, y)
             400 | 402 => {
                 let (x, y) = (f!(0), f!(1));
@@ -698,6 +746,34 @@ impl EnemyHost<'_> {
                 let (t, mode, speed) = (i!(0), i!(1), f!(2));
                 start_speed(self.motion(matches!(op, 444 | 445)), t, mode, speed);
             }
+            // Random movement within the boss region. APPROX: choose a bounded target;
+            // original 412 uses position-biased random direction before interpolation.
+            412 => {
+                let (time,mode,speed)=(i!(0),i!(1),f!(2));
+                let [x,y,w,h]=self.e.movement_limits.unwrap_or([0.0,128.0,280.0,96.0]);
+                let angle=self.st.randf()*std::f32::consts::TAU;
+                let goal=[(self.e.pos[0]+angle.cos()*speed*time as f32).clamp(x-w/2.0,x+w/2.0),
+                    (self.e.pos[1]+angle.sin()*speed*time as f32).clamp(y-h/2.0,y+h/2.0)];
+                self.e.abs.i_pos.start(self.e.abs.pv.pos,goal,time,mode);
+            }
+            504 => self.e.movement_limits=Some([f!(0),f!(1),f!(2),f!(3)]),
+            505 => self.e.movement_limits=None,
+            511 => { self.e.hp=i!(0); self.e.max_hp=self.e.hp; }
+            512 => {
+                let slot=i!(0); self.st.boss_ids.retain(|&id| id!=self.e.id);
+                self.e.boss_slot=(slot>=0).then_some(slot);
+                if slot>=0 { self.st.boss_ids.push(self.e.id); self.e.flags|=flag::NO_DEATH; }
+                else { self.e.flags&=!flag::NO_DEATH; }
+            }
+            513 => self.e.phase_time=0,
+            514 => {
+                let mut args=Args::new(ins); let _slot=args.int(ctx,self);
+                let hp=args.int(ctx,self); let time=args.int(ctx,self); let sub=args.string();
+                self.e.phase_interrupt=Some((hp,time,sub));
+            }
+            515 => self.e.invuln_time=i!(0),
+            // Audio, score/spell presentation and item-drop metadata. Gameplay mechanics
+            // are handled separately; these unsupported presentation ops stay counted.
             // setHurtbox(w, h) / setHitbox(w, h)
             500 => self.e.hurtbox = [f!(0), f!(1)],
             501 => self.e.hitbox = [f!(0), f!(1)],
@@ -746,6 +822,10 @@ impl EnemyHost<'_> {
                 ctx.set_float_var(ins, 0, v, self);
             }
             600..=620 => self.et_op(ctx, ins),
+            1007 | 1034 | 1035 => {
+                let rank=match op {1034=>self.st.incoming_extra_level,1035=>self.st.incoming_boss_level,_=>i!(0).clamp(0,7) as u8};
+                self.e.script_rank=Some(rank); ctx.rank_bit=1<<rank;
+            }
             1023 => self.st.wave_param = i!(0),
             1028 => self.e.rewards.a = f!(0),
             1029 => self.e.rewards.b = i!(0),

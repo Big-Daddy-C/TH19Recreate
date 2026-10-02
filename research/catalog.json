@@ -130,7 +130,7 @@
   "features": {
     "charge": {
       "implementation": "partial",
-      "summary": "X first-tier Reimu charge is playable at 92b07ae; earned higher tiers remain gated.",
+      "summary": "All four Reimu tiers playable with free practice charging; skill, opponent EX/boss and shield recovery implemented. Full parity and meter economy remain incomplete.",
       "symbols": [
         "charge_controller",
         "player_load",
@@ -155,11 +155,15 @@
       "code": [
         "crates/th-game/src/charge.rs",
         "crates/th-game/src/player.rs",
-        "crates/th19/src/main.rs"
+        "crates/th19/src/main.rs",
+        "crates/th-game/src/skill.rs",
+        "crates/th-game/src/side.rs",
+        "crates/th-game/src/enemy.rs"
       ],
       "tests": [
         "crates/th-game/tests/charge_data.rs",
-        "crates/th-game/tests/charge_gameplay.rs"
+        "crates/th-game/tests/charge_gameplay.rs",
+        "crates/th-game/tests/higher_charge.rs"
       ],
       "findings": [
         {
@@ -170,7 +174,7 @@
           "evidence": "code_checked"
         },
         {
-          "text": "Hold input bit 2; release selects tier. Invalid player state cancels. Charge increment is clamped speed-percent *10/100; cap is current meter; release recovery is 10 frames. Runtime temporarily caps at tier 1.",
+          "text": "Hold input bit 2; release selects tier. Invalid player state cancels. Charge increment is clamped speed-percent *10/100; cap is current meter; release recovery is 10 frames. Viewer practice mode now bypasses meter cap/cost and exposes all four tiers.",
           "sources": [
             "charge_controller"
           ],
@@ -196,7 +200,7 @@
           "evidence": "code_checked"
         },
         {
-          "text": "aura.anm script29 follows player while charging; interrupt8 at first threshold; removed on release/cancel. pl00.anm script10 owns orb spin and trail; do not overwrite its rotation every frame.",
+          "text": "aura.anm script29 follows player while charging; interrupts8/9/10/11 at the four thresholds; removed on release/cancel. pl00.anm script10 owns orb spin and trail; do not overwrite its rotation every frame.",
           "sources": [
             "charge_controller",
             "shot_update"
@@ -216,16 +220,16 @@
             "barrier_restore",
             "opponent_boss_active"
           ],
-          "evidence": "prior_session"
+          "evidence": "code_checked"
         },
         {
-          "text": "Reimu skill initializer uses three script20 VMs, fixed release center, 45-frame attack plus 60-frame tail; radius 0->64->0 over two 22-frame interpolations, phase advances 10 degrees/frame, grants 40 invulnerability frames. Verify ANM file and hidden collider arguments before implementing.",
+          "text": "Reimu skill initializer uses three script20 VMs, fixed release center, 45-frame attack plus 60-frame tail; radius 0->64->0 over two 22-frame interpolations, phase advances 10 degrees/frame, grants 40 invulnerability frames. The file is pl00.anm (player +44); hidden initial collider radius is 64 (XMM3 loaded from 005aa368). Before time45: three cancellation circles radius64, damage4/life1 every5 ticks. Tail: one growing cancellation circle 128+(t-45)*64/60 with integer division; damage1/life24/radius64/growth1 collider each frame.",
           "sources": [
             "reimu_skill_start",
             "reimu_skill_init",
             "reimu_skill_update"
           ],
-          "evidence": "prior_session"
+          "evidence": "code_checked"
         },
         {
           "text": "Character vtable at 005a8a18: +0xc basic, +0x10 skill, +0x14 EX, +0x18 boss, +0x24 opponent boss-active query. EX/Boss callbacks spawn ExtraAttack/BossAttack on opponent field, default HP 200.",
@@ -234,28 +238,65 @@
             "boss_dispatch",
             "opponent_boss_active"
           ],
-          "evidence": "prior_session"
+          "evidence": "code_checked"
+        },
+        {
+          "text": "FUN004ee770 cancels live/appearing non-invulnerable bullets using radius plus half sprite width. FUN005200f0 collider arguments were checked in disassembly, including hidden XMM3 radius. Ghost cancellation through FUN00530c60 remains unported.",
+          "sources": [
+            "reimu_skill_update"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "ECL 512 registers/unregisters boss slots; 513 resets phase time; 514 installs HP/time interrupt; 515 sets damage invulnerability. 1034/1035 select incoming EX/boss rank. Original pl00.ecl/default.ecl control entry, firing and defeat. Host byte dispatch table is 0x505560+(opcode-300), target table 0x50524c.",
+          "sources": [
+            "ecl_host"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Practice rank starts at zero, advances after dispatch and caps at seven. Skill phase uses a local xorshift RNG; boss move opcode412 uses an approximate bounded random target. Global -9886 uses provisional VS value1. Global -9888 remains unknown/default0; its original getter reads an opponent status value divided by200. Do not claim exact attack trajectories until resolved.",
+          "sources": [
+            "ecl_int_globals",
+            "ecl_float_globals"
+          ],
+          "evidence": "assumption"
+        },
+        {
+          "text": "Current boss run still counts unsupported opcodes 516,520,521,524,525,527,534,621,1036, plus global -9888. These include audio, cleanup, presentation and match context; their absence is not proven cosmetic. ANM transforms319/329/330 are now implemented from FUN004fe350.",
+          "sources": [
+            "ecl_host"
+          ],
+          "evidence": "code_checked"
         }
       ],
       "checks": {
-        "automated": "Asset-backed charge and viewer-input tests passed at 92b07ae; see test files. Not rerun merely to write this catalog.",
-        "visual": "Provisional HUD screenshot inspected at data/reference/charge-hud.png; charge-vs-original footage comparison not run.",
-        "original_game_parity": "not_run"
+        "automated": "2026-10-02 higher-charge working tree based on efc4d14: cargo test --release -p th-game -p th19 : 17 passed with original assets present. Includes skill damage/invulnerability, simultaneous bosses and timeout. Original-game parity not assessed.",
+        "visual": "Inspected data/reference/charge-skill.png (tier2, frame183) and charge-boss.png (tier4, frame550), generated by hidden screenshot preview. Skill sprites and opponent boss/bullets render. No side-by-side original-game comparison performed. Also inspected charge-extra.png (tier3, frame270): yin-yang projectiles render on the opponent field.",
+        "original_game_parity": "not_run",
+        "history": [
+          {
+            "revision": "92b07ae",
+            "automated": "Asset-backed charge and viewer-input tests passed at 92b07ae; see test files. Not rerun merely to write this catalog.",
+            "visual": "Provisional HUD screenshot inspected at data/reference/charge-hud.png; charge-vs-original footage comparison not run."
+          }
+        ]
       },
       "next": [
-        "Trace natural meter gains separately from ghost/EX counters; do not assume every kill reward is charge meter.",
-        "Verify skill sprite file and hidden collider arguments; implement local skill with tests.",
-        "Route EX/boss events after both fields update; verify ECL globals/opcodes and boss registration.",
-        "Add release-tier costs and shield recovery, then unlock higher-tier charging."
+        "Compare fixed-frame skill, EX and boss captures to original gameplay.",
+        "Resolve global -9888 and provisional -9886; audit remaining boss opcodes and exact movement412.",
+        "Implement ghost cancellation and ability/aura interactions.",
+        "Natural meter gain/spending deferred at user request; keep free charging available."
       ],
       "user_observations": [
         "Two hearts by default; start with barrier; broken barrier grants invulnerability; unshielded hit loses heart and restores barrier.",
-        "User describes charge -> skill -> EX -> boss tiers, EX restoring shield and attacking opponent. Consult these existing notes before asking them to repeat."
+        "User describes charge -> skill -> EX -> boss tiers, EX restoring shield and attacking opponent. Consult these existing notes before asking them to repeat.",
+        "2026-10-02: user requests higher charge attacks with unrestricted charging; defer meter gain."
       ]
     },
     "barrier": {
       "implementation": "partial",
-      "summary": "Two hearts, starting barrier, hit states and round point supported; earned EX recovery and match continuation pending.",
+      "summary": "Two hearts, starting barrier, hit states, round point and EX/boss shield recovery supported; match continuation pending.",
       "symbols": [
         "player_death",
         "barrier_restore"
@@ -281,7 +322,7 @@
         "original_game_parity": "not_run"
       },
       "next": [
-        "Connect EX/boss barrier recovery when higher charge tiers ship."
+        "Full multi-round match progression and original-game comparison."
       ]
     },
     "combat": {
@@ -344,7 +385,7 @@
         "original_game_parity": "not_run"
       },
       "next": [
-        "Validate BossAttack dependencies and Ecl_EtBreakLv2/3/4 before earned dispatch."
+        "Audit remaining Reimu boss opcodes 516,520,521,524,525,527,534,621,1036 and global -9888; implement exact move412."
       ]
     },
     "stage": {

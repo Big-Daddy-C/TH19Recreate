@@ -15,3 +15,5 @@ pub use side::{Side, SideState};
 /// x 16..312 / 328..624, y 16..464). Field coordinates have their origin at the top centre,
 /// x in [-148, 148], y in [0, 448].
 pub const FIELDS: [[f32; 4]; 2] = [[16.0, 16.0, 296.0, 448.0], [328.0, 16.0, 296.0, 448.0]];
+
+pub mod skill;

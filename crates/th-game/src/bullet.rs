@@ -486,6 +486,15 @@ impl Bullet {
         }
     }
 
+    /// FUN_004ee770: cancelable live/appearing bullets intersect a circle using half sprite width.
+    pub(crate) fn intersects_cancel(&self, pos: [f32;2], radius: f32, world: &World, lib: &AnmLibrary) -> bool {
+        if self.invuln != 0 || !matches!(self.state, 1 | 2) { return false; }
+        let half_width = self.vm.and_then(|id| world.get(id)).and_then(|vm|
+            lib.files.get(vm.file).and_then(|f| f.sprites.get(vm.sprite.max(0) as usize))
+                .map(|s| s.size[0] * vm.scale[0].abs() * 0.5)).unwrap_or(0.0);
+        (self.pos[0]-pos[0]).powi(2)+(self.pos[1]-pos[1]).powi(2) <= (radius+half_width).powi(2)
+    }
+
     fn sprite_size(&self, ctx: &Ctx) -> [f32; 2] {
         let Some(vm) = self.vm.and_then(|id| ctx.world.get(id)) else { return [0.0; 2] };
         ctx.lib

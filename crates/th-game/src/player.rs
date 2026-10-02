@@ -111,6 +111,15 @@ pub struct Player {
     pub charge: crate::charge::Gauge,
     /// Status +0x24. Starts at the first SHT threshold (FUN_005478f0).
     pub meter: i32,
+    /// Practice override requested by the user: all tiers, no meter earnings/costs.
+    pub free_charge: bool,
+    pub opponent_boss_active: bool,
+    pub charge_event: Option<crate::charge::Level>,
+    pub last_charge: Option<crate::charge::Level>,
+    pub skills: Vec<crate::skill::Skill>,
+    pub cancel_circles: Vec<([f32;2], f32)>,
+    damage_circles: Vec<crate::skill::DamageCircle>,
+    skill_rng: u32,
     charge_timer: Option<i32>,
     pub aura_anm: Option<usize>,
     charge_vm: Option<VmId>,
@@ -170,6 +179,8 @@ impl Player {
             charge_settings,
             charge: crate::charge::Gauge::default(),
             meter: charge_settings.attack,
+            free_charge: false, opponent_boss_active: false, charge_event: None, last_charge: None,
+            skills: Vec::new(), cancel_circles: Vec::new(), damage_circles: Vec::new(), skill_rng: 0x1cafe777,
             charge_timer: None,
             aura_anm: None,
             charge_vm: None,
@@ -266,6 +277,7 @@ impl Player {
 
     pub fn update(&mut self, keys: u32, enemies: &mut [Enemy], world: &mut World, lib: &AnmLibrary, field: [f32; 4]) {
         self.cancel_radius = None;
+        self.charge_event = None;
         if self.body.is_none() && matches!(self.state, State::Entering | State::Normal) {
             self.set_body_script(world, lib, field, 0);
         }
@@ -373,6 +385,21 @@ impl Player {
             self.update_shots(keys, world, lib, field, enemies);
         }
         self.update_charge(keys, world, lib, field);
+        self.cancel_circles.clear();
+        self.skills.retain_mut(|s| s.tick(world, field, &mut self.cancel_circles, &mut self.damage_circles));
+        for circle in &mut self.damage_circles {
+            for enemy in enemies.iter_mut() {
+                let d = &mut enemy.data;
+                if d.delete || d.flags & flag::NO_HURTBOX != 0 || d.hurtbox[0] <= 0.0 || circle.last_enemy == Some(d.id) { continue; }
+                let x = circle.pos[0].clamp(d.pos[0]-d.hurtbox[0]/2.0,d.pos[0]+d.hurtbox[0]/2.0);
+                let y = circle.pos[1].clamp(d.pos[1]-d.hurtbox[1]/2.0,d.pos[1]+d.hurtbox[1]/2.0);
+                if dist2(circle.pos,[x,y]) <= circle.radius.powi(2) {
+                    d.damage(circle.damage,circle.pos); circle.last_enemy=Some(d.id);
+                }
+            }
+            circle.radius += circle.growth; circle.remaining -= 1;
+        }
+        self.damage_circles.retain(|c| c.remaining > 0);
         self.update_bullets(enemies, world, field);
 
         let at = field_to_canvas(field, self.pos);
@@ -390,19 +417,21 @@ impl Player {
         }
     }
 
-    /// Playable first charge tier. Higher tiers remain gated until their meter gain and
-    /// character callbacks are implemented; do not spend meter for a nonexistent attack.
+    /// AuraCtrl release dispatch. Free-charge practice bypasses only the resource economy.
     fn update_charge(&mut self, keys: u32, world: &mut World, lib: &AnmLibrary, field: [f32; 4]) {
         let previous = self.charge.value;
         let released = self.charge.tick(keys & input::CHARGE != 0, self.state == State::Normal,
-            self.meter.min(self.charge_settings.attack), self.charge_settings, false, false);
+            if self.free_charge { 2500 } else { self.meter }, self.charge_settings, self.opponent_boss_active, false);
         if self.charge.value > 0 {
             if self.charge_vm.is_none() {
                 self.charge_vm = self.aura_anm.map(|file| world.spawn_clipped(lib, file, 29,
                     field_to_canvas(field, self.pos), field));
             }
-            if previous < self.charge_settings.attack && self.charge.value >= self.charge_settings.attack {
-                if let Some(id) = self.charge_vm { world.interrupt(id, 8); }
+            for (threshold, interrupt) in [(self.charge_settings.attack,8),(self.charge_settings.skill,9),
+                (self.charge_settings.extra,10),(self.charge_settings.boss,11)] {
+                if previous < threshold && self.charge.value >= threshold {
+                    if let Some(id) = self.charge_vm { world.interrupt(id, interrupt); }
+                }
             }
         } else if let Some(id) = self.charge_vm.take() {
             world.delete(id);
@@ -411,9 +440,27 @@ impl Player {
             let at = field_to_canvas(field, self.pos);
             vm.origin = [at[0], at[1], 0.0];
         }
-        if released == Some(crate::charge::Level::Attack) {
-            // EXReimu::charge (0053b110); updater 0053ac80 calls slot 10 on ticks 0..20.
+        if let Some(level) = released {
+            use crate::charge::Level;
+            self.last_charge = Some(level);
+            self.charge_event = Some(level);
+            // The basic local shot accompanies every higher-tier release.
             self.charge_timer = Some(0);
+            let threshold = match level {
+                Level::Attack => self.charge_settings.attack,
+                Level::Skill => self.charge_settings.skill,
+                Level::Extra => self.charge_settings.extra,
+                Level::Boss => self.charge_settings.boss,
+            };
+            if !self.free_charge { self.meter = (self.meter-threshold+self.charge_settings.attack).clamp(0,2500); }
+            if level == Level::Skill {
+                // APPROX: deterministic local RNG instead of the game's replay RNG.
+                self.skill_rng ^= self.skill_rng << 13; self.skill_rng ^= self.skill_rng >> 17; self.skill_rng ^= self.skill_rng << 5;
+                let phase = (self.skill_rng as f64/u32::MAX as f64) as f32*std::f32::consts::TAU-std::f32::consts::PI;
+                self.skills.push(crate::skill::Skill::new(self.pos,phase,self.anm_file,world,lib,field));
+                self.invuln = self.invuln.max(40);
+            }
+            if matches!(level, Level::Extra | Level::Boss) { self.barrier = Barrier::Up; }
         }
         if let Some(t) = self.charge_timer {
             self.fire_slot(10, t, 0, world, lib, field);

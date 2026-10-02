@@ -70,8 +70,8 @@ No original content is added to Git by these tools.
 
 ## Next playable increment
 
-Complete Reimu's skill, natural meter gain, then opponent EX/boss dispatch and barrier
-recovery. Read `topic charge` and `topic combat` first. The current executable only
-exposes the free first charge tier. Exact costs already have source leads; meter gain
-and skill collider arguments are the main unresolved questions. Keep each accepted
-behavior tied to original assets/code and a targeted runtime check.
+All four Reimu charge tiers now run with free practice charging. The user explicitly
+asked to defer meter gain; do not make that a prerequisite for further gameplay work.
+Read `topic charge` and `topic ecl` for tests and remaining gaps. Next, compare the new
+skill/EX/boss behavior against original footage and resolve the remaining boss globals,
+movement and effect opcodes. Preserve the working free-charge path during parity work.

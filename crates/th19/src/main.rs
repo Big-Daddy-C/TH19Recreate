@@ -205,6 +205,7 @@ impl Viewer {
             s.start(&prog);
             if let (Some(sht), Some(anm)) = (&sht, pl_anm) {
                 let mut p = th_game::player::Player::new(sht.clone(), anm);
+                p.free_charge = true;
                 p.aura_anm = aura;
                 p.effect_anm = s.st.anm_files[1];
                 s.player = Some(p);
@@ -224,11 +225,13 @@ impl Viewer {
             }
             let keys = self.player_keys();
             if let Some(g) = &mut self.game {
+                th_game::side::prepare_charge_targets(&mut g.sides);
                 for (i, s) in g.sides.iter_mut().enumerate().filter(|_| g.round.outcome.is_none()) {
                     // Side 2 has no controller yet: it just holds the shot button.
                     let k = if i == 0 { keys } else { th_game::player::input::SHOT };
                     s.tick(&g.prog, k, &mut self.world, &self.lib);
                 }
+                th_game::side::dispatch_charges(&mut g.sides);
                 let defeated = std::array::from_fn(|i| g.sides[i].player.as_ref()
                     .is_some_and(|p| p.state == th_game::player::State::GameOver));
                 g.round.resolve(defeated);
@@ -301,13 +304,19 @@ impl Viewer {
                     // Provisional HUD, outside the playfield. Top row = available meter;
                     // bottom row = held charge. Original front.anm HUD remains to be ported.
                     let [x, _, w, _] = field;
+                    for e in side.enemies.iter().filter(|e|e.data.boss_slot.is_some() && e.data.max_hp>0) {
+                        let ratio=(e.data.hp as f32/e.data.max_hp as f32).clamp(0.0,1.0);
+                        list.push(th_anm::DrawBatch::solid_rect([x,field[1],w*ratio,3.0],[0.95,0.15,0.35,1.0]));
+                    }
                     list.push(th_anm::DrawBatch::solid_rect([x, 465.0, w, 14.0], [0.04, 0.04, 0.08, 1.0]));
-                    list.push(th_anm::DrawBatch::solid_rect([x, 466.0, w*p.meter as f32/2500.0, 4.0], [0.15, 0.45, 0.95, 1.0]));
+                    list.push(th_anm::DrawBatch::solid_rect([x, 466.0, w*(if p.free_charge {2500} else {p.meter}) as f32/2500.0, 4.0], [0.15, 0.45, 0.95, 1.0]));
                     let ready = p.charge.value >= p.charge_settings.attack;
                     let color = if ready { [1.0, 0.8, 0.2, 1.0] } else { [0.7, 0.7, 0.8, 1.0] };
                     list.push(th_anm::DrawBatch::solid_rect([x, 472.0, w*p.charge.value as f32/2500.0, 5.0], color));
-                    let marker = x + w*p.charge_settings.attack as f32/2500.0;
-                    list.push(th_anm::DrawBatch::solid_rect([marker, 466.0, 1.0, 12.0], [1.0, 1.0, 1.0, 1.0]));
+                    for threshold in [p.charge_settings.attack,p.charge_settings.skill,p.charge_settings.extra,p.charge_settings.boss] {
+                        let marker=(x+w*threshold as f32/2500.0).min(x+w-1.0);
+                        list.push(th_anm::DrawBatch::solid_rect([marker,466.0,1.0,12.0],[1.0,1.0,1.0,1.0]));
+                    }
                 }
             }
         }
@@ -323,8 +332,12 @@ impl Viewer {
                     .iter()
                     .map(|s| {
                         let lives = s.player.as_ref().map_or(0, |p| p.lives);
-                        format!("{} enemies, {} hearts, chain {}, charge {}/{}", s.enemies.len(), lives, s.st.chain,
-                            s.player.as_ref().map_or(0, |p| p.charge.value), s.player.as_ref().map_or(0, |p| p.charge_settings.attack))
+                        format!("{} enemies, {} hearts, charge {} (free), last {:?}",s.enemies.len(),lives,
+                            s.player.as_ref().map_or("none",|p| {
+                                let v=p.charge.value;let c=p.charge_settings;
+                                if v>=c.boss {"4 BOSS"} else if v>=c.extra {"3 EX"} else if v>=c.skill {"2 SKILL"}
+                                else if v>=c.attack {"1 SHOT"} else if v>0 {"charging"} else {"idle"}
+                            }), s.player.as_ref().and_then(|p|p.last_charge))
                     })
                     .collect();
                 return format!(
@@ -470,6 +483,8 @@ impl Viewer {
 
 /// `--screenshot <file.png> [--frames N]`: render frame N offscreen, save it and exit.
 struct Screenshot {
+    /// Deterministic input exercise, used only for an offscreen capture.
+    charge_tier: Option<usize>,
     path: PathBuf,
     frames: u32,
 }
@@ -498,7 +513,15 @@ impl ApplicationHandler for App {
         self.next_frame = Instant::now();
 
         if let Some(shot) = self.screenshot.take() {
-            for _ in 0..shot.frames {
+            let charge_frames=shot.charge_tier.and_then(|tier| self.viewer.game.as_ref()
+                .and_then(|g|g.sides[0].player.as_ref()).map(|p| {
+                    let s=p.charge_settings; [s.attack,s.skill,s.extra,s.boss][tier-1] as u32/10
+                }));
+            for frame in 0..shot.frames {
+                if let Some(n)=charge_frames {
+                    if (60..60+n).contains(&frame) {self.viewer.held.insert(KeyCode::KeyX);}
+                    else {self.viewer.held.remove(&KeyCode::KeyX);}
+                }
                 self.viewer.tick();
             }
             let (list, scene_end, bg, fog) = self.viewer.frame();
@@ -606,7 +629,7 @@ fn main() {
     println!(
         "Controls: Tab = switch ANM viewer / stage viewer / game, Left/Right = file or stage, Up/Down = single script,\n\
          A = all scripts, C = toggle centre origin, F = fast-forward x8, V = toggle field divider,\n\
-         R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (tier 1), B = debug EX, Shift = focus, PgUp/PgDn = stage,\n\
+         R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (1 shot / 2 skill / 3 EX / 4 boss; free meter), B = debug EX, Shift = focus, PgUp/PgDn = stage,\n\
          . = step frame, 0-9 = send interrupt, Esc = quit"
     );
 
@@ -628,6 +651,8 @@ fn main() {
 
     let screenshot = args.iter().position(|a| a == "--screenshot").and_then(|i| args.get(i + 1)).map(|p| Screenshot {
         path: PathBuf::from(p),
+        charge_tier: args.iter().position(|a|a=="--preview-charge")
+            .and_then(|i|args.get(i+1)?.parse::<usize>().ok()).filter(|v|(1..=4).contains(v)),
         frames: args
             .iter()
             .position(|a| a == "--frames")

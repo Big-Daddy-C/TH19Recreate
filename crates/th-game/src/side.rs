@@ -61,6 +61,12 @@ pub struct SideState {
     pub player_pos: [f32; 2],
     /// TH19's escalating level (0..7), selecting columns of the level tables.
     pub level: usize,
+    pub extra_level: u8,
+    pub boss_level: u8,
+    pub incoming_extra_level: u8,
+    pub incoming_boss_level: u8,
+    pub boss_ids: Vec<i32>,
+    pub boss_globals: HashMap<i32, f32>,
     pub level_table: [[i32; 8]; 32],
     pub wave_pool: Vec<i32>,
     pub wave_sequence: [u8; 256],
@@ -213,6 +219,8 @@ impl Side {
                 difficulty: 1,
                 player_pos: [0.0, 400.0],
                 level: 0,
+                extra_level: 0, boss_level: 0, incoming_extra_level: 0, incoming_boss_level: 0,
+                boss_ids: Vec::new(), boss_globals: HashMap::new(),
                 level_table: [[0; 8]; 32],
                 wave_pool: Vec::new(),
                 wave_sequence,
@@ -317,6 +325,8 @@ impl Side {
                     continue;
                 }
             }
+            if self.player.as_ref().is_some_and(|p| p.cancel_circles.iter().any(|(pos,r)|
+                b.intersects_cancel(*pos,*r,ctx.world,ctx.lib))) { b.delete=true; continue; }
             // FUN_00549e00: hit when d^2 < player_r^2 + bullet_r^2.
             if b.state == 1 && !b.delete && player_r > 0.0 && d2 < player_r * player_r + b.hitbox * b.hitbox {
                 hit = Some(b.pos);
@@ -426,6 +436,12 @@ impl Side {
         if let Some(p) = &mut self.player {
             p.update(keys, &mut self.enemies, world, lib, self.st.field);
             self.st.player_pos = p.pos;
+            if let Some(level) = p.charge_event {
+                use crate::charge::Level;
+                let sub = match level { Level::Attack => None, Level::Skill => Some("Ecl_EtBreakLv2"),
+                    Level::Extra => Some("Ecl_EtBreakLv3"), Level::Boss => Some("Ecl_EtBreakLv4") };
+                if let Some(sub) = sub { self.st.request(script_request(sub,p.pos)); }
+            }
         }
         self.update_bullets(world, lib);
         self.update_explosions(world);
@@ -446,9 +462,49 @@ impl Side {
                 let mut e = self.enemies.remove(k);
                 e.remove_sprites(world);
                 self.st.alive.retain(|a| a.0 != e.data.id);
+                self.st.boss_ids.retain(|&id| id != e.data.id);
             } else {
                 k += 1;
             }
         }
     }
+}
+
+/// Match-level dispatch happens after both fields tick, so side ordering cannot grant
+/// one attack an extra simulation tick. Higher attacks are sent to the opponent only.
+pub fn prepare_charge_targets(sides: &mut [Side]) {
+    if sides.len()!=2 { return; }
+    let active = [sides[0].has_boss(),sides[1].has_boss()];
+    for i in 0..2 { if let Some(p)=&mut sides[i].player { p.opponent_boss_active=active[1-i]; } }
+}
+pub fn dispatch_charges(sides: &mut [Side]) {
+    if sides.len()!=2 { return; }
+    let events: [Option<crate::charge::Level>;2] = std::array::from_fn(|i| sides[i].player.as_mut().and_then(|p| p.charge_event.take()));
+    for (sender,event) in events.into_iter().enumerate() {
+        use crate::charge::Level;
+        match event {
+            Some(Level::Extra) => {
+                let rank=sides[sender].st.extra_level;
+                sides[1-sender].st.incoming_extra_level=rank;
+                sides[1-sender].st.request(script_request("ExtraAttack",[0.0,0.0]));
+                sides[sender].st.extra_level=(rank+1).min(7);
+            }
+            Some(Level::Boss) => {
+                let rank=sides[sender].st.boss_level;
+                sides[1-sender].st.incoming_boss_level=rank;
+                sides[1-sender].st.request(script_request("BossAttack",[0.0,0.0]));
+                sides[sender].st.boss_level=(rank+1).min(7);
+            }
+            _ => {}
+        }
+    }
+}
+impl Side {
+    pub fn has_boss(&self) -> bool {
+        !self.st.boss_ids.is_empty() || self.st.spawn.iter().any(|s| s.sub=="BossAttack" || s.sub=="Boss00")
+            || self.enemies.iter().any(|e| !e.data.delete && (e.data.sub=="BossAttack" || e.data.sub=="Boss00"))
+    }
+}
+fn script_request(sub: &str,pos: [f32;2]) -> SpawnRequest {
+    SpawnRequest { id:0,difficulty:0,sub:sub.into(),pos,hp:200,score:0,item:-1,mirrored:false,ivars:[0;4],fvars:[0.0;8] }
 }
