@@ -113,6 +113,121 @@ pub enum Pass<'a> {
     Ui,
 }
 
+/// Built-in ribbon effects created by ANM `effectNew` (508). Each is a strip of points whose
+/// shape is shifted along the ribbon over time, so disturbances travel along it.
+#[derive(Clone, Debug)]
+pub struct Ribbon {
+    kind: RibbonKind,
+    /// Offset from each point to the next, in the sprite's local 3D space.
+    deltas: Vec<[f32; 3]>,
+    timer: u32,
+    /// Effect 5: current sway angle of the first segment.
+    angle: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RibbonKind {
+    /// Effect 5: a strand hanging 200 units above its origin, swaying (e.g. stage 2's weeds).
+    Strand,
+    /// Effect 6: a rising wisp of smoke (e.g. stage 13's incense).
+    Smoke,
+}
+
+impl Ribbon {
+    fn new(effect: i32) -> Option<Self> {
+        match effect {
+            5 => Some(Self { kind: RibbonKind::Strand, deltas: vec![[0.0, 0.0, 4.0]; 40], timer: 0, angle: 10f32.to_radians() }),
+            6 => Some(Self { kind: RibbonKind::Smoke, deltas: vec![[-3.0, 0.0, -16.0]; 16], timer: 0, angle: 0.0 }),
+            _ => None,
+        }
+    }
+
+    /// One frame of motion, as in th19.exe's effect update callbacks.
+    fn update(&mut self, rng: &mut u32) {
+        // Uniform in [-1, 1] and [0, 1].
+        let mut signed = || randf01(rng) * 2.0 - 1.0;
+        let shift = |d: &mut Vec<[f32; 3]>| {
+            for i in (1..d.len()).rev() {
+                d[i] = d[i - 1];
+            }
+        };
+        match self.kind {
+            RibbonKind::Smoke if self.timer % 4 == 0 => {
+                shift(&mut self.deltas);
+                // The first segment's sideways lean random-walks, kept roughly within 0..3.
+                let x = self.deltas[0][0];
+                self.deltas[0][0] = if x < 3.0 {
+                    if x > 0.0 { x + signed() * 0.1 } else { x + (signed() * 0.5 + 0.5) * 0.1 }
+                } else {
+                    x - (signed() * 0.5 + 0.5) * 0.1
+                };
+            }
+            RibbonKind::Strand if self.timer % 2 == 0 => {
+                shift(&mut self.deltas);
+                // The first segment's angle random-walks between roughly 10 and 30 degrees.
+                let deg = 1f32.to_radians();
+                let a = self.angle;
+                self.angle = if a < 30f32.to_radians() {
+                    if a > 10f32.to_radians() { a + signed() * deg * 2.0 } else { a + (signed() * 0.5 + 0.5) * deg }
+                } else {
+                    a - (signed() * 0.5 + 0.5) * deg
+                };
+                let (s, c) = self.angle.sin_cos();
+                self.deltas[0] = [-s * 4.0, 0.0, c * 4.0];
+            }
+            _ => {}
+        }
+        self.timer += 1;
+    }
+
+    /// Strip vertices in local space: `(position, u, v, alpha 0..255)`, two per point.
+    fn vertices(&self) -> Vec<([f32; 3], f32, f32, f32)> {
+        let n = self.deltas.len();
+        let (mut pos, mut half, grow, dv) = match self.kind {
+            RibbonKind::Smoke => ([0.0f32, 0.0, 0.0], 0.0f32, true, 1.0 / 16.0),
+            RibbonKind::Strand => ([0.0, 0.0, -200.0], 8.0, false, 0.025),
+        };
+        let mut out = Vec::with_capacity(n * 2);
+        for i in 0..n {
+            let (a, b) = match self.kind {
+                RibbonKind::Smoke => SMOKE_ALPHA.get(i).copied().unwrap_or((128.0, 128.0)),
+                RibbonKind::Strand => (128.0, 128.0),
+            };
+            let v = i as f32 * dv;
+            out.push(([pos[0] + half, pos[1], pos[2]], 0.0, v, a));
+            out.push(([pos[0] - half, pos[1], pos[2]], 1.0, v, b));
+            if grow && half < 8.0 {
+                half += 2.0;
+            }
+            for k in 0..3 {
+                pos[k] += self.deltas[i][k];
+            }
+        }
+        out
+    }
+}
+
+/// Per-point alpha of the smoke ribbon's two edges: a fixed pattern of gaps that makes the
+/// wisp look broken up, with both ends fading out (values observed in th19.exe).
+const SMOKE_ALPHA: [(f32, f32); 16] = [
+    (0.0, 0.0),
+    (128.0, 0.0),
+    (128.0, 128.0),
+    (128.0, 128.0),
+    (128.0, 128.0),
+    (0.0, 128.0),
+    (0.0, 128.0),
+    (128.0, 0.0),
+    (128.0, 128.0),
+    (128.0, 128.0),
+    (128.0, 128.0),
+    (128.0, 128.0),
+    (0.0, 128.0),
+    (176.0, 0.0),
+    (80.0, 80.0),
+    (0.0, 0.0),
+];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RunState {
     Running,
@@ -195,6 +310,8 @@ pub struct Vm {
     pub size_override: Option<[f32; 2]>,
     /// 2D sprite belonging to the stage background (drawn in [`Pass::Backdrop`]).
     pub backdrop: bool,
+    /// Built-in effect attached by `effectNew`, drawn instead of the sprite.
+    pub effect: Option<Ribbon>,
 }
 
 impl Vm {
@@ -251,6 +368,7 @@ impl Vm {
             space_3d: false,
             size_override: None,
             backdrop: false,
+            effect: None,
         }
     }
 
@@ -422,14 +540,19 @@ impl World {
             .map(|(i, s)| VmId { index: i as u32, generation: s.generation })
             .collect();
         for id in ids {
+            let mut rng = self.rng;
             let Some(vm) = self.get_mut(id) else { continue };
             if vm.state != RunState::Static {
                 update_motion(vm);
+                if let Some(r) = &mut vm.effect {
+                    r.update(&mut rng);
+                }
                 vm.time += 1;
                 if vm.wait > 0 {
                     vm.wait -= 1;
                 }
             }
+            self.rng = rng;
             self.run(lib, id);
         }
         // Children of deleted parents go with them.
@@ -564,7 +687,7 @@ impl World {
                 continue;
             }
             // Depth writes depend only on the sprite's zWriteDisable flag (as in th19.exe).
-            let depth = match (camera.is_some(), vm.z_write_disable) {
+            let depth = match (camera.is_some(), vm.z_write_disable || vm.effect.is_some()) {
                 (false, _) => DepthMode::Off,
                 (true, true) => DepthMode::Test,
                 (true, false) => DepthMode::TestWrite,
@@ -1025,6 +1148,10 @@ fn exec(
         504 => spawns.push(Spawn::Root { script: i!(0), offset: [0.0; 2] }),
         505 | 510 => spawns.push(Spawn::Child { script: i!(0), offset: [f!(1), f!(2)] }),
         506 => spawns.push(Spawn::Root { script: i!(0), offset: [f!(1), f!(2)] }),
+        508 => match Ribbon::new(i!(0)) {
+            Some(r) => vm.effect = Some(r),
+            None => *unknown.entry(508).or_default() += 1,
+        },
         507 | 509 => {}
 
         // --- special drawing ---
@@ -1110,6 +1237,11 @@ impl Placer<'_> {
     /// VM-local point to 3D world position. Rotations use Direct3D's left-handed
     /// conventions (`D3DXMatrixRotationX/Y/Z`, row vectors) in the order given by `order`.
     fn to_world(&self, x: f32, y: f32) -> [f32; 3] {
+        self.to_world3([x, y, 0.0])
+    }
+
+    /// VM-local 3D point to world position (see [`Self::to_world`]).
+    fn to_world3(&self, p: [f32; 3]) -> [f32; 3] {
         let rot_x = |[x, y, z]: [f32; 3], a: f32| {
             let (s, c) = a.sin_cos();
             [x, y * c - z * s, y * s + z * c]
@@ -1123,7 +1255,6 @@ impl Placer<'_> {
             [x * c - y * s, x * s + y * c, z]
         };
         let [rx, ry, rz] = self.rot;
-        let p = [x, y, 0.0];
         let p = match self.order {
             1 => rot_y(rot_z(rot_x(p, rx), rz), ry),
             2 => rot_z(rot_x(rot_y(p, ry), rx), rz),
@@ -1257,6 +1388,33 @@ fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, camera: Option<&Camera>, out: 
     let sprite = *file.sprites.get(usize::try_from(vm.sprite).ok()?)?;
     if sprite.texture == u32::MAX {
         return None;
+    }
+
+    // Ribbon effects: a fogged 3D strip textured with the sprite, drawn in place of it.
+    if let (Some(r), Some(cam)) = (&vm.effect, camera) {
+        let pl = Placer { rot: vm.rot, fogged: true, ..pl };
+        let [u0, v0, u1, v1] = sprite.uv;
+        let pts: Vec<Clipped> = r
+            .vertices()
+            .into_iter()
+            .map(|(p, u, v, a)| Clipped {
+                clip: cam.clip(pl.to_world3(p)),
+                uv: [u0 + u * (u1 - u0) + vm.uv_scroll[0], v0 + v * (v1 - v0) + vm.uv_scroll[1]],
+                color: [1.0, 1.0, 1.0, a / 255.0],
+            })
+            .collect();
+        for k in 0..pts.len().saturating_sub(3) / 2 + 1 {
+            let (a, b, c, d) = (pts[2 * k], pts[2 * k + 1], pts[2 * k + 2], pts[2 * k + 3]);
+            for tri in [[a, b, c], [b, d, c]] {
+                let clipped = clip_near(&tri, Camera::NEAR);
+                for i in 1..clipped.len().saturating_sub(1) {
+                    for v in [&clipped[0], &clipped[i], &clipped[i + 1]] {
+                        out.push(pl.finish_3d(cam, v));
+                    }
+                }
+            }
+        }
+        return Some(sprite.texture);
     }
 
     // As in th19.exe, a stage quad's size only applies to render modes above 3.
