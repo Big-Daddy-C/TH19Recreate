@@ -182,11 +182,11 @@ impl Viewer {
                 // windows laid over that single shared background.
                 let rect = [0.0, 0.0, render::CANVAS_W, render::CANVAS_H];
                 let mut list = vec![th_anm::DrawBatch::solid_rect(rect, [sky[0], sky[1], sky[2], 1.0])];
+                // Sprite-slot sprites (e.g. stage 11's sky) sit behind the 3D scene; the scene's
+                // draw distance keeps far geometry from covering them.
+                list.extend(self.world.draw_list(&self.lib, th_anm::Pass::Backdrop));
                 let cam = st.camera(rect);
                 list.extend(self.world.draw_list(&self.lib, th_anm::Pass::Stage(&cam)));
-                // Sprite-slot sprites (e.g. stage 11's sky band) sit over the distant, fogged
-                // part of the 3D scene. APPROX: drawn after all stage geometry.
-                list.extend(self.world.draw_list(&self.lib, th_anm::Pass::Backdrop));
                 if self.show_fields {
                     // Stand-in for the real frame from front.anm: darken the strip between fields.
                     let gap_x = FIELDS[0][0] + FIELDS[0][2];

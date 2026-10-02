@@ -541,7 +541,12 @@ impl World {
             .filter_map(|s| s.vm.as_ref())
             .filter(|v| match pass {
                 Pass::Backdrop => !v.space_3d && v.backdrop,
-                Pass::Stage(_) => v.space_3d,
+                // Radial draw distance: stage sprites beyond it are not drawn at all.
+                Pass::Stage(cam) => v.space_3d && {
+                    let p = world_pos(self, v);
+                    let d2: f32 = p.iter().zip(&cam.eye).map(|(a, b)| (a - b) * (a - b)).sum();
+                    d2 <= cam.draw_distance_sq
+                },
                 Pass::Ui => !v.space_3d && !v.backdrop,
             })
             .collect();

@@ -382,6 +382,7 @@ impl Stage {
         }
         let mut cam = Camera::new(eye, dir, self.up, self.fov, viewport, (self.fog_range[0], self.fog_range[1]));
         cam.fog_color = [self.fog_color[0] / 255.0, self.fog_color[1] / 255.0, self.fog_color[2] / 255.0];
+        cam.draw_distance_sq = self.draw_distance_sq;
         cam
     }
 

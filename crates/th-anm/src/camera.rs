@@ -68,6 +68,8 @@ pub struct Camera {
     pub eye: Vec3,
     /// Fog colour (0..1), for sprites that fog themselves (render mode 6).
     pub fog_color: [f32; 3],
+    /// Stage sprites farther than this (squared distance from the eye) are not drawn.
+    pub draw_distance_sq: f32,
     /// Destination rectangle on the 640x480 canvas: `[x, y, w, h]`.
     pub viewport: [f32; 4],
     pub fog_near: f32,
@@ -87,6 +89,7 @@ impl Camera {
             right,
             eye,
             fog_color: [0.0; 3],
+            draw_distance_sq: f32::INFINITY,
             viewport,
             fog_near: fog.0,
             fog_far: fog.1,
