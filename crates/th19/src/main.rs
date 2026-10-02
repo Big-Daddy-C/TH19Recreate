@@ -291,10 +291,17 @@ impl Viewer {
         if self.mode != Mode::Anm {
             let name = self.stage_files.get(self.stage_idx).cloned().unwrap_or_default();
             if let Some(g) = &self.game {
-                let n: Vec<String> = g.sides.iter().map(|s| s.enemies.len().to_string()).collect();
+                let n: Vec<String> = g
+                    .sides
+                    .iter()
+                    .map(|s| {
+                        let lives = s.player.as_ref().map_or(0, |p| p.lives);
+                        format!("{} enemies, {} hearts, chain {}", s.enemies.len(), lives, s.st.chain)
+                    })
+                    .collect();
                 return format!(
-                    "th19-rs - {name} - enemies {} - {} VMs{}{}",
-                    n.join(" / "),
+                    "th19-rs - {name} - {} - {} VMs{}{}",
+                    n.join(" | "),
                     self.world.len(),
                     if self.fast { " - x8" } else { "" },
                     if self.paused { " - PAUSED" } else { "" }

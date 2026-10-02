@@ -63,9 +63,15 @@ impl Timer {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
-    /// Rising into the field (60 frames).
+    /// Rising into the field (60 frames); after a death it also clears nearby bullets.
     Entering,
     Normal,
+    /// Just hit: a short window (8 frames) before the death is processed (state 4).
+    Hit,
+    /// Dead, waiting 30 frames to respawn (state 2).
+    Dead,
+    /// Out of hearts.
+    GameOver,
 }
 
 struct PlayerOption {
@@ -101,11 +107,22 @@ pub struct Player {
     shot_timer: Timer,
     long_timer: Timer,
     pub bullets: Vec<PlayerBullet>,
-    /// Frames of invulnerability left after being hit.
+    /// Frames of invulnerability left.
     pub invuln: i32,
     /// Times hit so far.
     pub hits: u32,
+    /// Hearts left (status +0x54) and heart slots (status +0x58, at most 7).
+    pub lives: i32,
+    pub max_lives: i32,
+    /// Bullets within this radius of the player should be cancelled this frame.
+    pub cancel_radius: Option<f32>,
+    /// The death effect (script 21): a glow that bursts on interrupt 1.
+    death_vm: Option<VmId>,
 }
+
+/// Starting hearts. APPROX: the real value comes from the match settings (not yet decoded);
+/// the HUD supports up to 7.
+pub const DEFAULT_LIVES: i32 = 5;
 
 impl Player {
     pub fn new(sht: ShtFile, anm_file: usize) -> Self {
@@ -129,23 +146,48 @@ impl Player {
             bullets: Vec::new(),
             invuln: 0,
             hits: 0,
+            lives: DEFAULT_LIVES,
+            max_lives: DEFAULT_LIVES,
+            cancel_radius: None,
+            death_vm: None,
         }
     }
 
-    /// Collision radius against bullets (SHT header).
+    /// Collision radius against bullets: 3.0 (player +0x20c4/+0x20c8, scaled by a percentage
+    /// that is 100 unless an ability card changes it). 0 while the player can't be hit.
     pub fn hitbox_radius(&self) -> f32 {
-        if self.state == State::Normal && self.invuln == 0 { self.sht.radii[0] } else { 0.0 }
+        if self.state == State::Normal && self.invuln < 1 { 3.0 } else { 0.0 }
     }
 
-    /// Hit by a bullet. APPROX: until the game's hit/death sequence is decoded, a hit only
-    /// counts and grants 120 frames of invulnerability. Returns whether it counted.
-    pub fn hit(&mut self) -> bool {
-        if self.invuln > 0 {
+    /// Hit by a bullet (`FUN_00545e10`): hit effect, then an 8-frame window before death.
+    pub fn hit(&mut self, world: &mut World, lib: &AnmLibrary, field: [f32; 4]) -> bool {
+        if self.state != State::Normal || self.invuln > 0 {
             return false;
         }
         self.hits += 1;
-        self.invuln = 120;
+        world.spawn_clipped(lib, self.anm_file, 22, field_to_canvas(field, self.pos), field);
+        self.state = State::Hit;
+        self.state_time = 0;
+        self.invuln = 6;
         true
+    }
+
+    /// The death proper (`FUN_00549830`): effect, one heart lost, options gone, 180 frames
+    /// of invulnerability.
+    fn die(&mut self, world: &mut World, lib: &AnmLibrary, field: [f32; 4]) {
+        self.death_vm = Some(world.spawn_clipped(lib, self.anm_file, 21, field_to_canvas(field, self.pos), field));
+        self.lives -= 1;
+        self.state = State::Dead;
+        self.state_time = 0;
+        self.invuln = 180;
+        for o in self.options.drain(..) {
+            if let Some(id) = o.vm {
+                world.interrupt(id, 1);
+            }
+        }
+        if let Some(id) = self.body.take() {
+            world.delete(id);
+        }
     }
 
     fn level(&self) -> usize {
@@ -168,13 +210,43 @@ impl Player {
     }
 
     pub fn update(&mut self, keys: u32, enemies: &mut [Enemy], world: &mut World, lib: &AnmLibrary, field: [f32; 4]) {
-        if self.body.is_none() {
+        self.cancel_radius = None;
+        if self.body.is_none() && matches!(self.state, State::Entering | State::Normal) {
             self.set_body_script(world, lib, field, 0);
         }
         match self.state {
+            State::Hit => {
+                self.state_time += 1;
+                if self.state_time >= 8 {
+                    self.die(world, lib, field);
+                }
+            }
+            State::Dead => {
+                self.state_time += 1;
+                if self.state_time >= 30 {
+                    // APPROX: the glow waits for interrupt 1 to burst; what sends it in the
+                    // game hasn't been found, so it bursts here, as the player comes back.
+                    if let Some(id) = self.death_vm.take() {
+                        world.interrupt(id, 1);
+                    }
+                    if self.lives > 0 {
+                        // Respawn: back to the bottom centre and rise in again.
+                        self.state = State::Entering;
+                        self.state_time = 0;
+                        self.fixed = [0, 0xf000];
+                    } else {
+                        self.state = State::GameOver;
+                    }
+                }
+            }
+            State::GameOver => {}
             State::Entering => {
-                // Rise from y = 480 to y = 400 over 60 frames.
+                // Rise from y = 480 to y = 400 over 60 frames; from frame 30 bullets within
+                // 160 of the player are cancelled (case 0 of FUN_00546320).
                 self.fixed[1] = 0xf000 - self.state_time * 0x2800 / 60;
+                if self.state_time >= 30 {
+                    self.cancel_radius = Some(160.0);
+                }
                 self.state_time += 1;
                 if self.state_time >= 60 {
                     self.state = State::Normal;
@@ -216,7 +288,9 @@ impl Player {
             self.invuln -= 1;
         }
 
-        self.update_options(world, lib, field);
+        if matches!(self.state, State::Entering | State::Normal) {
+            self.update_options(world, lib, field);
+        }
         if self.state == State::Normal {
             self.update_shots(keys, world, lib, field, enemies);
         }

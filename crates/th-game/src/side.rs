@@ -306,14 +306,20 @@ impl Side {
             bullet::Ctx { world, lib, types: &types, anm, field: st.field, player: st.player_pos, rand: &mut rand };
         let mut hit = false;
         let player_r = self.player.as_ref().map_or(0.0, |p| p.hitbox_radius());
+        let cancel = self.player.as_ref().and_then(|p| p.cancel_radius);
         for b in st.bullets.iter_mut() {
             b.update(&mut ctx);
-            if b.state == 1 && !b.delete && player_r > 0.0 {
-                let (dx, dy) = (b.pos[0] - st.player_pos[0], b.pos[1] - st.player_pos[1]);
-                let r = b.hitbox + player_r;
-                if dx * dx + dy * dy < r * r {
-                    hit = true;
+            let (dx, dy) = (b.pos[0] - st.player_pos[0], b.pos[1] - st.player_pos[1]);
+            let d2 = dx * dx + dy * dy;
+            if let Some(r) = cancel {
+                if d2 <= r * r && b.invuln == 0 {
+                    b.delete = true;
+                    continue;
                 }
+            }
+            // FUN_00549e00: hit when d^2 < player_r^2 + bullet_r^2.
+            if b.state == 1 && !b.delete && player_r > 0.0 && d2 < player_r * player_r + b.hitbox * b.hitbox {
+                hit = true;
             }
         }
         st.bullets.retain(|b| {
@@ -326,11 +332,7 @@ impl Side {
         });
         if hit {
             if let Some(p) = &mut self.player {
-                if p.hit() {
-                    // APPROX: a hit clears the field's bullets (the game's hit sequence
-                    // hasn't been decoded yet).
-                    st.cancel_bullets = true;
-                }
+                p.hit(ctx.world, lib, st.field);
             }
         }
     }
