@@ -171,7 +171,9 @@ impl Viewer {
     }
 
     /// Everything needed to draw the current frame: triangles, background colour, fog colour.
-    fn frame(&self) -> (th_anm::DrawList, [f32; 3], [f32; 3]) {
+    /// Everything needed to draw the current frame: triangles, how many of them form the stage
+    /// scene (which later batches may sample), background colour and fog colour.
+    fn frame(&self) -> (th_anm::DrawList, usize, [f32; 3], [f32; 3]) {
         let (mut list, bg, fog) = match &self.stage {
             Some(st) => {
                 let c = st.clear_color.map(|x| x / 255.0);
@@ -201,8 +203,12 @@ impl Viewer {
             }
             None => (Vec::new(), [0.0; 3], [0.0; 3]),
         };
+        let scene_end = if self.stage.is_some() { list.len() } else { 0 };
+        if let Some(st) = &self.stage {
+            list.extend(st.distortion_batches(&FIELDS));
+        }
         list.extend(self.world.draw_list(&self.lib, th_anm::Pass::Ui));
-        (list, bg, fog)
+        (list, scene_end, bg, fog)
     }
 
     fn title(&mut self) -> String {
@@ -318,10 +324,10 @@ impl ApplicationHandler for App {
             for _ in 0..shot.frames {
                 self.viewer.tick();
             }
-            let (list, bg, fog) = self.viewer.frame();
+            let (list, scene_end, bg, fog) = self.viewer.frame();
             let r = self.renderer.as_mut().unwrap();
             let (w, h) = (1280, 960);
-            let rgba = r.screenshot(&self.viewer.lib, &list, bg, fog, w, h);
+            let rgba = r.screenshot(&self.viewer.lib, &list, scene_end, bg, fog, w, h);
             match image::save_buffer(&shot.path, &rgba, w, h, image::ExtendedColorType::Rgba8) {
                 Ok(()) => println!("saved {} (frame {})", shot.path.display(), shot.frames),
                 Err(e) => eprintln!("failed to save {}: {e}", shot.path.display()),
@@ -367,9 +373,9 @@ impl ApplicationHandler for App {
                 if self.next_frame < now {
                     self.next_frame = now;
                 }
-                let (list, bg, fog) = self.viewer.frame();
+                let (list, scene_end, bg, fog) = self.viewer.frame();
                 if let Some(r) = &mut self.renderer {
-                    r.render(&self.viewer.lib, &list, bg, fog);
+                    r.render(&self.viewer.lib, &list, scene_end, bg, fog);
                 }
                 if now.duration_since(self.last_title) > Duration::from_millis(250) {
                     self.last_title = now;

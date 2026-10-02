@@ -75,8 +75,11 @@ pub struct Renderer {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     pipelines: HashMap<(BlendMode, DepthMode), wgpu::RenderPipeline>,
-    /// Depth buffer and the size it was created for.
-    depth: Option<(wgpu::TextureView, u32, u32)>,
+    /// Depth buffers by size.
+    depth: HashMap<(u32, u32), wgpu::TextureView>,
+    /// Offscreen stage image: view, bind group, size.
+    scene: Option<(wgpu::TextureView, wgpu::BindGroup, u32, u32)>,
+    clamp_sampler: wgpu::Sampler,
     globals: wgpu::BindGroup,
     globals_buf: wgpu::Buffer,
     tex_layout: wgpu::BindGroupLayout,
@@ -192,6 +195,13 @@ impl Renderer {
             ..Default::default()
         });
 
+        let clamp_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("scene"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("sprite"),
             source: wgpu::ShaderSource::Wgsl(SHADER.into()),
@@ -278,7 +288,9 @@ impl Renderer {
             queue,
             config,
             pipelines,
-            depth: None,
+            depth: HashMap::new(),
+            scene: None,
+            clamp_sampler,
             globals,
             globals_buf: ubuf,
             white,
@@ -307,8 +319,10 @@ impl Renderer {
         self.textures.clear();
     }
 
-    /// Draw one frame to the window. `background` fills the canvas (0..1 RGB); `fog` is the stage fog colour.
-    pub fn render(&mut self, lib: &AnmLibrary, list: &DrawList, background: [f32; 3], fog: [f32; 3]) {
+    /// Draw one frame to the window. `list[..scene_end]` is the stage scene; batches after it
+    /// may sample that scene through [`th_anm::SCENE_TEXTURE`]. `background` fills the canvas
+    /// (0..1 RGB); `fog` is the stage fog colour.
+    pub fn render(&mut self, lib: &AnmLibrary, list: &DrawList, scene_end: usize, background: [f32; 3], fog: [f32; 3]) {
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
@@ -319,17 +333,19 @@ impl Renderer {
         };
         let view = frame.texture.create_view(&Default::default());
         let (w, h) = (self.config.width, self.config.height);
-        let enc = self.draw_into(lib, list, background, fog, &view, w, h);
+        let enc = self.draw_into(lib, list, scene_end, background, fog, &view, w, h);
         self.queue.submit([enc.finish()]);
         self.window.pre_present_notify();
         self.queue.present(frame);
     }
 
     /// Render one frame offscreen at `width`x`height` and return it as RGBA8 pixels.
+    #[allow(clippy::too_many_arguments)]
     pub fn screenshot(
         &mut self,
         lib: &AnmLibrary,
         list: &DrawList,
+        scene_end: usize,
         background: [f32; 3],
         fog: [f32; 3],
         width: u32,
@@ -346,7 +362,7 @@ impl Renderer {
             view_formats: &[],
         });
         let view = tex.create_view(&Default::default());
-        let mut enc = self.draw_into(lib, list, background, fog, &view, width, height);
+        let mut enc = self.draw_into(lib, list, scene_end, background, fog, &view, width, height);
         let row = (width * 4).next_multiple_of(256);
         let buf = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("screenshot"),
@@ -378,11 +394,59 @@ impl Renderer {
         out
     }
 
+    fn depth_view(&mut self, w: u32, h: u32) -> wgpu::TextureView {
+        if let Some(v) = self.depth.get(&(w, h)) {
+            return v.clone();
+        }
+        let tex = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("depth"),
+            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let v = tex.create_view(&Default::default());
+        self.depth.insert((w, h), v.clone());
+        v
+    }
+
+    /// The offscreen stage image (canvas-shaped), recreated when its size changes.
+    fn scene_target(&mut self, w: u32, h: u32) -> (wgpu::TextureView, wgpu::BindGroup) {
+        if !matches!(&self.scene, Some((_, _, sw, sh)) if *sw == w && *sh == h) {
+            let tex = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("scene"),
+                size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.config.format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let view = tex.create_view(&Default::default());
+            let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("scene"),
+                layout: &self.tex_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.clamp_sampler) },
+                ],
+            });
+            self.scene = Some((view, bind, w, h));
+        }
+        let (v, b, _, _) = self.scene.as_ref().unwrap();
+        (v.clone(), b.clone())
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn draw_into(
         &mut self,
         lib: &AnmLibrary,
         list: &DrawList,
+        scene_end: usize,
         background: [f32; 3],
         fog: [f32; 3],
         view: &wgpu::TextureView,
@@ -394,19 +458,37 @@ impl Renderer {
             0,
             bytemuck::cast_slice(&[CANVAS_W, CANVAS_H, 0.0, 0.0, fog[0], fog[1], fog[2], 1.0]),
         );
-        let bg = th_anm::DrawBatch {
+        let solid = |color: [f32; 4]| th_anm::DrawBatch {
             texture: None,
             blend: BlendMode::Replace,
             depth: DepthMode::Off,
             layer: i32::MIN,
             clip: None,
-            vertices: canvas_quad([background[0], background[1], background[2], 1.0]),
+            vertices: canvas_quad(color),
         };
-        let list: Vec<&th_anm::DrawBatch> = std::iter::once(&bg).chain(list.iter()).collect();
+        let bg = solid([background[0], background[1], background[2], 1.0]);
+        // The captured stage image, pasted back onto the canvas before everything else.
+        let mut composite = solid([1.0; 4]);
+        composite.texture = Some(th_anm::SCENE_TEXTURE);
+        for v in &mut composite.vertices {
+            v.uv = [v.pos[0] / CANVAS_W, v.pos[1] / CANVAS_H];
+        }
+        let scene_end = scene_end.min(list.len());
+        let use_scene = scene_end > 0;
+
+        // Batches in draw order; `split` is where the offscreen scene pass ends.
+        let mut all: Vec<&th_anm::DrawBatch> = vec![&bg];
+        all.extend(list[..scene_end].iter());
+        let split = all.len();
+        if use_scene {
+            all.push(&composite);
+        }
+        all.extend(list[scene_end..].iter());
+
         // Upload any textures used for the first time.
-        for b in &list {
+        for b in &all {
             if let Some(t) = b.texture {
-                if !self.textures.contains_key(&t) {
+                if t != th_anm::SCENE_TEXTURE && !self.textures.contains_key(&t) {
                     if let Some(img) = lib.textures.get(t as usize) {
                         let bg = self.make_texture(img.width, img.height, &img.rgba);
                         self.textures.insert(t, bg);
@@ -415,7 +497,7 @@ impl Renderer {
             }
         }
 
-        let total: usize = list.iter().map(|b| b.vertices.len()).sum();
+        let total: usize = all.iter().map(|b| b.vertices.len()).sum();
         let bytes = (total * std::mem::size_of::<Vertex>()) as u64;
         if bytes > self.vbuf_cap {
             self.vbuf_cap = bytes.next_power_of_two();
@@ -427,80 +509,105 @@ impl Renderer {
             });
         }
         let mut offset = 0u64;
-        let mut ranges = Vec::with_capacity(list.len());
-        for b in &list {
+        let mut ranges = Vec::with_capacity(all.len());
+        for b in &all {
             let data: &[u8] = bytemuck::cast_slice(&b.vertices);
             self.queue.write_buffer(&self.vbuf, offset, data);
             ranges.push((offset, b.vertices.len() as u32));
             offset += data.len() as u64;
         }
 
-        if !matches!(self.depth, Some((_, w, h)) if w == target_w && h == target_h) {
-            let tex = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("depth"),
-                size: wgpu::Extent3d { width: target_w, height: target_h, depth_or_array_layers: 1 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: DEPTH_FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                view_formats: &[],
-            });
-            self.depth = Some((tex.create_view(&Default::default()), target_w, target_h));
-        }
-        let depth_view = &self.depth.as_ref().unwrap().0;
+        // Letterbox the 4:3 canvas into the target.
+        let (ww, wh) = (target_w as f32, target_h as f32);
+        let scale = (ww / CANVAS_W).min(wh / CANVAS_H);
+        let (vw, vh) = (CANVAS_W * scale, CANVAS_H * scale);
+        let (ox, oy) = ((ww - vw) * 0.5, (wh - vh) * 0.5);
+
+        let (scene_w, scene_h) = ((vw.round() as u32).max(1), (vh.round() as u32).max(1));
+        let scene = if use_scene { Some(self.scene_target(scene_w, scene_h)) } else { None };
+        let target_depth = self.depth_view(target_w, target_h);
+        let scene_depth = if use_scene { Some(self.depth_view(scene_w, scene_h)) } else { None };
+
         let mut enc = self.device.create_command_encoder(&Default::default());
-        {
-            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("main"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: depth_view,
-                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Discard }),
-                    stencil_ops: None,
-                }),
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-
-            // Letterbox the 4:3 canvas.
-            let (ww, wh) = (target_w as f32, target_h as f32);
-            let scale = (ww / CANVAS_W).min(wh / CANVAS_H);
-            let (vw, vh) = (CANVAS_W * scale, CANVAS_H * scale);
-            pass.set_viewport((ww - vw) * 0.5, (wh - vh) * 0.5, vw, vh, 0.0, 1.0);
-            let (ox, oy) = ((ww - vw) * 0.5, (wh - vh) * 0.5);
-            // Canvas rectangle -> target pixels, clamped to the target.
-            let scissor = |r: [f32; 4]| {
-                let x0 = (ox + r[0] * scale).clamp(0.0, ww);
-                let y0 = (oy + r[1] * scale).clamp(0.0, wh);
-                let x1 = (ox + (r[0] + r[2]) * scale).clamp(0.0, ww);
-                let y1 = (oy + (r[1] + r[3]) * scale).clamp(0.0, wh);
-                (x0 as u32, y0 as u32, ((x1 - x0) as u32).max(1), ((y1 - y0) as u32).max(1))
-            };
-            let full = [0.0, 0.0, CANVAS_W, CANVAS_H];
-
-            pass.set_bind_group(0, &self.globals, &[]);
-            for (b, &(off, count)) in list.iter().zip(&ranges) {
-                let (sx, sy, sw, sh) = scissor(b.clip.unwrap_or(full));
-                pass.set_scissor_rect(sx, sy, sw, sh);
-                let tex = b.texture.and_then(|t| self.textures.get(&t)).unwrap_or(&self.white);
-                pass.set_pipeline(&self.pipelines[&(b.blend, b.depth)]);
-                pass.set_bind_group(1, tex, &[]);
-                pass.set_vertex_buffer(0, self.vbuf.slice(off..off + count as u64 * std::mem::size_of::<Vertex>() as u64));
-                pass.draw(0..count, 0..1);
-            }
+        // Pass 1 (optional): the stage scene into the offscreen image.
+        if let (Some((scene_view, _)), Some(depth)) = (&scene, &scene_depth) {
+            let geom = Geometry { ox: 0.0, oy: 0.0, scale: scene_w as f32 / CANVAS_W, w: scene_w as f32, h: scene_h as f32 };
+            self.encode_pass(&mut enc, scene_view, depth, &all[..split], &ranges[..split], geom, None);
         }
+        // Pass 2: everything else onto the target (starting with the scene image, if any).
+        let geom = Geometry { ox, oy, scale, w: ww, h: wh };
+        let (from, scene_bind) = if use_scene { (split, scene.as_ref().map(|s| &s.1)) } else { (0, None) };
+        self.encode_pass(&mut enc, view, &target_depth, &all[from..], &ranges[from..], geom, scene_bind);
         enc
     }
+
+    #[allow(clippy::too_many_arguments)]
+    fn encode_pass(
+        &self,
+        enc: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        depth_view: &wgpu::TextureView,
+        batches: &[&th_anm::DrawBatch],
+        ranges: &[(u64, u32)],
+        g: Geometry,
+        scene: Option<&wgpu::BindGroup>,
+    ) {
+        let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("canvas"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: depth_view,
+                depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Discard }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        let (vw, vh) = (CANVAS_W * g.scale, CANVAS_H * g.scale);
+        pass.set_viewport(g.ox, g.oy, vw, vh, 0.0, 1.0);
+        // Canvas rectangle -> target pixels, clamped to the target.
+        let scissor = |r: [f32; 4]| {
+            let x0 = (g.ox + r[0] * g.scale).clamp(0.0, g.w);
+            let y0 = (g.oy + r[1] * g.scale).clamp(0.0, g.h);
+            let x1 = (g.ox + (r[0] + r[2]) * g.scale).clamp(0.0, g.w);
+            let y1 = (g.oy + (r[1] + r[3]) * g.scale).clamp(0.0, g.h);
+            (x0 as u32, y0 as u32, ((x1 - x0) as u32).max(1), ((y1 - y0) as u32).max(1))
+        };
+        let full = [0.0, 0.0, CANVAS_W, CANVAS_H];
+        pass.set_bind_group(0, &self.globals, &[]);
+        for (b, &(off, count)) in batches.iter().zip(ranges) {
+            if count == 0 {
+                continue;
+            }
+            let (sx, sy, sw, sh) = scissor(b.clip.unwrap_or(full));
+            pass.set_scissor_rect(sx, sy, sw, sh);
+            let tex = match b.texture {
+                Some(th_anm::SCENE_TEXTURE) => scene.unwrap_or(&self.white),
+                Some(t) => self.textures.get(&t).unwrap_or(&self.white),
+                None => &self.white,
+            };
+            pass.set_pipeline(&self.pipelines[&(b.blend, b.depth)]);
+            pass.set_bind_group(1, tex, &[]);
+            pass.set_vertex_buffer(0, self.vbuf.slice(off..off + count as u64 * std::mem::size_of::<Vertex>() as u64));
+            pass.draw(0..count, 0..1);
+        }
+    }
+}
+
+/// Where the 640x480 canvas lands in a render target.
+#[derive(Clone, Copy)]
+struct Geometry {
+    ox: f32,
+    oy: f32,
+    scale: f32,
+    w: f32,
+    h: f32,
 }
 
 fn make_texture(

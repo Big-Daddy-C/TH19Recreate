@@ -53,6 +53,9 @@ pub struct Stage {
     i_fog: Interp<6>,
     i_fov: Interp<1>,
     rock: Rock,
+    /// Screen-edge distortion (`ins_17`): mode (0 = off) and per-playfield wave phases.
+    distortion: i32,
+    distortion_phase: [[f32; 2]; 2],
 
     vms: Vec<VmId>,
     /// STD sprite slots (`ins_14`): 2D sprites, at most 8 at a time, with their layer.
@@ -61,6 +64,9 @@ pub struct Stage {
     pub backdrop_origin: [f32; 2],
     pub unknown_ops: HashMap<u16, u32>,
 }
+
+/// The 640x480 game canvas.
+const CANVAS: [f32; 2] = [640.0, 480.0];
 
 /// `0xAARRGGBB` -> `[r, g, b, a]`.
 fn argb(c: i32) -> [f32; 4] {
@@ -129,6 +135,8 @@ impl Stage {
             i_fog: Interp::default(),
             i_fov: Interp::default(),
             rock: Rock::default(),
+            distortion: 0,
+            distortion_phase: [[0.0; 2]; 2],
             vms,
             slots: [None; 8],
             // APPROX: anchor of sprite-slot sprites; confirm against th19.exe.
@@ -174,6 +182,67 @@ impl Stage {
             self.fov = f;
         }
         self.update_rock();
+        if self.distortion != 0 {
+            for p in &mut self.distortion_phase {
+                p[0] = wrap(p[0] + 0.049_087_387);
+                p[1] = wrap(p[1] + 0.039_269_91);
+            }
+        }
+    }
+
+    /// Triangles for the screen-edge distortion of each playfield (`ins_17`): a grid laid
+    /// over a band of the field that redraws the stage image with its interior vertices
+    /// pushed around by two drifting sine waves. Samples [`th_anm::SCENE_TEXTURE`].
+    pub fn distortion_batches(&self, fields: &[[f32; 4]]) -> Vec<th_anm::DrawBatch> {
+        if self.distortion == 0 {
+            return Vec::new();
+        }
+        // Grid size per mode, from th19.exe: 17 columns, 7 or 17 rows.
+        let (cols, rows) = if self.distortion == 1 { (17usize, 7usize) } else { (17, 17) };
+        // APPROX: band height and placement (mode 1 along the top, mode 2 along the bottom)
+        // are inferred; the exact rectangle is passed in registers in th19.exe.
+        const BAND: f32 = 112.0;
+        let mut out = Vec::new();
+        for (k, field) in fields.iter().take(2).enumerate() {
+            let [fx, fy, fw, fh] = *field;
+            let (y0, strong_at_top) = if self.distortion == 1 { (fy, true) } else { (fy + fh - BAND, false) };
+            let mut grid = vec![[0.0f32; 4]; cols * rows]; // x, y, u, v
+            let [mut pa, mut pb] = [self.distortion_phase[k][0], self.distortion_phase[k][1]];
+            for i in 0..cols {
+                for j in 0..rows {
+                    let rest = [fx + fw * i as f32 / (cols - 1) as f32, y0 + BAND * j as f32 / (rows - 1) as f32];
+                    let frac = j as f32 / (rows - 1) as f32;
+                    let amp = 24.0 * if strong_at_top { 1.0 - frac } else { frac };
+                    let interior = i != 0 && j != 0 && i != cols - 1 && j != rows - 1;
+                    let (dx, dy) = if interior { (pa.sin() * amp, pb.sin() * amp) } else { (0.0, 0.0) };
+                    grid[i * rows + j] =
+                        [rest[0] + dx, rest[1] + dy, rest[0] / CANVAS[0], rest[1] / CANVAS[1]];
+                    pa = wrap(pa + 0.668_424);
+                }
+                pb = wrap(pb - 1.495_996_6);
+            }
+            let colour = [1.0, 1.0, 1.0, 0xc0 as f32 / 255.0];
+            let v = |g: [f32; 4]| th_anm::Vertex { pos: [g[0], g[1]], uv: [g[2], g[3]], color: colour, w: 1.0, fog: 0.0, depth: 0.0 };
+            let mut vertices = Vec::with_capacity((cols - 1) * (rows - 1) * 6);
+            for i in 0..cols - 1 {
+                for j in 0..rows - 1 {
+                    let a = grid[i * rows + j];
+                    let b = grid[(i + 1) * rows + j];
+                    let c = grid[(i + 1) * rows + j + 1];
+                    let d = grid[i * rows + j + 1];
+                    vertices.extend_from_slice(&[v(a), v(b), v(c), v(a), v(c), v(d)]);
+                }
+            }
+            out.push(th_anm::DrawBatch {
+                texture: Some(th_anm::SCENE_TEXTURE),
+                blend: th_anm::BlendMode::Normal,
+                depth: th_anm::DepthMode::Off,
+                layer: 0,
+                clip: Some(*field),
+                vertices,
+            });
+        }
+        out
     }
 
     fn run(&mut self, world: &mut World, lib: &AnmLibrary) {
@@ -274,7 +343,10 @@ impl Stage {
             20 => self.draw_distance_sq = f(0) * f(0),
             // fovTime(t, mode, fov)
             21 => self.i_fov.start([self.fov], [f(2)], i(0), i(1)),
-            // 17: screen-edge distortion.
+            17 => {
+                self.distortion = i(0);
+                self.distortion_phase = [[0.0; 2]; 2];
+            }
             op => *self.unknown_ops.entry(op).or_default() += 1,
         }
     }
