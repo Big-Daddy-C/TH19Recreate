@@ -18,6 +18,11 @@ pub enum Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub mod anm;
+pub mod bgm;
+pub mod ecl;
+pub mod msg;
+pub mod sht;
+pub mod stage;
 
 /// Bounds-checked little-endian reader over a byte slice, positioned at a base offset.
 #[derive(Clone, Copy)]

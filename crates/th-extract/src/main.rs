@@ -75,6 +75,98 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+        "ecl-info" => {
+            let mut ops: std::collections::BTreeMap<u16, usize> = Default::default();
+            for i in 0..archive.entries().len() {
+                let name = archive.entries()[i].name.clone();
+                if !name.ends_with(".ecl") {
+                    continue;
+                }
+                match th_formats::ecl::EclFile::parse(&archive.read_entry(i)?) {
+                    Ok(e) => {
+                        let n: usize = e.subs.iter().map(|s| s.instrs.len()).sum();
+                        for s in &e.subs {
+                            for ins in &s.instrs {
+                                *ops.entry(ins.opcode).or_default() += 1;
+                            }
+                        }
+                        let first: Vec<_> = e.subs.iter().take(3).map(|s| s.name.as_str()).collect();
+                        println!("{name:<14} anim={:?} ecli={:?} subs={:<4} instrs={n:<6} e.g. {first:?}", e.anim, e.ecli, e.subs.len());
+                    }
+                    Err(err) => println!("{name:<14} ERROR {err}"),
+                }
+            }
+            println!("{} distinct opcodes: {:?}", ops.len(), ops.keys().collect::<Vec<_>>());
+        }
+        "std-info" => {
+            for i in 0..archive.entries().len() {
+                let name = archive.entries()[i].name.clone();
+                if !name.ends_with(".std") {
+                    continue;
+                }
+                match th_formats::stage::StdFile::parse(&archive.read_entry(i)?) {
+                    Ok(s) => {
+                        let quads: usize = s.objects.iter().map(|o| o.quads.len()).sum();
+                        let mut ops: Vec<u16> = s.script.iter().map(|i| i.opcode).collect();
+                        ops.sort();
+                        ops.dedup();
+                        println!(
+                            "{name:<12} anm={:<12} objects={:<3} quads={:<4} instances={:<4} script={:<4} ops={ops:?}",
+                            s.anm_name, s.objects.len(), quads, s.instances.len(), s.script.len()
+                        );
+                    }
+                    Err(err) => println!("{name:<12} ERROR {err}"),
+                }
+            }
+        }
+        "msg-info" => {
+            // Structure only: dialogue text is never printed.
+            let (mut text_bytes, mut sjis_ok) = (0usize, 0usize);
+            let mut ops = std::collections::BTreeSet::new();
+            for i in 0..archive.entries().len() {
+                let name = archive.entries()[i].name.clone();
+                if !name.ends_with(".msg") {
+                    continue;
+                }
+                let bytes = archive.read_entry(i)?;
+                let parsed = if name.starts_with("end") || name.starts_with("staff") {
+                    th_formats::msg::MsgFile::parse_ending(&bytes)
+                } else {
+                    th_formats::msg::MsgFile::parse(&bytes)
+                };
+                match parsed {
+                    Ok(m) => {
+                        let used = m.entries.iter().filter(|e| !e.instrs.is_empty()).count();
+                        let n: usize = m.entries.iter().map(|e| e.instrs.len()).sum();
+                        for e in &m.entries {
+                            for ins in &e.instrs {
+                                ops.insert(ins.opcode);
+                                if ins.data.len() > 8 && ins.opcode == 17 {
+                                    let t = th_formats::msg::decode_text(&ins.data[4..]);
+                                    text_bytes += t.len();
+                                    sjis_ok += sjis_valid(&t);
+                                }
+                            }
+                        }
+                        println!("{name:<12} entries={:<3} used={used:<3} instrs={n}", m.entries.len());
+                    }
+                    Err(err) => println!("{name:<12} ERROR {err}"),
+                }
+            }
+            println!("opcodes: {ops:?}");
+            if text_bytes > 0 {
+                println!("op17 text: {text_bytes} bytes, {:.1}% valid Shift-JIS", 100.0 * sjis_ok as f64 / text_bytes as f64);
+            }
+        }
+        "bgm-info" => {
+            for t in th_formats::bgm::parse_fmt(&archive.read("thbgm.fmt")?)? {
+                let secs = t.track_size as f64 / (t.sample_rate as f64 * t.channels as f64 * t.bits_per_sample as f64 / 8.0);
+                println!(
+                    "{:<16} offset={:<10} intro={:<9} size={:<9} {}Hz {}ch {}bit ({secs:.1}s)",
+                    t.name, t.offset, t.intro_size, t.track_size, t.sample_rate, t.channels, t.bits_per_sample
+                );
+            }
+        }
         other => return Err(format!("unknown command {other}").into()),
     }
     Ok(())
@@ -86,4 +178,24 @@ fn magic(d: &[u8]) -> &'static str {
         [0xff, 0xd8, ..] => "jpg",
         _ => "raw",
     }
+}
+
+/// Count bytes that form valid Shift-JIS sequences (sanity check for text decoding).
+fn sjis_valid(t: &[u8]) -> usize {
+    let (mut i, mut ok) = (0, 0);
+    while i < t.len() {
+        let b = t[i];
+        if b < 0x80 || (0xa1..=0xdf).contains(&b) {
+            ok += 1;
+            i += 1;
+        } else if ((0x81..=0x9f).contains(&b) || (0xe0..=0xfc).contains(&b))
+            && t.get(i + 1).is_some_and(|&c| (0x40..=0xfc).contains(&c) && c != 0x7f)
+        {
+            ok += 2;
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+    ok
 }

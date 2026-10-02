@@ -33,15 +33,16 @@ cargo run --release -p th-extract -- th19.dat list               # list archive 
 cargo run --release -p th-extract -- th19.dat extract data/raw   # dump everything (local only!)
 cargo run --release -p th-extract -- th19.dat anm-info           # parse every .anm, summary
 cargo run --release -p th-extract -- th19.dat anm-dump title.anm # entries / sprites / bytecode
+cargo run --release -p th-extract -- th19.dat ecl-info           # also: std-info, msg-info, bgm-info
 cargo run --release -p th-anm --example anm_smoke -- th19.dat    # run every ANM script headless
-cargo test
+cargo test   # includes a real-data test that parses every file in your th19.dat (set TH19_DAT)
 ```
 
 ## Layout
 
 | Crate | Purpose |
 | --- | --- |
-| `th-formats` | Pure parsers: THA1 archive (`dat`), ANM v8 (`anm`). ECL/STD/MSG/SHT/thbgm.fmt next. |
+| `th-formats` | Pure parsers: THA1 archive, ANM, ECL, STD (`stage`), MSG, SHT, `thbgm.fmt` (`bgm`). |
 | `th-anm` | ANM virtual machine + interpolators; emits renderer-agnostic triangle batches. |
 | `th-extract` | CLI for inspecting / extracting your game data. |
 | `th19` | The game binary: winit window, wgpu renderer, fixed 60 Hz loop. |
@@ -57,7 +58,12 @@ deterministic (needed for replays and netplay).
 | ANM v8 + TH19 extensions (cropped PNG/JPEG THTX, 40-byte sprites) | ✅ all 124 files parse |
 | ANM VM (vars, math, jumps, interrupts, interpolation modes 0–31, children, primitives) | 🟡 all 3,009 scripts run; 600-series TH19 draw ops, `effectNew`, 3D modes approximate |
 | wgpu renderer (10 ANM blend modes, letterboxed 640×480 canvas) | 🟡 works; layers/render stages not yet modelled |
-| STD (3D stage backgrounds) | ⬜ |
+| ECL container (`SCPT`/`ECLH`, 43 files, 169 distinct opcodes) | ✅ parsed |
+| STD (17 stages: objects, quads, instances, camera script) | ✅ parsed |
+| MSG (58 files incl. endings; text XOR decoding) | ✅ parsed |
+| SHT (19 characters; layout reverse-engineered, some fields `UNCONFIRMED`) | ✅ parsed |
+| `thbgm.fmt` (24 tracks, intro/loop points) | ✅ verified against `thbgm.dat` size |
+| STD playback (3D stage backgrounds) | ⬜ |
 | ECL VM (enemies, bullets, spell cards) | ⬜ |
 | Player / shot types (`plXX.sht`, `plXX.ecl`) | ⬜ |
 | Bullet manager, lasers, items, collision | ⬜ |
@@ -67,7 +73,7 @@ deterministic (needed for replays and netplay).
 
 ## Roadmap
 
-1. **Formats** — ECL (`SCPT`), STD, MSG, SHT, `thbgm.fmt`, with round-trip/dump tests against real files.
+1. ~~**Formats**~~ — done; all parsers are checked against every file in `th19.dat` by `cargo test`.
 2. **Stage backgrounds** — STD VM + 3D camera, so `world01..17` render behind the field.
 3. **ECL VM** — sub/thread model, enemy/bullet instructions, `default.ecl` / `common.ecl` / `waveNN.ecl`.
 4. **Gameplay core** — playfields (two of them — TH19 is a VS shooter), player movement/focus,
