@@ -105,7 +105,9 @@ pub struct Player {
 
 impl Player {
     pub fn new(sht: ShtFile, anm_file: usize) -> Self {
-        let power = (sht.power_levels * 100).clamp(0, 400);
+        // Normal power is 200 (two options); the game raises it to 400 only for a timed
+        // boost and drops back to 200 afterwards (FUN_00419ae0).
+        let power = 200.min(sht.power_levels * 100).clamp(0, 400);
         Self {
             sht,
             anm_file,
