@@ -158,6 +158,22 @@ impl Viewer {
         }
     }
 
+    /// Everything needed to draw the current frame: triangles, background colour, fog colour.
+    fn frame(&self) -> (th_anm::DrawList, [f32; 3], [f32; 3]) {
+        let (mut list, bg, fog) = match &self.stage {
+            Some(st) => {
+                let cam = st.camera([0.0, 0.0, render::CANVAS_W, render::CANVAS_H]);
+                let c = st.clear_color.map(|x| x / 255.0);
+                let f = [st.fog_color[0] / 255.0, st.fog_color[1] / 255.0, st.fog_color[2] / 255.0];
+                // Distant geometry fades into the fog, so fill the background with it too.
+                (self.world.draw_list(&self.lib, Some(&cam)), if st.fog_range[1] > 0.0 { f } else { c }, f)
+            }
+            None => (Vec::new(), [0.0; 3], [0.0; 3]),
+        };
+        list.extend(self.world.draw_list(&self.lib, None));
+        (list, bg, fog)
+    }
+
     fn title(&mut self) -> String {
         if self.mode == Mode::Stage {
             let name = self.stage_files.get(self.stage_idx).cloned().unwrap_or_default();
@@ -238,7 +254,14 @@ impl Viewer {
     }
 }
 
+/// `--screenshot <file.png> [--frames N]`: render frame N offscreen, save it and exit.
+struct Screenshot {
+    path: PathBuf,
+    frames: u32,
+}
+
 struct App {
+    screenshot: Option<Screenshot>,
     viewer: Viewer,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
@@ -258,6 +281,21 @@ impl ApplicationHandler for App {
         self.renderer = Some(Renderer::new(window.clone()));
         self.window = Some(window);
         self.next_frame = Instant::now();
+
+        if let Some(shot) = self.screenshot.take() {
+            for _ in 0..shot.frames {
+                self.viewer.tick();
+            }
+            let (list, bg, fog) = self.viewer.frame();
+            let r = self.renderer.as_mut().unwrap();
+            let (w, h) = (1280, 960);
+            let rgba = r.screenshot(&self.viewer.lib, &list, bg, fog, w, h);
+            match image::save_buffer(&shot.path, &rgba, w, h, image::ExtendedColorType::Rgba8) {
+                Ok(()) => println!("saved {} (frame {})", shot.path.display(), shot.frames),
+                Err(e) => eprintln!("failed to save {}: {e}", shot.path.display()),
+            }
+            event_loop.exit();
+        }
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -297,20 +335,9 @@ impl ApplicationHandler for App {
                 if self.next_frame < now {
                     self.next_frame = now;
                 }
-                let v = &self.viewer;
-                let (mut list, bg, fog) = match &v.stage {
-                    Some(st) => {
-                        let cam = st.camera([0.0, 0.0, render::CANVAS_W, render::CANVAS_H]);
-                        let c = st.clear_color.map(|x| x / 255.0);
-                        let f = [st.fog_color[0] / 255.0, st.fog_color[1] / 255.0, st.fog_color[2] / 255.0];
-                        // Distant geometry fades into the fog, so fill the background with it too.
-                        (v.world.draw_list(&v.lib, Some(&cam)), if st.fog_range[1] > 0.0 { f } else { c }, f)
-                    }
-                    None => (Vec::new(), [0.0; 3], [0.0; 3]),
-                };
-                list.extend(v.world.draw_list(&v.lib, None));
+                let (list, bg, fog) = self.viewer.frame();
                 if let Some(r) = &mut self.renderer {
-                    r.render(&v.lib, &list, bg, fog);
+                    r.render(&self.viewer.lib, &list, bg, fog);
                 }
                 if now.duration_since(self.last_title) > Duration::from_millis(250) {
                     self.last_title = now;
@@ -366,8 +393,18 @@ fn main() {
         viewer.restart();
     }
 
+    let screenshot = args.iter().position(|a| a == "--screenshot").and_then(|i| args.get(i + 1)).map(|p| Screenshot {
+        path: PathBuf::from(p),
+        frames: args
+            .iter()
+            .position(|a| a == "--frames")
+            .and_then(|i| args.get(i + 1)?.parse().ok())
+            .unwrap_or(0),
+    });
+
     let event_loop = EventLoop::new().expect("event loop");
     let mut app = App {
+        screenshot,
         viewer,
         window: None,
         renderer: None,

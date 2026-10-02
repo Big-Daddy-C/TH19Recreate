@@ -47,12 +47,28 @@ fn argb(c: i32) -> [f32; 4] {
 impl Stage {
     /// `anm_file` is the id of the stage's `.anm` (named by `file.anm_name`) in `lib`.
     pub fn new(file: StdFile, anm_file: usize, lib: &AnmLibrary, world: &mut World) -> Self {
+        // Debug aid: TH19_STD_SCRIPTS=0,3 spawns only quads using those ANM scripts.
+        let only: Option<Vec<u16>> = std::env::var("TH19_STD_SCRIPTS")
+            .ok()
+            .map(|v| v.split(',').filter_map(|x| x.trim().parse().ok()).collect());
+        // Draw order: each object (objects are listed in layer order: ground, trees, canopy...)
+        // across all of its instances, rather than instance by instance. Going instance by
+        // instance lets a nearer row's lower layer paint over a farther row's upper layer,
+        // which shows up as seams between repeating tiles.
+        // APPROX: matches the intended layering; the exact order (or a depth buffer) in
+        // th19.exe still needs confirming.
         let mut vms = Vec::new();
-        for inst in &file.instances {
-            let Some(obj) = file.objects.iter().find(|o| o.id == inst.object) else { continue };
-            for q in &obj.quads {
-                let p = [inst.pos[0] + q.pos[0], inst.pos[1] + q.pos[1], inst.pos[2] + q.pos[2]];
-                vms.push(world.spawn_3d(lib, anm_file, q.script as usize, p));
+        for obj in &file.objects {
+            for inst in file.instances.iter().filter(|i| i.object == obj.id) {
+                for q in &obj.quads {
+                if only.as_ref().is_some_and(|o| !o.contains(&q.script)) {
+                    continue;
+                }
+                    let p = [inst.pos[0] + q.pos[0], inst.pos[1] + q.pos[1], inst.pos[2] + q.pos[2]];
+                    // The quad's size overrides the sprite's (e.g. a 512x256 mist sprite tiled at 1024x512).
+                    let size = (q.size[0] > 0.0 && q.size[1] > 0.0).then_some(q.size);
+                    vms.push(world.spawn_3d(lib, anm_file, q.script as usize, p, size));
+                }
             }
         }
         let mut stage = Self {

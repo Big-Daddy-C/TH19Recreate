@@ -77,13 +77,17 @@ impl Camera {
         Self { view_proj: mul(&view, &proj), viewport, fog_near: fog.0, fog_far: fog.1 }
     }
 
-    /// Project a world point. Returns canvas `[x, y]`, the clip `w` (view depth) and fog factor.
-    pub fn project(&self, p: Vec3) -> Option<([f32; 2], f32, f32)> {
-        let c = transform(p, &self.view_proj);
+    /// Minimum view depth; geometry closer than this is clipped away.
+    pub const NEAR: f32 = 1.0;
+
+    /// World point to homogeneous clip coordinates.
+    pub fn clip(&self, p: Vec3) -> [f32; 4] {
+        transform(p, &self.view_proj)
+    }
+
+    /// Clip coordinates (with `w >= NEAR`) to canvas `[x, y]`, clip `w` and fog factor.
+    pub fn to_screen(&self, c: [f32; 4]) -> ([f32; 2], f32, f32) {
         let w = c[3];
-        if w < 1.0 {
-            return None;
-        }
         let [vx, vy, vw, vh] = self.viewport;
         let x = vx + (c[0] / w * 0.5 + 0.5) * vw;
         let y = vy + (0.5 - c[1] / w * 0.5) * vh;
@@ -92,7 +96,13 @@ impl Camera {
         } else {
             0.0
         };
-        Some(([x, y], w, fog))
+        ([x, y], w, fog)
+    }
+
+    /// Project a world point, or `None` if it is behind the near plane.
+    pub fn project(&self, p: Vec3) -> Option<([f32; 2], f32, f32)> {
+        let c = self.clip(p);
+        (c[3] >= Self::NEAR).then(|| self.to_screen(c))
     }
 }
 

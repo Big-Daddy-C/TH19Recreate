@@ -142,6 +142,8 @@ pub struct Vm {
     pub origin: [f32; 3],
     /// Positioned in 3D stage space and drawn through a [`Camera`] (STD quads).
     pub space_3d: bool,
+    /// Draw the sprite at this size instead of its own (STD quads specify their size).
+    pub size_override: Option<[f32; 2]>,
 }
 
 impl Vm {
@@ -194,6 +196,7 @@ impl Vm {
             parent: None,
             origin: [0.0; 3],
             space_3d: false,
+            size_override: None,
         }
     }
 
@@ -308,8 +311,20 @@ impl World {
     }
 
     /// Create a root VM positioned in 3D stage space (drawn only through a [`Camera`]).
-    pub fn spawn_3d(&mut self, lib: &AnmLibrary, file: usize, script: usize, pos: [f32; 3]) -> VmId {
-        self.spawn_inner(lib, file, script, None, pos, true)
+    /// `size` stretches its sprite to that size (STD quads), like the original.
+    pub fn spawn_3d(
+        &mut self,
+        lib: &AnmLibrary,
+        file: usize,
+        script: usize,
+        pos: [f32; 3],
+        size: Option<[f32; 2]>,
+    ) -> VmId {
+        let id = self.spawn_inner(lib, file, script, None, pos, true);
+        if let Some(vm) = self.get_mut(id) {
+            vm.size_override = size;
+        }
+        id
     }
 
     fn spawn_inner(
@@ -947,6 +962,38 @@ fn rgba(c: [f32; 3], a: f32) -> [f32; 4] {
     [c[0] / 255.0, c[1] / 255.0, c[2] / 255.0, (a / 255.0).clamp(0.0, 1.0)]
 }
 
+/// A vertex in clip space, before the perspective divide.
+#[derive(Clone, Copy)]
+struct Clipped {
+    clip: [f32; 4],
+    uv: [f32; 2],
+    color: [f32; 4],
+}
+
+/// Sutherland–Hodgman clip of a convex polygon against the plane `w = near`.
+fn clip_near(poly: &[Clipped], near: f32) -> Vec<Clipped> {
+    let lerp = |a: &Clipped, b: &Clipped, t: f32| {
+        let m = |x: f32, y: f32| x + (y - x) * t;
+        Clipped {
+            clip: std::array::from_fn(|i| m(a.clip[i], b.clip[i])),
+            uv: std::array::from_fn(|i| m(a.uv[i], b.uv[i])),
+            color: std::array::from_fn(|i| m(a.color[i], b.color[i])),
+        }
+    };
+    let mut out = Vec::with_capacity(poly.len() + 2);
+    for i in 0..poly.len() {
+        let (a, b) = (&poly[i], &poly[(i + 1) % poly.len()]);
+        let (da, db) = (a.clip[3] - near, b.clip[3] - near);
+        if da >= 0.0 {
+            out.push(*a);
+        }
+        if (da >= 0.0) != (db >= 0.0) {
+            out.push(lerp(a, b, da / (da - db)));
+        }
+    }
+    out
+}
+
 /// Maps a VM-local point (relative to its anchor, in pixels) to a screen vertex.
 struct Placer<'a> {
     origin: [f32; 3],
@@ -957,39 +1004,52 @@ struct Placer<'a> {
 }
 
 impl Placer<'_> {
-    fn place(&self, x: f32, y: f32, uv: [f32; 2], color: [f32; 4]) -> Option<Vertex> {
-        let [rx, ry, rz] = self.rot;
-        let Some(cam) = self.camera else {
-            let (s, c) = rz.sin_cos();
-            let pos = [self.origin[0] + x * c - y * s, self.origin[1] + x * s + y * c];
-            return Some(Vertex { pos, uv, color, w: 1.0, fog: 0.0 });
-        };
+    /// VM-local point to 3D world position (rotation applied X, then Y, then Z).
+    fn to_world(&self, x: f32, y: f32) -> [f32; 3] {
         // APPROX: rotation order for 3D sprites is not yet confirmed against th19.exe.
+        let [rx, ry, rz] = self.rot;
         let (sx, cx) = rx.sin_cos();
         let (sy, cy) = ry.sin_cos();
         let (sz, cz) = rz.sin_cos();
         let (x1, y1, z1) = (x, y * cx, y * sx);
         let (x2, y2, z2) = (x1 * cy + z1 * sy, y1, -x1 * sy + z1 * cy);
         let (x3, y3, z3) = (x2 * cz - y2 * sz, x2 * sz + y2 * cz, z2);
-        let world = [self.origin[0] + x3, self.origin[1] + y3, self.origin[2] + z3];
-        let (pos, w, fog) = cam.project(world)?;
+        [self.origin[0] + x3, self.origin[1] + y3, self.origin[2] + z3]
+    }
+
+    fn place_2d(&self, x: f32, y: f32, uv: [f32; 2], color: [f32; 4]) -> Vertex {
+        let (s, c) = self.rot[2].sin_cos();
+        let pos = [self.origin[0] + x * c - y * s, self.origin[1] + x * s + y * c];
+        Vertex { pos, uv, color, w: 1.0, fog: 0.0 }
+    }
+
+    fn finish_3d(&self, cam: &Camera, v: &Clipped) -> Vertex {
+        let (pos, w, fog) = cam.to_screen(v.clip);
         // Fogging an additive sprite towards a colour would brighten it; fade it out instead.
         let (color, fog) = if self.additive {
             let k = 1.0 - fog;
-            ([color[0] * k, color[1] * k, color[2] * k, color[3]], 0.0)
+            ([v.color[0] * k, v.color[1] * k, v.color[2] * k, v.color[3]], 0.0)
         } else {
-            (color, fog)
+            (v.color, fog)
         };
-        Some(Vertex { pos, uv, color, w, fog })
+        Vertex { pos, uv: v.uv, color, w, fog }
     }
 
-    /// Push a triangle, dropping it entirely if any corner is behind the camera.
+    /// Push a triangle. In 3D it is clipped against the camera's near plane first,
+    /// so geometry passing beside or under the camera is cut rather than dropped.
     fn tri(&self, out: &mut Vec<Vertex>, v: [(f32, f32, [f32; 2], [f32; 4]); 3]) {
-        let a = self.place(v[0].0, v[0].1, v[0].2, v[0].3);
-        let b = self.place(v[1].0, v[1].1, v[1].2, v[1].3);
-        let c = self.place(v[2].0, v[2].1, v[2].2, v[2].3);
-        if let (Some(a), Some(b), Some(c)) = (a, b, c) {
-            out.extend_from_slice(&[a, b, c]);
+        let Some(cam) = self.camera else {
+            for (x, y, uv, c) in v {
+                out.push(self.place_2d(x, y, uv, c));
+            }
+            return;
+        };
+        let poly = v.map(|(x, y, uv, color)| Clipped { clip: cam.clip(self.to_world(x, y)), uv, color });
+        let clipped = clip_near(&poly, Camera::NEAR);
+        for i in 1..clipped.len().saturating_sub(1) {
+            for c in [&clipped[0], &clipped[i], &clipped[i + 1]] {
+                out.push(self.finish_3d(cam, c));
+            }
         }
     }
 
@@ -1077,8 +1137,9 @@ fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, camera: Option<&Camera>, out: 
         return None;
     }
 
-    let w = sprite.size[0] * vm.scale[0] * vm.scale2[0];
-    let h = sprite.size[1] * vm.scale[1] * vm.scale2[1];
+    let base = vm.size_override.unwrap_or(sprite.size);
+    let w = base[0] * vm.scale[0] * vm.scale2[0];
+    let h = base[1] * vm.scale[1] * vm.scale2[1];
     // Anchor: 0 = centre, 1 = left/top, 2 = right/bottom.
     let ax = match vm.anchor[0] {
         1 => 0.0,
@@ -1110,4 +1171,27 @@ fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, camera: Option<&Camera>, out: 
         [tl, tr, br, bl],
     );
     Some(sprite.texture)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn v(w: f32) -> Clipped {
+        Clipped { clip: [0.0, 0.0, 0.0, w], uv: [w, 0.0], color: [1.0; 4] }
+    }
+
+    #[test]
+    fn near_clip_keeps_front_and_cuts_crossing_edges() {
+        // Fully in front: unchanged.
+        assert_eq!(clip_near(&[v(5.0), v(6.0), v(7.0)], 1.0).len(), 3);
+        // Fully behind: gone.
+        assert!(clip_near(&[v(-5.0), v(-6.0), v(0.5)], 1.0).is_empty());
+        // One corner behind: becomes a quad, new corners sit exactly on the plane.
+        let q = clip_near(&[v(-1.0), v(3.0), v(3.0)], 1.0);
+        assert_eq!(q.len(), 4);
+        assert!(q.iter().all(|c| c.clip[3] >= 1.0 - 1e-5));
+        // Attributes are interpolated along the cut edge (uv.x mirrors w here).
+        assert!(q.iter().any(|c| (c.uv[0] - 1.0).abs() < 1e-5));
+    }
 }

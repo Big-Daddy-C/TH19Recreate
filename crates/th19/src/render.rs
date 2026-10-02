@@ -272,8 +272,88 @@ impl Renderer {
         self.textures.clear();
     }
 
-    /// Draw one frame. `background` fills the canvas (0..1 RGB); `fog` is the stage fog colour.
+    /// Draw one frame to the window. `background` fills the canvas (0..1 RGB); `fog` is the stage fog colour.
     pub fn render(&mut self, lib: &AnmLibrary, list: &DrawList, background: [f32; 3], fog: [f32; 3]) {
+        let frame = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
+            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
+                self.surface.configure(&self.device, &self.config);
+                return;
+            }
+            _ => return,
+        };
+        let view = frame.texture.create_view(&Default::default());
+        let (w, h) = (self.config.width, self.config.height);
+        let enc = self.draw_into(lib, list, background, fog, &view, w, h);
+        self.queue.submit([enc.finish()]);
+        self.window.pre_present_notify();
+        self.queue.present(frame);
+    }
+
+    /// Render one frame offscreen at `width`x`height` and return it as RGBA8 pixels.
+    pub fn screenshot(
+        &mut self,
+        lib: &AnmLibrary,
+        list: &DrawList,
+        background: [f32; 3],
+        fog: [f32; 3],
+        width: u32,
+        height: u32,
+    ) -> Vec<u8> {
+        let tex = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("screenshot"),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: self.config.format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = tex.create_view(&Default::default());
+        let mut enc = self.draw_into(lib, list, background, fog, &view, width, height);
+        let row = (width * 4).next_multiple_of(256);
+        let buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("screenshot"),
+            size: (row * height) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        enc.copy_texture_to_buffer(
+            tex.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buf,
+                layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(height) },
+            },
+            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        );
+        self.queue.submit([enc.finish()]);
+        let slice = buf.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |_| {});
+        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+        let data = slice.get_mapped_range().expect("map screenshot buffer");
+        let bgra = matches!(self.config.format, wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb);
+        let mut out = Vec::with_capacity((width * height * 4) as usize);
+        for y in 0..height as usize {
+            for px in data[y * row as usize..][..width as usize * 4].chunks_exact(4) {
+                let (r, b) = if bgra { (px[2], px[0]) } else { (px[0], px[2]) };
+                out.extend_from_slice(&[r, px[1], b, 255]);
+            }
+        }
+        out
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_into(
+        &mut self,
+        lib: &AnmLibrary,
+        list: &DrawList,
+        background: [f32; 3],
+        fog: [f32; 3],
+        view: &wgpu::TextureView,
+        target_w: u32,
+        target_h: u32,
+    ) -> wgpu::CommandEncoder {
         self.queue.write_buffer(
             &self.globals_buf,
             0,
@@ -318,21 +398,12 @@ impl Renderer {
             offset += data.len() as u64;
         }
 
-        let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
-            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                self.surface.configure(&self.device, &self.config);
-                return;
-            }
-            _ => return,
-        };
-        let view = frame.texture.create_view(&Default::default());
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("main"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -347,7 +418,7 @@ impl Renderer {
             });
 
             // Letterbox the 4:3 canvas.
-            let (ww, wh) = (self.config.width as f32, self.config.height as f32);
+            let (ww, wh) = (target_w as f32, target_h as f32);
             let scale = (ww / CANVAS_W).min(wh / CANVAS_H);
             let (vw, vh) = (CANVAS_W * scale, CANVAS_H * scale);
             pass.set_viewport((ww - vw) * 0.5, (wh - vh) * 0.5, vw, vh, 0.0, 1.0);
@@ -367,9 +438,7 @@ impl Renderer {
                 pass.draw(0..count, 0..1);
             }
         }
-        self.queue.submit([enc.finish()]);
-        self.window.pre_present_notify();
-        self.queue.present(frame);
+        enc
     }
 }
 
