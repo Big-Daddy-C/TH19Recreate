@@ -352,13 +352,23 @@ fn main() {
     };
     log::info!("using {} ({} files)", dat_path.display(), dat.entries().len());
     println!(
-        "Controls: Left/Right = file, Up/Down = single script, A = all scripts, C = toggle centre origin,\n\
-         R = restart, Space = pause, . = step frame, 0-9 = send interrupt, Esc = quit"
+        "Controls: Tab = switch ANM / stage viewer, Left/Right = file or stage, Up/Down = single script,\n\
+         A = all scripts, C = toggle centre origin, F = fast-forward x8, R = restart, Space = pause,\n\
+         . = step frame, 0-9 = send interrupt, Esc = quit"
     );
+
+    let mut viewer = Viewer::new(dat);
+    // `--stage N` starts in the stage viewer on worldNN.std.
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(n) = args.iter().position(|a| a == "--stage").and_then(|i| args.get(i + 1)?.parse::<usize>().ok()) {
+        viewer.mode = Mode::Stage;
+        viewer.stage_idx = n.saturating_sub(1).min(viewer.stage_files.len().saturating_sub(1));
+        viewer.restart();
+    }
 
     let event_loop = EventLoop::new().expect("event loop");
     let mut app = App {
-        viewer: Viewer::new(dat),
+        viewer,
         window: None,
         renderer: None,
         next_frame: Instant::now(),
