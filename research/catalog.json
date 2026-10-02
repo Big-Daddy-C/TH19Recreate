@@ -1,0 +1,387 @@
+{
+  "schema": 1,
+  "reference": {
+    "game": "Touhou19 v1.10c, native Windows x86 PE32",
+    "exe_sha256": "8918fb39d511c9906ef769c6dd2761e7cb44ded5b7c4c1cd99c8992d12c078e9",
+    "baseline_note": "Source fingerprints recorded 2026-10-02 from existing files. They detect changed evidence, not whether each interpretation is correct. code_checked findings carry prior-turn checks; prior_session findings require targeted verification before implementation."
+  },
+  "symbols": {
+    "charge_controller": {
+      "address": "004e79e0",
+      "decompile_sha256": "7079c366cbb0976aaa3304648690b397a5b6010acf985f2e99555e101c181371"
+    },
+    "player_load": {
+      "address": "005478f0",
+      "decompile_sha256": "1ba810cc6f399e2f2a37b4a305f2713eac1e667bb625c765512a1432a62b16f6"
+    },
+    "reimu_charge_start": {
+      "address": "0053b110",
+      "decompile_sha256": "3a0f5f78905e0a15cce0369b20db4ad706206e14d13d3ec48ec103b9e6ab38be"
+    },
+    "reimu_update": {
+      "address": "0053ac80",
+      "decompile_sha256": "96cf1cf6ceeadae05bbdc2ccc68e61674ce74fa2f2ec41d4fd5a6d77ba6a1384"
+    },
+    "reimu_skill_start": {
+      "address": "0053af60",
+      "decompile_sha256": "84a6dd1bf4d1a169ca992664c2035ccfe9d6416dcf1d709d81dd8fff51a90988"
+    },
+    "reimu_skill_init": {
+      "address": "0053b920",
+      "decompile_sha256": "5d9887a109565cdfb9c951fb2b32ba14257907956e6f66ea9a21f3524aa05847"
+    },
+    "reimu_skill_update": {
+      "address": "0053b3a0",
+      "decompile_sha256": "3cc2af5c02a67474989a4e85e7d2aad007b9f270aba6217e2d372585ba0ac108"
+    },
+    "ex_dispatch": {
+      "address": "0050d8a0",
+      "decompile_sha256": "e31ebe40eebfeb493a1bda0def345d653c10afaf2d4bcb7e571c11fd04064fd7"
+    },
+    "boss_dispatch": {
+      "address": "0050d800",
+      "decompile_sha256": "91ff3a704c34dd0c02542d83b7d0d276d88a814945ff9958915b45c32f5e1f90"
+    },
+    "opponent_boss_active": {
+      "address": "0050d940",
+      "decompile_sha256": "e7d1177ab6df3c27ee16bef233dd35eb54f886f70a64b8569f84e78d1bd399cb"
+    },
+    "meter_spend": {
+      "address": "0040b3e0",
+      "decompile_sha256": "274bbe0f71fa314f4d4ef5b97bb45475a2b01e1aa3c54836cc173b8146f02c86"
+    },
+    "barrier_restore": {
+      "address": "0040b420",
+      "decompile_sha256": "52a33b199cbc3b52fbfc0237a86f72aa51f97a8127bc4d20a62017cb60dfa06b"
+    },
+    "shot_select": {
+      "address": "0054f990",
+      "decompile_sha256": "6fe3d91e0d76f7c42068903dd464130c0ccd4704305bc4f0136e6922971a332e"
+    },
+    "shot_spawn": {
+      "address": "0054e960",
+      "decompile_sha256": "555ae865c2f42c4b106a9fc22480f54e5da704713ab59303ab54f5c41537d056"
+    },
+    "shot_update": {
+      "address": "0054df10",
+      "decompile_sha256": "7b71676b02d57bda3f94505e5b0a290c3cda4896106a2b7475329167a57ce192"
+    },
+    "shot_hit": {
+      "address": "0054fba0",
+      "decompile_sha256": "76e45d976aa2f97fcf52a13732d2b1ee5c48b3b37c2c6b81431077fd8ee98fd9"
+    },
+    "charge_shot_hit": {
+      "address": "0054b370",
+      "decompile_sha256": null
+    },
+    "charge_shot_speed": {
+      "address": "0054b380",
+      "decompile_sha256": null
+    },
+    "charge_shot_init": {
+      "address": "0054b3e0",
+      "decompile_sha256": null
+    },
+    "enemy_death": {
+      "address": "0050c1f0",
+      "decompile_sha256": "049d952ce78ef12f492f673283fcc611f112682a5f790dd3eef232a5000727b9"
+    },
+    "death_chain": {
+      "address": "0051d4e0",
+      "decompile_sha256": "687b785f491a92339c05ebcc48aed7f93565227399c66ca3928297790058deb5"
+    },
+    "chain_timer": {
+      "address": "00549780",
+      "decompile_sha256": "516342de187a86bc1224b45dc6b817f22b746b7e733763a6613ddd118dd7665f"
+    },
+    "player_death": {
+      "address": "00549830",
+      "decompile_sha256": "75bfefaf50198e145b2d4da55fdac77107f2d18a8837e36baa8cf67d5cbd967c"
+    },
+    "ecl_core": {
+      "address": "005687d0",
+      "decompile_sha256": "2089b2e0f69811214c3ab41d0f27f78ae40a92e76004ac773d58f51503876a16"
+    },
+    "ecl_host": {
+      "address": "004fecc0",
+      "decompile_sha256": "145bb78a3907254fc4f19360d88f5865d82d3514bf44c3babe91d4219841972a"
+    },
+    "ecl_int_globals": {
+      "address": "004fd720",
+      "decompile_sha256": "63e6b52ac859a7b1cd8eb6d364df9ee5236d040455c6850b2e7be9c5c4b62830"
+    },
+    "ecl_float_globals": {
+      "address": "004fc530",
+      "decompile_sha256": "72f092fb903a1e2032a7d09854f784dc3bef12586605d0194b70523c68886254"
+    },
+    "stage_script": {
+      "address": "004ea770",
+      "decompile_sha256": "51beb7093894a883c3da48097e75a1a997cdaf7a1d20807cdbd033a5822b9fb8"
+    },
+    "stage_draw": {
+      "address": "004ebb30",
+      "decompile_sha256": "0c23f3277412c4c0a28453a696aa3a88fc60c7d958c62464c7f3e483f1f5e8ea"
+    },
+    "stage_camera": {
+      "address": "00534a30",
+      "decompile_sha256": "f38b549bd581e6a918143baa53d9e8f35052ba1fb82116624519f7bd85729f7f"
+    }
+  },
+  "features": {
+    "charge": {
+      "implementation": "partial",
+      "summary": "X first-tier Reimu charge is playable at 92b07ae; earned higher tiers remain gated.",
+      "symbols": [
+        "charge_controller",
+        "player_load",
+        "reimu_charge_start",
+        "reimu_update",
+        "reimu_skill_start",
+        "reimu_skill_init",
+        "reimu_skill_update",
+        "ex_dispatch",
+        "boss_dispatch",
+        "opponent_boss_active",
+        "meter_spend",
+        "barrier_restore",
+        "shot_select",
+        "shot_spawn",
+        "shot_update",
+        "shot_hit",
+        "charge_shot_hit",
+        "charge_shot_speed",
+        "charge_shot_init"
+      ],
+      "code": [
+        "crates/th-game/src/charge.rs",
+        "crates/th-game/src/player.rs",
+        "crates/th19/src/main.rs"
+      ],
+      "tests": [
+        "crates/th-game/tests/charge_data.rs",
+        "crates/th-game/tests/charge_gameplay.rs"
+      ],
+      "findings": [
+        {
+          "text": "SHT absolute offsets 0x2c/0x30/0x34/0x38 multiply by 10 to yield thresholds. Initial meter = first threshold. Reimu: 500/1000/1700/2500. Values are loaded from assets, not authored here.",
+          "sources": [
+            "player_load"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Hold input bit 2; release selects tier. Invalid player state cancels. Charge increment is clamped speed-percent *10/100; cap is current meter; release recovery is 10 frames. Runtime temporarily caps at tier 1.",
+          "sources": [
+            "charge_controller"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Basic attack also runs on higher-tier release. Reimu resets timer and invokes SHT slot 10 at times 0..20. Four records fire at time 0, damage 7, initial speed 14; no meter cost.",
+          "sources": [
+            "reimu_charge_start",
+            "reimu_update",
+            "shot_select"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Table 005a0440[11] -> 0054b3e0 sets piercing byte +114. Table 005a0400[8] -> 0054b380 decelerates by 0.95 to minimum 0.2 before time 120, then accelerates by 0.2. Table 005a03d0[7] -> 0054b370 calls 0054fba0; piercing avoids hit deletion. These three entry points are absent as standalone exports.",
+          "sources": [
+            "charge_shot_init",
+            "charge_shot_speed",
+            "charge_shot_hit",
+            "shot_hit"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "aura.anm script29 follows player while charging; interrupt8 at first threshold; removed on release/cancel. pl00.anm script10 owns orb spin and trail; do not overwrite its rotation every frame.",
+          "sources": [
+            "charge_controller",
+            "shot_update"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Charge speed currently assumes 100 percent. Exact initialization and ability modifiers remain to trace.",
+          "sources": [],
+          "evidence": "assumption"
+        },
+        {
+          "text": "Skill cost = skill threshold minus attack threshold. EX cost = EX minus attack; boss cost = boss minus attack. EX/boss restore barrier. Active opponent boss causes boss-tier fallback to EX.",
+          "sources": [
+            "charge_controller",
+            "meter_spend",
+            "barrier_restore",
+            "opponent_boss_active"
+          ],
+          "evidence": "prior_session"
+        },
+        {
+          "text": "Reimu skill initializer uses three script20 VMs, fixed release center, 45-frame attack plus 60-frame tail; radius 0->64->0 over two 22-frame interpolations, phase advances 10 degrees/frame, grants 40 invulnerability frames. Verify ANM file and hidden collider arguments before implementing.",
+          "sources": [
+            "reimu_skill_start",
+            "reimu_skill_init",
+            "reimu_skill_update"
+          ],
+          "evidence": "prior_session"
+        },
+        {
+          "text": "Character vtable at 005a8a18: +0xc basic, +0x10 skill, +0x14 EX, +0x18 boss, +0x24 opponent boss-active query. EX/Boss callbacks spawn ExtraAttack/BossAttack on opponent field, default HP 200.",
+          "sources": [
+            "ex_dispatch",
+            "boss_dispatch",
+            "opponent_boss_active"
+          ],
+          "evidence": "prior_session"
+        }
+      ],
+      "checks": {
+        "automated": "Asset-backed charge and viewer-input tests passed at 92b07ae; see test files. Not rerun merely to write this catalog.",
+        "visual": "Provisional HUD screenshot inspected at data/reference/charge-hud.png; charge-vs-original footage comparison not run.",
+        "original_game_parity": "not_run"
+      },
+      "next": [
+        "Trace natural meter gains separately from ghost/EX counters; do not assume every kill reward is charge meter.",
+        "Verify skill sprite file and hidden collider arguments; implement local skill with tests.",
+        "Route EX/boss events after both fields update; verify ECL globals/opcodes and boss registration.",
+        "Add release-tier costs and shield recovery, then unlock higher-tier charging."
+      ],
+      "user_observations": [
+        "Two hearts by default; start with barrier; broken barrier grants invulnerability; unshielded hit loses heart and restores barrier.",
+        "User describes charge -> skill -> EX -> boss tiers, EX restoring shield and attacking opponent. Consult these existing notes before asking them to repeat."
+      ]
+    },
+    "barrier": {
+      "implementation": "partial",
+      "summary": "Two hearts, starting barrier, hit states and round point supported; earned EX recovery and match continuation pending.",
+      "symbols": [
+        "player_death",
+        "barrier_restore"
+      ],
+      "code": [
+        "crates/th-game/src/player.rs",
+        "crates/th-game/src/round.rs"
+      ],
+      "tests": [
+        "crates/th-game/tests/charge_gameplay.rs"
+      ],
+      "findings": [
+        {
+          "text": "Current runtime: shield break gives 100 invulnerability frames and 40-frame knockback; heart loss restores shield; final defeat awards one opponent point. Full multi-round progression is pending.",
+          "sources": [
+            "player_death",
+            "barrier_restore"
+          ],
+          "evidence": "prior_session"
+        }
+      ],
+      "checks": {
+        "original_game_parity": "not_run"
+      },
+      "next": [
+        "Connect EX/boss barrier recovery when higher charge tiers ship."
+      ]
+    },
+    "combat": {
+      "implementation": "partial",
+      "summary": "Waves, enemy bullets, damage flash, directional death effects and chain explosions work; meter rewards remain unported.",
+      "symbols": [
+        "enemy_death",
+        "death_chain",
+        "chain_timer"
+      ],
+      "code": [
+        "crates/th-game/src/side.rs",
+        "crates/th-game/src/enemy.rs",
+        "crates/th-game/src/bullet.rs"
+      ],
+      "tests": [],
+      "findings": [
+        {
+          "text": "Do not conflate chain timer FUN00549780 with charge meter. Enemy death calls FUN0051d4e0, which invokes several distinct reward helpers. Prior investigation has not identified natural charge-meter gain.",
+          "sources": [
+            "enemy_death",
+            "death_chain",
+            "chain_timer"
+          ],
+          "evidence": "prior_session"
+        }
+      ],
+      "checks": {
+        "original_game_parity": "not_run"
+      },
+      "next": [
+        "Trace reward recipients and pending item/graze systems before enabling meter gain."
+      ]
+    },
+    "ecl": {
+      "implementation": "partial",
+      "summary": "Core VM and wave/bullet host run; do not assume all boss scripts/opcodes are supported.",
+      "symbols": [
+        "ecl_core",
+        "ecl_host",
+        "ecl_int_globals",
+        "ecl_float_globals"
+      ],
+      "code": [
+        "crates/th-ecl/src/lib.rs",
+        "crates/th-game/src/enemy.rs"
+      ],
+      "tests": [],
+      "findings": [
+        {
+          "text": "Core dispatch handles opcodes below300; enemy host dispatch is FUN004fecc0. Unknown-opcode/global counters exist; inspect them when introducing a new script instead of silently claiming support.",
+          "sources": [
+            "ecl_core",
+            "ecl_host"
+          ],
+          "evidence": "prior_session"
+        }
+      ],
+      "checks": {
+        "original_game_parity": "not_run"
+      },
+      "next": [
+        "Validate BossAttack dependencies and Ecl_EtBreakLv2/3/4 before earned dispatch."
+      ]
+    },
+    "stage": {
+      "implementation": "partial",
+      "summary": "User reported backgrounds near parity; exact remaining effects still need comparison.",
+      "symbols": [
+        "stage_script",
+        "stage_draw",
+        "stage_camera"
+      ],
+      "code": [
+        "crates/th-stage/src/lib.rs",
+        "crates/th-anm/src/vm.rs",
+        "crates/th19/src/render.rs"
+      ],
+      "tests": [],
+      "findings": [
+        {
+          "text": "Preserve shared stage behind both fields, layer ordering, D16 depth, LESSEQUAL and alpha threshold1/255. Previous guessed depth/alpha/culling fixes regressed water.",
+          "sources": [
+            "stage_draw",
+            "stage_camera"
+          ],
+          "evidence": "prior_session"
+        },
+        {
+          "text": "Known approximate areas include sprite-slot anchor, distortion band rectangle and uninvestigated stage9 blur. Stage14 flicker needs user/reference confirmation.",
+          "sources": [],
+          "evidence": "prior_session"
+        }
+      ],
+      "checks": {
+        "original_game_parity": "not_run"
+      },
+      "next": [
+        "Use fixed-frame comparison for reported defects; avoid global render hacks."
+      ]
+    }
+  }
+}

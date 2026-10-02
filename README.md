@@ -94,6 +94,11 @@ deterministic (needed for replays and netplay).
 
 ### Reverse-engineering workflow
 
+Start with [research/WORKFLOW.md](research/WORKFLOW.md) and
+`python tools/research.py topic`. The saved feature catalog links source addresses,
+implementation, existing checks and unresolved questions. `python tools/research.py check`
+detects changed reference files before we reuse their findings.
+
 Public format docs cover the file layouts and most of the opcodes, but exact behaviour
 (e.g. render modes, TH19-only opcodes, ECL instruction semantics, CPU AI) has to come from
 the executable. Suggested pipeline:

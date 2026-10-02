@@ -2,3 +2,7 @@
 # Extracted/converted game assets — never commit these, they belong to ZUN / Team Shanghai Alice.
 /data
 *.dat
+
+# Local Python lookup-tool caches
+__pycache__/
+*.pyc
