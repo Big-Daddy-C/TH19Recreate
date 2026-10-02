@@ -195,12 +195,17 @@ impl Viewer {
             Some(id) => Some(id),
             None => self.dat.read("ghost.anm").ok().and_then(|b| self.lib.load("ghost.anm", &b).ok()),
         };
+        let aura = match self.lib.file_id("aura.anm") {
+            Some(id) => Some(id),
+            None => self.dat.read("aura.anm").ok().and_then(|b| self.lib.load("aura.anm", &b).ok()),
+        };
         for s in &mut sides {
             s.st.bullet_types = self.bullet_types.clone();
             s.st.ghost_anm = ghost;
             s.start(&prog);
             if let (Some(sht), Some(anm)) = (&sht, pl_anm) {
                 let mut p = th_game::player::Player::new(sht.clone(), anm);
+                p.aura_anm = aura;
                 p.effect_anm = s.st.anm_files[1];
                 s.player = Some(p);
             }
@@ -290,6 +295,22 @@ impl Viewer {
             list.extend(st.distortion_batches(&FIELDS));
         }
         list.extend(self.world.draw_list(&self.lib, th_anm::Pass::Ui));
+        if let Some(g) = &self.game {
+            for (side, field) in g.sides.iter().zip(FIELDS) {
+                if let Some(p) = &side.player {
+                    // Provisional HUD, outside the playfield. Top row = available meter;
+                    // bottom row = held charge. Original front.anm HUD remains to be ported.
+                    let [x, _, w, _] = field;
+                    list.push(th_anm::DrawBatch::solid_rect([x, 465.0, w, 14.0], [0.04, 0.04, 0.08, 1.0]));
+                    list.push(th_anm::DrawBatch::solid_rect([x, 466.0, w*p.meter as f32/2500.0, 4.0], [0.15, 0.45, 0.95, 1.0]));
+                    let ready = p.charge.value >= p.charge_settings.attack;
+                    let color = if ready { [1.0, 0.8, 0.2, 1.0] } else { [0.7, 0.7, 0.8, 1.0] };
+                    list.push(th_anm::DrawBatch::solid_rect([x, 472.0, w*p.charge.value as f32/2500.0, 5.0], color));
+                    let marker = x + w*p.charge_settings.attack as f32/2500.0;
+                    list.push(th_anm::DrawBatch::solid_rect([marker, 466.0, 1.0, 12.0], [1.0, 1.0, 1.0, 1.0]));
+                }
+            }
+        }
         (list, scene_end, bg, fog)
     }
 
@@ -302,7 +323,8 @@ impl Viewer {
                     .iter()
                     .map(|s| {
                         let lives = s.player.as_ref().map_or(0, |p| p.lives);
-                        format!("{} enemies, {} hearts, chain {}", s.enemies.len(), lives, s.st.chain)
+                        format!("{} enemies, {} hearts, chain {}, charge {}/{}", s.enemies.len(), lives, s.st.chain,
+                            s.player.as_ref().map_or(0, |p| p.charge.value), s.player.as_ref().map_or(0, |p| p.charge_settings.attack))
                     })
                     .collect();
                 return format!(
@@ -350,6 +372,7 @@ impl Viewer {
             (KeyCode::ArrowLeft, LEFT),
             (KeyCode::ArrowRight, RIGHT),
             (KeyCode::KeyZ, SHOT),
+            (KeyCode::KeyX, CHARGE),
         ] {
             if h(key) {
                 bits |= bit;
@@ -381,7 +404,7 @@ impl Viewer {
             }
             KeyCode::KeyF => self.fast = !self.fast,
             // Debug: send an extra attack into player 1's field.
-            KeyCode::KeyX if self.mode == Mode::Game => self.debug_extra_attack(),
+            KeyCode::KeyB if self.mode == Mode::Game => self.debug_extra_attack(),
             KeyCode::KeyV => self.show_fields = !self.show_fields,
             KeyCode::ArrowRight | KeyCode::ArrowLeft if self.mode != Mode::Anm => {
                 let n = self.stage_files.len().max(1);
@@ -467,6 +490,7 @@ impl ApplicationHandler for App {
         }
         let attrs = Window::default_attributes()
             .with_title("th19-rs")
+            .with_visible(self.screenshot.is_none())
             .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 960.0));
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         self.renderer = Some(Renderer::new(window.clone()));
@@ -582,7 +606,7 @@ fn main() {
     println!(
         "Controls: Tab = switch ANM viewer / stage viewer / game, Left/Right = file or stage, Up/Down = single script,\n\
          A = all scripts, C = toggle centre origin, F = fast-forward x8, V = toggle field divider,\n\
-         R = restart, Space = pause. Game: arrows = move, Z = shot, Shift = focus, PgUp/PgDn = stage,\n\
+         R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (tier 1), B = debug EX, Shift = focus, PgUp/PgDn = stage,\n\
          . = step frame, 0-9 = send interrupt, Esc = quit"
     );
 
@@ -621,4 +645,37 @@ fn main() {
         last_title: Instant::now(),
     };
     event_loop.run_app(&mut app).expect("run app");
+}
+
+#[cfg(test)]
+mod charge_input_tests {
+    use super::*;
+    #[test]
+    fn x_drives_player_charge_without_debug_enemy_injection() {
+        let Some(home) = std::env::var_os("USERPROFILE") else { return };
+        let path = std::env::var_os("TH19_DAT").map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(home).join("Downloads/th19/th19/th19.dat"));
+        if !path.is_file() { eprintln!("Original assets absent: skipping viewer input test"); return; }
+        let mut viewer = Viewer::new(Archive::open(path).unwrap());
+        viewer.mode = Mode::Game;
+        viewer.game = viewer.load_game();
+        for side in &mut viewer.game.as_mut().unwrap().sides {
+            side.stage = None;
+            side.player.as_mut().unwrap().state = th_game::player::State::Normal;
+        }
+        viewer.held.insert(KeyCode::KeyX);
+        viewer.key(KeyCode::KeyX);
+        for _ in 0..50 { viewer.tick(); }
+        let game = viewer.game.as_ref().unwrap();
+        assert_eq!(game.sides[0].player.as_ref().unwrap().charge.value, 500);
+        assert!(game.sides[0].enemies.is_empty(), "X must no longer inject debug ExtraAttack");
+        let (list, _, _, _) = viewer.frame();
+        assert!(list.iter().any(|batch| batch.vertices.iter().any(|v| v.color == [1.0, 0.8, 0.2, 1.0])),
+            "ready charge must produce a gold HUD bar");
+        viewer.held.remove(&KeyCode::KeyX);
+        viewer.tick();
+        let game = viewer.game.as_ref().unwrap();
+        assert_eq!(game.sides[0].player.as_ref().unwrap().bullets.iter().filter(|b| b.charge_shot).count(), 4);
+        assert_eq!(game.sides[1].player.as_ref().unwrap().bullets.iter().filter(|b| b.charge_shot).count(), 0);
+    }
 }

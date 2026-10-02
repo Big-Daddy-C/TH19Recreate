@@ -13,6 +13,7 @@ use crate::enemy::{field_to_canvas, flag, Enemy};
 /// Input bits, as the game stores them.
 pub mod input {
     pub const SHOT: u32 = 1;
+    pub const CHARGE: u32 = 2;
     pub const FOCUS: u32 = 8;
     pub const UP: u32 = 0x10;
     pub const DOWN: u32 = 0x20;
@@ -91,6 +92,9 @@ pub struct PlayerBullet {
     pub homing: bool,
     pub vm: Option<VmId>,
     pub time: i32,
+    /// Reimu slot 10: init callback 11 sets piercing, update callback 8 controls speed.
+    pub charge_shot: bool,
+    last_enemy: Option<i32>,
 }
 
 pub struct Player {
@@ -103,6 +107,13 @@ pub struct Player {
     pub state_time: i32,
     pub focused: bool,
     pub power: i32,
+    pub charge_settings: crate::charge::Settings,
+    pub charge: crate::charge::Gauge,
+    /// Status +0x24. Starts at the first SHT threshold (FUN_005478f0).
+    pub meter: i32,
+    charge_timer: Option<i32>,
+    pub aura_anm: Option<usize>,
+    charge_vm: Option<VmId>,
     prev_vx: i32,
     body: Option<VmId>,
     options: Vec<PlayerOption>,
@@ -145,6 +156,8 @@ impl Player {
         // Normal power is 200 (two options); the game raises it to 400 only for a timed
         // boost and drops back to 200 afterwards (FUN_00419ae0).
         let power = 200.min(sht.power_levels * 100).clamp(0, 400);
+        // APPROX: use 100% charge speed until match settings / card modifiers are loaded.
+        let charge_settings = crate::charge::Settings::from_sht(&sht, 100);
         Self {
             sht,
             anm_file,
@@ -154,6 +167,12 @@ impl Player {
             state_time: 0,
             focused: false,
             power,
+            charge_settings,
+            charge: crate::charge::Gauge::default(),
+            meter: charge_settings.attack,
+            charge_timer: None,
+            aura_anm: None,
+            charge_vm: None,
             prev_vx: 0,
             body: None,
             options: Vec::new(),
@@ -353,6 +372,7 @@ impl Player {
         if self.state == State::Normal {
             self.update_shots(keys, world, lib, field, enemies);
         }
+        self.update_charge(keys, world, lib, field);
         self.update_bullets(enemies, world, field);
 
         let at = field_to_canvas(field, self.pos);
@@ -367,6 +387,37 @@ impl Player {
             } else {
                 vm.color_mode = 0;
             }
+        }
+    }
+
+    /// Playable first charge tier. Higher tiers remain gated until their meter gain and
+    /// character callbacks are implemented; do not spend meter for a nonexistent attack.
+    fn update_charge(&mut self, keys: u32, world: &mut World, lib: &AnmLibrary, field: [f32; 4]) {
+        let previous = self.charge.value;
+        let released = self.charge.tick(keys & input::CHARGE != 0, self.state == State::Normal,
+            self.meter.min(self.charge_settings.attack), self.charge_settings, false, false);
+        if self.charge.value > 0 {
+            if self.charge_vm.is_none() {
+                self.charge_vm = self.aura_anm.map(|file| world.spawn_clipped(lib, file, 29,
+                    field_to_canvas(field, self.pos), field));
+            }
+            if previous < self.charge_settings.attack && self.charge.value >= self.charge_settings.attack {
+                if let Some(id) = self.charge_vm { world.interrupt(id, 8); }
+            }
+        } else if let Some(id) = self.charge_vm.take() {
+            world.delete(id);
+        }
+        if let Some(vm) = self.charge_vm.and_then(|id| world.get_mut(id)) {
+            let at = field_to_canvas(field, self.pos);
+            vm.origin = [at[0], at[1], 0.0];
+        }
+        if released == Some(crate::charge::Level::Attack) {
+            // EXReimu::charge (0053b110); updater 0053ac80 calls slot 10 on ticks 0..20.
+            self.charge_timer = Some(0);
+        }
+        if let Some(t) = self.charge_timer {
+            self.fire_slot(10, t, 0, world, lib, field);
+            self.charge_timer = (t < 20).then_some(t + 1);
         }
     }
 
@@ -435,9 +486,14 @@ impl Player {
         if self.focused && slot < 10 {
             slot += 5;
         }
+        self.fire_slot(slot, timer, long, world, lib, field);
+    }
+
+    fn fire_slot(&mut self, slot: usize, timer: i32, long: i32, world: &mut World, lib: &AnmLibrary, field: [f32; 4]) {
         let Some(Some(records)) = self.sht.slots.get(slot) else { return };
         let records: Vec<ShotRecord> = records.clone();
         for r in &records {
+            if r.interval < 0 { break; }
             let fires = if r.alt_interval != 0 {
                 long >= 0 && long % r.alt_interval as i32 == r.alt_phase as i32
             } else {
@@ -466,7 +522,9 @@ impl Player {
         let vm = (r.anm_script >= 0).then(|| {
             let id = world.spawn_clipped(lib, self.anm_file, r.anm_script as usize, field_to_canvas(field, pos), field);
             if let Some(v) = world.get_mut(id) {
-                v.rot[2] = r.angle;
+                // Charge orbs rotate through script 10's angular velocity. Their ANM
+                // does not request direction-following rotation (0054df10, +0x4cc).
+                if r.funcs != [11, 8, 0, 7] { v.rot[2] = r.angle; }
             }
             id
         });
@@ -479,6 +537,8 @@ impl Player {
             homing: r.funcs[0] == 1,
             vm,
             time: 0,
+            charge_shot: r.funcs == [11, 8, 0, 7],
+            last_enemy: None,
         });
     }
 
@@ -486,6 +546,11 @@ impl Player {
         let mut i = 0;
         while i < self.bullets.len() {
             let b = &mut self.bullets[i];
+            // Callback 8 at 0054b380, read from the original executable's table
+            // 005a0400 (not present as a function in the Ghidra export).
+            if b.charge_shot {
+                b.speed = if b.time < 120 { (b.speed - 0.95).max(0.2) } else { b.speed + 0.2 };
+            }
             b.time += 1;
             if b.homing {
                 // APPROX: steer toward the nearest damageable enemy and speed up; the real
@@ -515,9 +580,12 @@ impl Player {
                     let overlap = (b.pos[0] - d.pos[0]).abs() * 2.0 < b.hitbox[0] + d.hurtbox[0]
                         && (b.pos[1] - d.pos[1]).abs() * 2.0 < b.hitbox[1] + d.hurtbox[1];
                     if overlap {
+                        // The collider skips its most recently hit enemy (+0xa8,
+                        // FUN_00520450). Callback 7 preserves piercing shots (0054fba0).
+                        if b.charge_shot && b.last_enemy == Some(d.id) { continue; }
                         d.damage(b.damage, b.pos);
-                        dead = true;
-                        break;
+                        b.last_enemy = Some(d.id);
+                        if !b.charge_shot { dead = true; break; }
                     }
                 }
             }
@@ -532,7 +600,7 @@ impl Player {
             let at = field_to_canvas(field, b.pos);
             if let Some(vm) = b.vm.and_then(|id| world.get_mut(id)) {
                 vm.origin = [at[0], at[1], 0.0];
-                vm.rot[2] = b.angle;
+                if !b.charge_shot { vm.rot[2] = b.angle; }
             }
             i += 1;
         }
