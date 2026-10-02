@@ -77,6 +77,8 @@ struct Viewer {
     centered: bool,
     show_all: bool,
     game: Option<Game>,
+    /// Keys currently held (gameplay input).
+    held: std::collections::HashSet<KeyCode>,
 }
 
 impl Viewer {
@@ -105,6 +107,7 @@ impl Viewer {
             centered: false,
             show_all: true,
             game: None,
+            held: Default::default(),
         };
         v.restart();
         v
@@ -172,8 +175,17 @@ impl Viewer {
             .enumerate()
             .map(|(i, &f)| th_game::Side::new(f, 0x9e37_79b9 ^ i as u32, seq, anm_files))
             .collect();
+        // APPROX: both sides play Reimu until character select exists.
+        let sht = self.dat.read("pl00.sht").ok().and_then(|b| th_formats::sht::ShtFile::parse(&b).ok());
+        let pl_anm = match self.lib.file_id("pl00.anm") {
+            Some(id) => Some(id),
+            None => self.dat.read("pl00.anm").ok().and_then(|b| self.lib.load("pl00.anm", &b).ok()),
+        };
         for s in &mut sides {
             s.start(&prog);
+            if let (Some(sht), Some(anm)) = (&sht, pl_anm) {
+                s.player = Some(th_game::player::Player::new(sht.clone(), anm));
+            }
         }
         Some(Game { prog, sides })
     }
@@ -183,9 +195,12 @@ impl Viewer {
             if let Some(st) = &mut self.stage {
                 st.tick(&mut self.world, &self.lib);
             }
+            let keys = self.player_keys();
             if let Some(g) = &mut self.game {
-                for s in &mut g.sides {
-                    s.tick(&g.prog, &mut self.world, &self.lib);
+                for (i, s) in g.sides.iter_mut().enumerate() {
+                    // Side 2 has no controller yet: it just holds the shot button.
+                    let k = if i == 0 { keys } else { th_game::player::input::SHOT };
+                    s.tick(&g.prog, k, &mut self.world, &self.lib);
                 }
             }
             self.world.tick(&self.lib);
@@ -291,7 +306,36 @@ impl Viewer {
         )
     }
 
+    /// Player 1 input bits from the held keys: arrows, Z = shot, Shift = focus.
+    fn player_keys(&self) -> u32 {
+        use th_game::player::input::*;
+        let h = |k: KeyCode| self.held.contains(&k);
+        let mut bits = 0;
+        for (key, bit) in [
+            (KeyCode::ArrowUp, UP),
+            (KeyCode::ArrowDown, DOWN),
+            (KeyCode::ArrowLeft, LEFT),
+            (KeyCode::ArrowRight, RIGHT),
+            (KeyCode::KeyZ, SHOT),
+        ] {
+            if h(key) {
+                bits |= bit;
+            }
+        }
+        if h(KeyCode::ShiftLeft) || h(KeyCode::ShiftRight) {
+            bits |= FOCUS;
+        }
+        bits
+    }
+
     fn key(&mut self, code: KeyCode) {
+        // In game mode the arrows steer the player; PageUp/PageDown change stage.
+        let code = match (self.mode, code) {
+            (Mode::Game, KeyCode::ArrowLeft | KeyCode::ArrowRight | KeyCode::ArrowUp | KeyCode::ArrowDown) => return,
+            (Mode::Game, KeyCode::PageUp) => KeyCode::ArrowLeft,
+            (Mode::Game, KeyCode::PageDown) => KeyCode::ArrowRight,
+            (_, c) => c,
+        };
         match code {
             KeyCode::Tab => {
                 self.mode = match self.mode {
@@ -401,9 +445,19 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::KeyboardInput {
-                event: KeyEvent { physical_key: PhysicalKey::Code(code), state: ElementState::Pressed, .. },
+                event: KeyEvent { physical_key: PhysicalKey::Code(code), state: ElementState::Released, .. },
                 ..
             } => {
+                self.viewer.held.remove(&code);
+            }
+            WindowEvent::KeyboardInput {
+                event: KeyEvent { physical_key: PhysicalKey::Code(code), state: ElementState::Pressed, repeat, .. },
+                ..
+            } => {
+                self.viewer.held.insert(code);
+                if repeat {
+                    return;
+                }
                 if code == KeyCode::Escape {
                     event_loop.exit();
                 }
@@ -475,7 +529,7 @@ fn main() {
     println!(
         "Controls: Tab = switch ANM viewer / stage viewer / game, Left/Right = file or stage, Up/Down = single script,\n\
          A = all scripts, C = toggle centre origin, F = fast-forward x8, V = toggle field divider,\n\
-         R = restart, Space = pause,\n\
+         R = restart, Space = pause. Game: arrows = move, Z = shot, Shift = focus, PgUp/PgDn = stage,\n\
          . = step frame, 0-9 = send interrupt, Esc = quit"
     );
 

@@ -12,6 +12,7 @@ use th_anm::{AnmLibrary, World};
 use th_ecl::Program;
 
 use crate::enemy::Enemy;
+use crate::player::Player;
 
 /// Sub names for wave ids (table at 0x5a0f50 in th19.exe; id 0 is unused).
 pub fn wave_sub(id: i32) -> Option<String> {
@@ -133,6 +134,7 @@ pub struct Side {
     pub enemies: Vec<Enemy>,
     /// The stage script thread group (`main`), run like an enemy with no body.
     pub stage: Option<Enemy>,
+    pub player: Option<Player>,
 }
 
 impl Side {
@@ -158,6 +160,7 @@ impl Side {
             },
             enemies: Vec::new(),
             stage: None,
+            player: None,
         }
     }
 
@@ -186,7 +189,8 @@ impl Side {
         }
     }
 
-    pub fn tick(&mut self, prog: &Program, world: &mut World, lib: &AnmLibrary) {
+    /// One frame. `keys` are the player's input bits ([`crate::player::input`]).
+    pub fn tick(&mut self, prog: &Program, keys: u32, world: &mut World, lib: &AnmLibrary) {
         if let Some(stage) = &mut self.stage {
             stage.update(prog, &mut self.st, world, lib);
         }
@@ -201,6 +205,10 @@ impl Side {
             }
             self.create_pending(prog);
             i += 1;
+        }
+        if let Some(p) = &mut self.player {
+            p.update(keys, &mut self.enemies, world, lib, self.st.field);
+            self.st.player_pos = p.pos;
         }
         let mut k = 0;
         while k < self.enemies.len() {

@@ -19,6 +19,7 @@ Right now the `th19` binary is an **ANM + stage viewer** used to validate the pi
 | Key | Action |
 | --- | --- |
 | Tab | cycle ANM viewer → stage (STD) viewer → game (stage + waves) |
+| Game mode | arrows = move, Z = shot, Shift = focus, PgUp/PgDn = stage (`--game N` starts here) |
 | ← / → | previous / next `.anm` file, or stage |
 | ↑ / ↓ | step through individual scripts |
 | A | toggle "all scripts at once" |
@@ -69,12 +70,12 @@ deterministic (needed for replays and netplay).
 | ECL container (`SCPT`/`ECLH`, 43 files, 169 distinct opcodes) | ✅ parsed |
 | STD (17 stages: objects, quads, instances, camera script) | ✅ parsed |
 | MSG (58 files incl. endings; text XOR decoding) | ✅ parsed |
-| SHT (19 characters; layout reverse-engineered, some fields `UNCONFIRMED`) | ✅ parsed |
+| SHT (19 characters; header + 120-byte shot records decoded from the player code) | ✅ parsed |
 | `thbgm.fmt` (24 tracks, intro/loop points) | ✅ verified against `thbgm.dat` size |
 | STD playback (camera/fog script, 3D quads, perspective + fog) | 🟡 all 17 stages run; camera shake, skybox sprites, distortion not yet |
 | ECL VM core (opcodes 0–97) | ✅ checked against the decompiled interpreter |
 | Enemies + TH19 wave system (movement, directional sprites, wave pool/sequence, level tables) | 🟡 waves run on both fields; no bullets, deaths or boss/charge attacks yet |
-| Player / shot types (`plXX.sht`, `plXX.ecl`) | ⬜ |
+| Player: movement (fixed point, decoded clamps/speeds), options, shot timers + SHT records, shots vs enemies | 🟡 Reimu on both sides; homing amulets approximate; no death/bombs/charge yet |
 | Bullet manager, lasers, items, collision | ⬜ |
 | MSG dialogue, menus, story/VS flow, CPU opponent | ⬜ |
 | Audio: `thbgm.dat` looping BGM (via `thbgm.fmt`), SFX `.wav` | ⬜ |

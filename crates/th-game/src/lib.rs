@@ -1,7 +1,8 @@
-//! Gameplay: enemies driven by ECL, the wave system and (soon) the player and bullets.
+//! Gameplay: enemies driven by ECL, the wave system, the player and player shots.
 
 pub mod enemy;
 pub mod motion;
+pub mod player;
 pub mod side;
 
 pub use enemy::{Enemy, EnemyData};

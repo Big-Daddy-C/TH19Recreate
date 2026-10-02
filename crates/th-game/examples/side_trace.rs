@@ -21,7 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     s.start(&prog);
     let mut last = usize::MAX;
     for f in 0..frames {
-        s.tick(&prog, &mut world, &lib);
+        s.tick(&prog, 0, &mut world, &lib);
         world.tick(&lib);
         if s.enemies.len() != last && (f % 30 == 0 || s.enemies.len() < 3) {
             let subs: Vec<String> = s
