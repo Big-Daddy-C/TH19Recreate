@@ -1,0 +1,4 @@
+/target
+# Extracted/converted game assets — never commit these, they belong to ZUN / Team Shanghai Alice.
+/data
+*.dat

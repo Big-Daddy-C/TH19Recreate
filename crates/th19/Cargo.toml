@@ -1,0 +1,16 @@
+[package]
+name = "th19"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+default-run = "th19"
+
+[dependencies]
+th-formats = { path = "../th-formats" }
+th-anm = { path = "../th-anm" }
+wgpu = "30"
+winit = "0.30"
+pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }
+log = "0.4"
+env_logger = "0.11"
