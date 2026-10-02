@@ -11,7 +11,10 @@ use winit::window::Window;
 
 pub const CANVAS_W: f32 = 640.0;
 pub const CANVAS_H: f32 = 480.0;
-const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+// th19.exe creates its Direct3D 9 device with a 16-bit depth buffer (D3DFMT_D16). Its
+// coarseness matters: coplanar overlapping quads quantise to equal depths, so with
+// LESSEQUAL the later one wins cleanly instead of z-fighting.
+const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth16Unorm;
 
 const SHADER: &str = r#"
 struct Globals { canvas: vec2<f32>, _pad: vec2<f32>, fog: vec4<f32> };
