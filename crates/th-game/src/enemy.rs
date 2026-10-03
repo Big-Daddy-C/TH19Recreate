@@ -216,6 +216,12 @@ impl Enemy {
         }
         e.size = main_size(e, world, lib);
 
+        // FUN_00509980's tail also plays sound 0x22 (panned by the enemy x) for a damaged enemy. The
+        // boss variant 0x23 (flags 0x4080 at low health) and the per-enemy override +0x510c are
+        // not ported.
+        if e.damaged {
+            st.play_sound(0x22, e.pos[0]);
+        }
         // Hit flash (FUN_00509980's tail): a damaged enemy's main sprite is drawn in
         // colour 2 = 0xff0000ff for one frame, then normally for at least 4 frames.
         if let Some(vm) = e.main.and_then(|m| e.vms[m.slot]).and_then(|id| world.get_mut(id)) {
@@ -664,9 +670,15 @@ impl EnemyHost<'_> {
                     origin[0] += e.angle[0].cos() * e.distance;
                     origin[1] += e.angle[0].sin() * e.distance;
                     let kind = if op == 702 { crate::laser::Kind::Line } else { crate::laser::Kind::Infinite };
+                    let sound = e.laser.sound[0];
                     let laser = crate::laser::Laser::new(kind, origin, e.angle[0], e.speed[0], e.sprite, e.color, &e.laser,
                         &self.st.bullet_types, anm, self.world, self.lib, self.st.field);
                     self.st.lasers.push(laser);
+                    // FUN_0052b8e0 (the infinite laser's init) plays the ET's first sound id (+0x8c8,
+                    // copied from ET +0x478) at centre pan; no other laser class plays one.
+                    if kind == crate::laser::Kind::Infinite && sound >= 0 {
+                        self.st.sounds.push((sound as u32, 0));
+                    }
                 }
             }
             614 => {

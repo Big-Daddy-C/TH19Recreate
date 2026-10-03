@@ -351,6 +351,11 @@ impl SideState {
         bullet::fire(et, origin, &mut ctx, &mut out);
         self.rand();
         self.bullets.extend(out);
+        // FUN_004f1340 ends by queueing the ET's bullet sound (flag +0x474 & 0x20, set by ins_600),
+        // panned by the origin x.
+        if et.laser.sound[0] >= 0 {
+            self.play_sound(et.laser.sound[0] as u32, origin[0]);
+        }
     }
 
     pub fn wave_members_alive(&self) -> i32 {
@@ -533,6 +538,7 @@ impl Side {
             // Original contact callback applies its factor to the following movement tick.
             let dt = b.scope_time_scale;
             b.update_scaled(&mut ctx, dt);
+            st.sounds.extend(b.sounds.drain(..));
             let slowed = b.state == 1 && b.hitbox > 0.0 && scope.is_some_and(|(c,r)| crate::scope::bullet_hit(scope_character,c,r,b.pos,b.hitbox));
             // The graze ring counts as contact too (iVar6 == 2 from FUN_00549e00); a hit does not.
             let (dx, dy) = (b.pos[0] - st.player_pos[0], b.pos[1] - st.player_pos[1]);
@@ -629,6 +635,8 @@ impl Side {
     fn kill(st: &mut SideState, e: &mut crate::enemy::EnemyData, world: &mut World, lib: &AnmLibrary) {
         // FUN_0051d4e0 case0 earns spirit credit at chains>9; case1 dispatches an
         // animal selected by distance, and earns5 further credit (default modifiers).
+        // FUN_0050c1f0 opens with the death sound (enemy +0x6328 = (id & 1) + 3 from creation).
+        st.play_sound(3 + (e.id & 1) as u32, e.pos[0]);
         st.spirit_origin = e.pos;
         if !e.suppress_kill_rewards {
         if (1..=4).contains(&e.spirit_kind) {
@@ -844,6 +852,7 @@ impl Side {
         }
         let mut items = std::mem::take(&mut self.st.items);
         let orbs = items.update(self.player.as_ref(), &self.st, world, lib);
+        self.st.sounds.extend(items.sounds.drain(..));
         self.st.items = items;
         if orbs > 0 {
             if let Some(p) = self.player.as_mut() {

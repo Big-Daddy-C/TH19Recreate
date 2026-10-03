@@ -12,7 +12,8 @@ pub struct Audio {
     sink: MixerDeviceSink,
     /// PCM by sound id (`None` for ids without a file).
     sounds: Vec<Option<Pcm>>,
-    /// Sound volume. APPROX: the game's own volume setting (`th19.cfg`) is not read yet.
+    /// Sound volume 0..1, changed with `-` / `+`. APPROX: the game's own volume setting
+    /// (`th19.cfg`) is not read yet.
     volume: f32,
 }
 
@@ -26,7 +27,15 @@ impl Audio {
                 th_formats::wav::parse(&bytes).map_err(|e| log::warn!("sound: {e}")).ok()
             })
             .collect();
-        Some(Self { sink, sounds, volume: 0.5 })
+        Some(Self { sink, sounds, volume: 0.2 })
+    }
+
+    pub fn volume(&self) -> f32 {
+        self.volume
+    }
+
+    pub fn adjust_volume(&mut self, delta: f32) {
+        self.volume = ((self.volume + delta) * 20.0).round().clamp(0.0, 20.0) / 20.0;
     }
 
     /// Play every distinct sound once (the game queues each id at most once per frame, with

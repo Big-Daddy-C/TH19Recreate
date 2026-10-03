@@ -71,8 +71,11 @@ fn sound_table_files_parse() {
     let Some(path) = dat_path() else { return };
     let exe = th_formats::exe::Exe::parse(std::fs::read(path.with_file_name("th19.exe")).unwrap()).unwrap();
     let table = th_formats::exe::sound_table(&exe);
-    assert_eq!(table[0x2a].as_deref(), Some("se_ch00.wav"));
-    assert_eq!(table[0xd].as_deref(), Some("se_extend.wav"));
+    // Menu ids (FUN_004e0f60: 8 ok, 9 cancel, 10 select) and the laser default (0x26).
+    assert_eq!(table[0].as_deref(), Some("se_plst00.wav"));
+    assert_eq!(table[9].as_deref(), Some("se_cancel00.wav"));
+    assert_eq!(table[10].as_deref(), Some("se_select00.wav"));
+    assert_eq!(table[0x26].as_deref(), Some("se_lazer02.wav"));
     let mut dat = Archive::open(path).unwrap();
     let mut playable = 0;
     for name in table.iter().flatten() {
@@ -80,5 +83,5 @@ fn sound_table_files_parse() {
         assert!(!pcm.samples.is_empty(), "{name}");
         playable += 1;
     }
-    assert!(playable > 60, "only {playable} sounds resolved");
+    assert!(playable == 0x48, "only {playable} sounds resolved");
 }

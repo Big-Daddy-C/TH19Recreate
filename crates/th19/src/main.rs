@@ -446,7 +446,8 @@ impl Viewer {
                     })
                     .collect();
                 return format!(
-                    "th19-rs - {name}{} - {} - {} VMs{}{} - points {}:{} {:?}",
+                    "th19-rs - {name}{}{} - {} - {} VMs{}{} - points {}:{} {:?}",
+                    self.audio.as_ref().map_or(String::new(), |a| format!(" - VOL {:.0}%", a.volume() * 100.0)),
                     format!("{}{}{}{}", if self.godmode { " - GODMODE" } else { "" }, if self.full_charge { " - FULLCHARGE" } else { "" }, if self.bot_ai { " - BOT" } else { " - DUMMY" }, if self.player_bot_ai { " - P1 AI" } else { "" }),
                     n.join(" | "),
                     self.world.len(),
@@ -538,6 +539,14 @@ impl Viewer {
                     self.bot_ai = !self.bot_ai;
                     self.bot = th_game::bot::Bot::new();
                     log::info!("bot ai {}", if self.bot_ai { "on" } else { "off (holds shot)" });
+                }
+            }
+            // Sound volume: `-` / `+` (also the numpad keys) in steps of 5%.
+            KeyCode::Minus | KeyCode::NumpadSubtract | KeyCode::Equal | KeyCode::NumpadAdd => {
+                let delta = if matches!(code, KeyCode::Minus | KeyCode::NumpadSubtract) { -0.05 } else { 0.05 };
+                if let Some(a) = &mut self.audio {
+                    a.adjust_volume(delta);
+                    log::info!("volume {:.0}%", a.volume() * 100.0);
                 }
             }
             // Development full-charge mode: all tiers always available, no meter cost.
@@ -820,7 +829,7 @@ fn main() {
     println!(
         "Controls: Tab = switch ANM viewer / stage viewer / game, Left/Right = file or stage, Up/Down = single script,\n\
          A = all scripts, C = toggle centre origin, F = fast-forward x8, V = toggle field divider,\n\
-         R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (1 shot / 2 skill / 3 EX / 4 boss), M = toggle full-charge practice, C = bomb, B = clear fields, T = rain on the opponent (Shift+T on you), G = godmode, 1-4 = instant charge tier (4 = boss; Shift+1-4 = opponent's), Shift = focus, [ / ] = bot character (Shift for player), K = opponent bot/dummy, Shift+K = player AI/manual, PgUp/PgDn = stage,\n\
+         R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (1 shot / 2 skill / 3 EX / 4 boss), M = toggle full-charge practice, C = bomb, B = clear fields, T = rain on the opponent (Shift+T on you), G = godmode, 1-4 = instant charge tier (4 = boss; Shift+1-4 = opponent's), Shift = focus, [ / ] = bot character (Shift for player), K = opponent bot/dummy, Shift+K = player AI/manual, - / + = volume, PgUp/PgDn = stage,\n\
          . = step frame, 0-9 = send interrupt, Esc = quit"
     );
 

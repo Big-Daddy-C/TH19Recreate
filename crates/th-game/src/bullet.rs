@@ -87,7 +87,8 @@ impl Default for Et {
             count: [1, 1],
             aim: 0,
             distance: 0.0,
-            laser: crate::laser::LaserEt::default(),
+            // ins_600's reset also loads the sound ids 0x15 (bullets) and 0x26 (lasers).
+            laser: crate::laser::LaserEt { sound: [0x15, 0x26], ..Default::default() },
             ex: [Ex::default(); 24],
             ex_next: 0,
         }
@@ -153,6 +154,10 @@ pub struct Bullet {
     pub cancelled: bool,
     /// Graze allowance and timers (`FUN_004f5130`).
     pub graze: crate::graze::Gate,
+    /// The shooter's second sound id (`ET +0x47c`, bullet +0x6bc), played at ex events.
+    pub sound2: i32,
+    /// Sound requests from this bullet's tick `(id, pan)`; the side collects them.
+    pub sounds: Vec<(u32, i32)>,
     pub scope_time_scale: f32,
     /// Consecutive scope-contact frames (native timer at bullet+0xfec).
     pub scope_frames: i32,
@@ -302,6 +307,8 @@ fn make_bullet(et: &Et, origin: [f32; 2], i: i32, j: i32, aim: f32, ctx: &mut Ct
         delete: false,
         cancelled: false,
         graze: Default::default(),
+        sound2: et.laser.sound[1],
+        sounds: Vec::new(),
         scope_time_scale: 1.0,
         scope_frames: 0,
         timer_fraction: 0.0,
@@ -460,6 +467,8 @@ impl Bullet {
                     }
                 }
                 ex::DELETE => self.delete = true,
+                // FUN_004f1460 case 0x800: play sound `a`, panned by the bullet's x.
+                ex::SOUND => self.sounds.push((e.a.max(0) as u32, (self.pos[0] * 1000.0 / 192.0) as i32)),
                 // Not implemented yet: other kinds are skipped.
                 _ => {}
             }
@@ -681,6 +690,10 @@ impl Bullet {
             return false;
         }
         st.step_count += 1;
+        // FUN_004f08a0 plays the bullet's second sound at each step boundary.
+        if self.sound2 >= 0 {
+            self.sounds.push((self.sound2 as u32, 0));
+        }
         // Redirect (jump table at 0x4f0ad8): 0/5 add, 1/6 aim + angle, 2/3/4 set.
         match st.step_mode {
             0 | 5 => self.angle = wrap_angle(self.angle + st.step_angle),
@@ -740,6 +753,10 @@ impl Bullet {
         self.set_vel();
         if hit {
             self.st.bounce_count += 1;
+            // FUN_004efb70: the bullet's second sound on each bounce.
+            if self.sound2 >= 0 {
+                self.sounds.push((self.sound2 as u32, 0));
+            }
         }
         if self.st.bounce_count < self.st.bounce_max {
             return false;

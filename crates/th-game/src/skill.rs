@@ -18,6 +18,8 @@ pub struct Skill {
     radius: f32,
     interp: Interp<1>,
     vms: [VmId; 3],
+    /// Set on the tick the circles are told to fade (FUN_0053b3a0: sound 0x2c, side pan).
+    pub ended: bool,
 }
 impl Skill {
     pub fn new(
@@ -36,6 +38,7 @@ impl Skill {
             phase,
             radius: 0.0,
             interp,
+            ended: false,
             vms: std::array::from_fn(|_| {
                 world.spawn_clipped(lib, file, 20, field_to_canvas(field, pos), field)
             }),
@@ -58,6 +61,7 @@ impl Skill {
             self.interp.start([64.0], [0.0], 22, 1);
         }
         if self.time == 45 {
+            self.ended = true;
             for id in self.vms {
                 world.interrupt(id, 1);
             }

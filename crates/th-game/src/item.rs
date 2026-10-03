@@ -54,6 +54,8 @@ pub struct Items {
     counter: i32,
     rate: i32,
     accumulator: i32,
+    /// Sound requests from this tick (`FUN_00520d40` plays 0x25 at a collected item's x).
+    pub sounds: Vec<(u32, i32)>,
 }
 
 impl Items {
@@ -165,6 +167,7 @@ impl Items {
                 let d2 = (ppos[0] - it.pos[0]).powi(2) + (ppos[1] - it.pos[1]).powi(2);
                 if d2 < PICKUP_RADIUS * PICKUP_RADIUS {
                     collected += 1;
+                    self.sounds.push((0x25, (it.pos[0] * 1000.0 / 192.0) as i32));
                     gone = true;
                 } else if !matches!(it.phase, Phase::Attracted | Phase::Homing | Phase::Rising)
                     && d2 < ATTRACT_RADIUS * ATTRACT_RADIUS
