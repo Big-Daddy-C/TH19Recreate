@@ -451,23 +451,19 @@ impl Bullet {
 
     /// One frame (`FUN_004f5680`).
     pub fn update(&mut self, ctx: &mut Ctx) {
-        match self.state {
-            2 => {
-                self.pos = [self.pos[0] + self.vel[0] / 2.0, self.pos[1] + self.vel[1] / 2.0];
-                let done = self.vm.and_then(|id| ctx.world.get(id)).is_none_or(|vm| vm.ivars[0] != 0);
-                if done {
-                    self.state = 1;
-                }
+        if self.state == 2 {
+            self.pos = [self.pos[0] + self.vel[0] / 2.0, self.pos[1] + self.vel[1] / 2.0];
+            let done = self.vm.and_then(|id| ctx.world.get(id)).is_none_or(|vm| vm.ivars[0] != 0);
+            if done { self.state = 1; }
+        }
+        // FUN004f5680 case2 -> LAB004f57e9: once the appear flag is set, run the
+        // live handlers and full movement in this same tick, after the half movement.
+        if self.state == 1 {
+            loop {
+                self.run_ex(ctx);
+                if self.handlers(ctx) == 0 { break; }
             }
-            _ => {
-                loop {
-                    self.run_ex(ctx);
-                    if self.handlers(ctx) == 0 {
-                        break;
-                    }
-                }
-                self.pos = [self.pos[0] + self.vel[0], self.pos[1] + self.vel[1]];
-            }
+            self.pos = [self.pos[0] + self.vel[0], self.pos[1] + self.vel[1]];
         }
 
         if self.invuln > 0 {

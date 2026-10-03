@@ -96,6 +96,7 @@ pub struct SideState {
     pub cancel_bullets: bool,
     /// Spell card background VM (ECL 522 / 523).
     pub spell_background: Option<th_anm::VmId>,
+    pub spell_start_effect: Option<th_anm::VmId>,
     /// ECL 525 requested destroying this field's enemies.
     pub clear_enemies: bool,
     /// `ghost.anm` (kill explosions).
@@ -244,7 +245,7 @@ impl Side {
                 bullets: Vec::new(),
                 bullet_types: Rc::new(Vec::new()),
                 cancel_bullets: false,
-                spell_background: None,
+                spell_background: None, spell_start_effect: None,
                 clear_enemies: false,
                 ghost_anm: None,
                 explosions: Vec::new(),
@@ -547,6 +548,7 @@ impl Side {
         if let Some(id) = self.st.spell_background.take() {
             world.delete(id);
         }
+        if let Some(id)=self.st.spell_start_effect.take() {world.delete(id);}
         self.st.boss_ids.clear();
         for b in self.st.bullets.drain(..) {
             if let Some(id) = b.vm {

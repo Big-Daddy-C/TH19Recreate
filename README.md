@@ -162,3 +162,16 @@ movement, ghost cancellation, some boss ECL globals/opcodes and presentation eff
 remain incomplete. Charge speed uses the unmodified 100-percent setting; ability-card
 modifiers and aura gameplay interactions remain. See `research/catalog.json` for the
 recorded gaps and comparison status.
+
+### Spell attack corrections
+
+ECL calls now preserve calculated firing angles and spreads. Reimu's Lv3–4 spell orbs
+spread around the boss rather than forming a line; ECL316 plays her casting sprite
+(pl00b.anm script9). The declaration flash and field beams are also present, and bullet
+acceleration resumes on the appearance animation's completion frame. Regression tests
+exercise the original scripts and the interrupted appearance/bounce path.
+
+The declaration beam anchor and specialized ANM600 drawing still need verification;
+spell name/HUD effects and boss distortion remain incomplete. Original boss footage is
+needed for a direct visual parity comparison. Free charging and development controls
+remain available.

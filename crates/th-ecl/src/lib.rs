@@ -482,7 +482,10 @@ impl Context {
 
     /// Post-instruction bookkeeping: pop consumed stack bytes and advance (unless jumped).
     fn finish_instr(&mut self, ins: &Instr, before: (Option<SubRef>, usize)) {
-        let pop = (ins.stack_refs & 0xff) as usize;
+        // FUN005687d0 call case11 clears the header pop and jumps directly to the
+        // callee. Calls11/15/16 already consume stack arguments in FUN0056b140;
+        // applying the header again corrupts the new frame (or the async caller).
+        let pop = if matches!(ins.opcode,11|15|16) {0} else {(ins.stack_refs & 0xff) as usize};
         self.sp = self.sp.saturating_sub(pop);
         if (self.sub, self.ip) == before {
             self.ip += 1;

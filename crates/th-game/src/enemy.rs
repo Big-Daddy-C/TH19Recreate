@@ -636,7 +636,17 @@ impl EnemyHost<'_> {
                     if script>=0 { self.world.spawn_clipped(self.lib,file,script as usize,field_to_canvas(self.st.field,self.e.pos),self.st.field); }
                 }
             }
-            316 => { let slot=i!(0).max(0) as usize; let label=i!(1); if let Some(id)=self.e.vms.get(slot).copied().flatten() { self.world.interrupt(id,label); } }
+            // 316 selects a casting animation relative to anmSetMain's base, not an interrupt.
+            // FUN004fecc0 at 004ff6c5: script = base + 5 + variant; negative variant = base.
+            316 => {
+                let slot=i!(0).max(0) as usize; let variant=i!(1);
+                if let Some(main)=self.e.main {
+                    let script=if variant<0 {main.base_script} else {main.base_script+5+variant as usize};
+                    let file=self.st.anm_files.get(self.e.anm_slot).copied().flatten().unwrap_or(main.file);
+                    if slot<self.e.vms.len() {set_vm(self.e,self.world,self.lib,self.st.field,slot,file,script);}
+                }
+            }
+            317 => { let slot=i!(0).max(0) as usize; let label=i!(1); if let Some(id)=self.e.vms.get(slot).copied().flatten() { self.world.interrupt(id,label); } }
             319 | 329 | 330 => {
                 let slot=i!(0).max(0) as usize;
                 let id=self.e.vms.get(slot).copied().flatten();
@@ -778,6 +788,14 @@ impl EnemyHost<'_> {
             // background over the field.
             522 => {
                 self.e.spell_hp7=Some(self.e.hp*7);
+                if let Some(old)=self.st.spell_start_effect.take() {self.world.delete(old);}
+                if let Some(file)=self.st.anm_files[1] {
+                    // FUN004f67c0: persistent declaration flash at the boss, transient field beams.
+                    self.st.spell_start_effect=Some(self.world.spawn_clipped(self.lib,file,6,
+                        field_to_canvas(self.st.field,self.e.pos),self.st.field));
+                    // APPROX: field-space anchor while ANM draw type600 remains unsupported.
+                    self.world.spawn_clipped(self.lib,file,13,[self.st.field[0],self.st.field[1]],self.st.field);
+                }
                 if let Some(file)=self.st.anm_files.get(3).copied().flatten() {
                     if let Some(old)=self.st.spell_background.take() { self.world.delete(old); }
                     let at=field_to_canvas(self.st.field,[0.0,0.0]);
@@ -785,7 +803,10 @@ impl EnemyHost<'_> {
                 }
             }
             // Spell card end (FUN_004f6730): the background goes away.
-            523 => if let Some(id)=self.st.spell_background.take() { self.world.delete(id); },
+            523 => {
+                if let Some(id)=self.st.spell_background.take() {self.world.delete(id);}
+                if let Some(id)=self.st.spell_start_effect.take() {self.world.delete(id);}
+            },
             512 => {
                 let slot=i!(0); self.st.boss_ids.retain(|&id| id!=self.e.id);
                 self.e.boss_slot=(slot>=0).then_some(slot);

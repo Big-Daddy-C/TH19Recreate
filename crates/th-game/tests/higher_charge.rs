@@ -476,3 +476,73 @@ fn enemy_bullets_draw_above_the_spell_background() {
     assert_eq!(g.world.get(orb).unwrap().draw_priority, Some(th_game::bullet::BULLET_DRAW_PRIORITY));
     assert!(g.sides[1].st.spell_background.is_some());
 }
+
+/// 316 is anmPlay (base+5+variant), whereas 317 is anmInterrupt.
+#[test]
+fn reimu_spell_uses_casting_sprite_and_declaration_flash() {
+    let Some(mut g)=setup() else {return};
+    g.sides[1].player.as_mut().unwrap().godmode=true;
+    g.sides[0].st.boss_level=2;
+    g.sides[0].player.as_mut().unwrap().instant_charge(Level::Boss);
+    let mut flash=None; let mut cast=false;let mut normal_after_cast=false;
+    for _ in 0..500 {
+        g.tick([0;2]);
+        if flash.is_none() {flash=g.sides[1].st.spell_start_effect;}
+        if let Some(boss)=g.sides[1].enemies.iter().find(|e|e.data.boss_slot.is_some()) {
+            if let Some(vm)=boss.data.vms[0].and_then(|id|g.world.get(id)) {
+                if vm.script==9 {cast=true;}
+                else if cast && (4..=8).contains(&vm.script) {normal_after_cast=true;}
+            }
+        }
+    }
+    assert!(cast,"Original pl00b.anm script9 must play at firing");
+    assert!(normal_after_cast,"Movement must restore directional sprites after casting");
+    let flash=flash.expect("Spell declaration owns effect.anm script6");
+    assert_eq!(g.world.get(flash).unwrap().script,6);
+    for e in &mut g.sides[1].enemies {if e.data.boss_slot.is_some(){e.data.damage(100000,[0.0,400.0]);}}
+    for _ in 0..90 {g.tick([0;2]);}
+    assert!(g.sides[1].st.spell_start_effect.is_none());
+    assert!(g.world.get(flash).is_none(),"Spell declaration effect must be cleaned up");
+}
+
+#[test]
+fn appearing_spell_bullet_moves_and_accelerates_on_completion_tick() {
+    let Some(mut g)=setup() else {return};
+    use th_game::bullet::{Et,Ex,ex};
+    let mut et=Et {sprite:44,color:3,aim:1,angle:[0.0;2],speed:[1.5,1.0],count:[1,1],..Default::default()};
+    et.ex[0]=Ex {kind:ex::SPAWN_ANIM,a:1,..Default::default()};
+    et.ex[1]=Ex {kind:ex::ACCEL,a:600,r:0.01,s:std::f32::consts::FRAC_PI_2,..Default::default()};
+    // Original Card1_at appends an asynchronous four-bounce behavior after acceleration.
+    et.ex[2]=Ex {kind:ex::BOUNCE,asynchronous:true,a:4,b:13,r:-1000000.0,..Default::default()};
+    g.sides[0].st.fire(&et,[0.0,128.0],&mut g.world,&g.lib);
+    let b=&g.sides[0].st.bullets[0];let before=b.pos;let id=b.vm.unwrap();
+    g.world.get_mut(id).unwrap().ivars[0]=1; // Appear animation's completion flag.
+    g.tick([0;2]);
+    let b=&g.sides[0].st.bullets[0];
+    assert_eq!(b.state,1);
+    assert!((b.pos[0]-before[0]-2.25).abs()<0.0001);
+    assert!((b.pos[1]-before[1]-0.01).abs()<0.0001,"Acceleration runs on the transition tick");
+    for _ in 0..110 {g.tick([0;2]);}
+    let b=&g.sides[0].st.bullets[0];
+    assert!(b.vel[0]<0.0,"Card orbs reflect off the right boundary while acceleration runs");
+    assert!(b.vel[1]>1.0);
+}
+#[test]
+fn spell_card_orbs_cover_the_scripted_angular_spread() {
+    let Some(mut g)=setup() else {return};
+    g.sides[1].player.as_mut().unwrap().godmode=true;
+    g.sides[0].st.boss_level=2;
+    g.sides[0].player.as_mut().unwrap().instant_charge(Level::Boss);
+    let mut ids=std::collections::HashSet::new();let mut angles=Vec::new();
+    for _ in 0..350 {
+        g.tick([0;2]);
+        for b in g.sides[1].st.bullets.iter().filter(|b|b.kind==44 || b.kind==1) {
+            if ids.insert(b.vm.unwrap()) {angles.push(b.angle);}
+        }
+    }
+    assert!(angles.len()>=14,"First Card1_at volley emits thirteen decrements plus the zero iteration");
+    let first=&angles[..14];
+    let minimum=first.iter().copied().fold(f32::INFINITY,f32::min);
+    let maximum=first.iter().copied().fold(f32::NEG_INFINITY,f32::max);
+    assert!(maximum-minimum>5.0,"Card1_at's +/-TAU argument must survive its call frame: {first:?}");
+}

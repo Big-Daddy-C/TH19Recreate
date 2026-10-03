@@ -225,6 +225,18 @@
     "bullet_manager_init": {
       "address": "004f6470",
       "decompile_sha256": "f161e5f915e44fbe6d0f62cb664f3d1c97b17e2289f5d7b9658bddee890183c2"
+    },
+    "ecl_call_arguments": {
+      "address": "0056b140",
+      "decompile_sha256": "280daecb16dfa35eb1927f22a43ca03cecddd4000beaaa08adf80eb73d4e2979"
+    },
+    "bullet_update": {
+      "address": "004f5680",
+      "decompile_sha256": "668fefe21c7f443e81452932cb2cf76f9bfdea3eb8af47ff5178e3ac88ac9e67"
+    },
+    "bullet_bounce": {
+      "address": "004efb70",
+      "decompile_sha256": "4a9d1591c5be3a62bf6dfe85ee74eb72e761168b27daf8233cff9c70aa291a13"
     }
   },
   "features": {
@@ -261,7 +273,10 @@
         "scripted_send_flag",
         "spell_declare",
         "anm_effect_new",
-        "charge_in_effect_update"
+        "charge_in_effect_update",
+        "ecl_call_arguments",
+        "bullet_update",
+        "bullet_bounce"
       ],
       "code": [
         "crates/th-game/src/charge.rs",
@@ -456,13 +471,49 @@
           "text": "Dev keys: Shift+1-4 make player 2 release that tier (EX/boss land on player 1); --boss-level N sets player 1's starting boss level for screenshots. Development aids.",
           "sources": [],
           "evidence": "assumption"
+        },
+        {
+          "text": "2026-10-02: The spell angular spread was corrupted by duplicate stack cleanup on ECL call11. FUN005687d0 case0xb clears the stack-pop header and jumps directly to the callee; FUN0056b140 already consumes stacked call args. Calls15/16 likewise jump past common cleanup. Runtime now skips the second header pop for11/15/16. Original Card1_at first14 bullets spanned effectively zero angle before fix (1.312e-42..1.328e-42); asset-backed regression now verifies >5 rad spread from its +/-TAU argument. This affects all ECL sub calls with stacked args, not only Reimu.",
+          "sources": [
+            "ecl_core",
+            "ecl_call_arguments"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "2026-10-02: ECL316 is anmPlay, not anmInterrupt: 004ff6c5 selects baseScript+5+variant, or baseScript for negative variant, replacing the VM. Reimu base4/variant0 selects pl00b.anm script9 casting. ECL317 (004ff765) is the actual interrupt. Casting/movement recovery verified with actual Lv3 scripts.",
+          "sources": [
+            "ecl_host"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "2026-10-02: FUN004f5680 case2 moves half velocity then jumps to LAB004f57e9; completed appear animation resumes live behavior and full movement in the same tick. Corrected the prior one-tick delay. Regression uses Card1_at shooter settings (1.5 speed, down acceleration0.01 for600ticks, async4bounces flags13) and verifies completion movement and right-wall reflection.",
+          "sources": [
+            "bullet_update",
+            "bullet_bounce"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "2026-10-02: Added effect.anm script6 at spell-declaration boss position (owned until ECL523/dev clear) and transient effect.anm13 field beams, per FUN004f67c0. Effect13 anchor is APPROX field top-left; ANM600 specialized draw remains unsupported. Spell flash cleanup regression caught missing ECL523 deletion, then passed after repair. Spell background remains separate.",
+          "sources": [
+            "spell_declare",
+            "spell_end"
+          ],
+          "evidence": "code_checked"
         }
       ],
       "checks": {
-        "automated": "2026-10-02 working tree based on 9625e46: cargo test --release --workspace : 32 passed with original assets present (adds spell 1/7 damage, spell background lifetime). Original-game parity not assessed.",
-        "visual": "Inspected th19 --boss-level 3 --preview-charge 4 frames 440/520/600: spell background (eff04/eff04b) fades in over the field during the Lv3 card. No original footage for comparison.",
+        "automated": "2026-10-02 working tree based on70f3770: cargo test --release --workspace:37 passed with original assets. Added casting/declaration cleanup, spawn-completion acceleration/reflection, and angular-spread regressions. Spread regression failed before core call fix, then passed. Original-game parity not assessed.",
+        "visual": "Inspected data/reference/spell-declare-fixed.png frame445 (Lv3), spell-spread-fixed.png frame620 (Lv3), and spell-level4-fixed.png frame1000 (Lv4). Before core fix spell-cast-fixed.png frame620 showed a line of orbs; after fix the same seed/frame spreads them around Reimu. Declaration flashes/beams and casting sprite render. No original boss footage comparison.",
         "original_game_parity": "not_run",
         "history": [
+          {
+            "revision": "70f3770",
+            "automated": "2026-10-02 working tree based on 9625e46: cargo test --release --workspace : 32 passed with original assets present (adds spell 1/7 damage, spell background lifetime). Original-game parity not assessed.",
+            "visual": "Inspected th19 --boss-level 3 --preview-charge 4 frames 440/520/600: spell background (eff04/eff04b) fades in over the field during the Lv3 card. No original footage for comparison."
+          },
           {
             "revision": "9625e46",
             "automated": "2026-10-02 working tree based on 1ba478e: cargo test --release --workspace : 31 passed with original assets present (level mapping Lv N = rank N-1, boss HP/phases per level, entrance particles spawn and expire). Original-game parity not assessed.",
@@ -491,7 +542,7 @@
         ]
       },
       "next": [
-        "Port spell-card name banner, effect.anm 6/13 at declaration, FrontInf interrupts 2/3, ECL 621 distortion; compare against original footage.",
+        "Port spell-card name banner, FrontInf interrupts2/3, ECL621 distortion; verify new declaration beams against original footage (ANM600 and anchor incomplete).",
         "Compare boss phases and kill times per level against original footage (needs an opponent that dodges; the test bot sits under the boss).",
         "Port spell declare/end presentation (522/523), screen shake 517, sounds 516; find the status+0x40 cap for -9888.",
         "Audit remaining boss opcodes 521,524,527,534,621,624,1020 and exact movement 412.",
@@ -624,6 +675,14 @@
             "ecl_host"
           ],
           "evidence": "prior_session"
+        },
+        {
+          "text": "Call11/15/16 consume their stack references while packing arguments and bypass common header cleanup. Duplicate popping corrupted Reimu spell spread. Core fix and actual Card1_at angular regression added 2026-10-02.",
+          "sources": [
+            "ecl_core",
+            "ecl_call_arguments"
+          ],
+          "evidence": "code_checked"
         }
       ],
       "checks": {
