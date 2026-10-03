@@ -20,3 +20,4 @@ pub const FIELDS: [[f32; 4]; 2] = [[16.0, 16.0, 296.0, 448.0], [328.0, 16.0, 296
 pub mod skill;
 pub mod scope;
 pub mod spirit;
+pub mod reflect;

@@ -794,3 +794,71 @@ fn explosions_damage_overlapping_enemies_every_frame() {
     let falling = hp.windows(2).filter(|w| w[1] < w[0]).count();
     assert!(falling >= 15, "the neighbour should lose HP on most frames: {hp:?}");
 }
+
+fn put_bullet(g: &mut Game, side: usize, kind: i32, color: i32, pos: [f32; 2], invuln: bool) {
+    use th_game::bullet::{fire, Ctx, Et};
+    let s = &mut g.sides[side];
+    let types = s.st.bullet_types.clone();
+    let anm = s.st.anm_files[0].expect("bullet.anm");
+    let field = s.st.field;
+    let mut rand = || 0.5;
+    let mut ctx = Ctx { world: &mut g.world, lib: &g.lib, types: &types, anm, field, player: [0.0, 400.0], rand: &mut rand };
+    let et = Et { sprite: kind, color, absolute: true, angle: [std::f32::consts::FRAC_PI_2, 0.0], speed: [0.0, 0.0],
+        count: [1, 1], aim: 1, ..Et::default() };
+    let mut out = Vec::new();
+    fire(&et, pos, &mut ctx, &mut out);
+    for b in &mut out { b.invuln = if invuln { 600 } else { 0 }; b.state = 1; }
+    s.st.bullets.append(&mut out);
+}
+
+/// FUN_0051c8c0: a kill explosion cancels live bullets of types 0..3 (invulnerable ones too),
+/// leaves other types alone, counts a chain hit for each, and sends a converted bullet to
+/// the opponent (FUN_0051c650 / FUN_0051bd50).
+#[test]
+fn explosions_cancel_small_bullets_and_send_them_to_the_opponent() {
+    use th_game::side::SpawnRequest;
+    let Some(mut g) = setup() else { return };
+    g.sides[1].st.request(SpawnRequest { id: 0, difficulty: 0, sub: "GhostPure".into(), pos: [0.0, 200.0], hp: 200,
+        score: 0, item: -1, mirrored: false, ivars: [2, 0, 2, 0], fvars: [0.0; 8] });
+    for _ in 0..70 { g.tick([0; 2]); }
+    g.sides[1].st.bullets.clear();
+    // The spirit has drifted; put the bullets around where it will die.
+    let at = g.sides[1].enemies.iter().find(|e| e.data.sub == "GhostPure").unwrap().data.pos;
+    put_bullet(&mut g, 1, 0, 1, [at[0] + 6.0, at[1]], false);
+    put_bullet(&mut g, 1, 1, 2, [at[0] - 6.0, at[1]], true);
+    put_bullet(&mut g, 1, 5, 2, [at[0], at[1] + 6.0], false);
+    put_bullet(&mut g, 1, 0, 1, [at[0] + 130.0, at[1]], false);
+    let chain_before = g.sides[1].st.chain;
+    g.sides[1].enemies.iter_mut().find(|e| e.data.sub == "GhostPure").unwrap().data.killed = true;
+    for _ in 0..25 { g.tick([0; 2]); }
+    let kinds: Vec<i32> = g.sides[1].st.bullets.iter().map(|b| b.kind).collect();
+    assert!(kinds.contains(&5), "type 5 is not cancelled by explosions: {kinds:?}");
+    assert_eq!(kinds.iter().filter(|&&k| k < 4).count(), 1, "only the far small bullet survives: {kinds:?}");
+    assert_eq!(g.sides[1].st.chain, chain_before + 1 + 2, "kill + one chain hit per cancelled bullet");
+    // The two converted bullets arrive within 160 frames and fire on the other field.
+    let before = g.sides[0].st.bullets.len();
+    let mut arrived = false;
+    for _ in 0..180 {
+        g.tick([0; 2]);
+        if g.sides[0].st.bullets.len() > before { arrived = true; break; }
+    }
+    assert!(arrived, "converted bullets must arrive on the opponent's field");
+}
+
+/// Cancel eligibility differs by mechanism: ECL 615/616 (FUN_004ee880) cancels invulnerable
+/// bullets, the player's cancels (FUN_004ee770) do not; both need state 1 or 2.
+#[test]
+fn script_cancel_ignores_invulnerability_but_player_cancel_respects_it() {
+    let Some(mut g) = setup() else { return };
+    put_bullet(&mut g, 1, 0, 1, [10.0, 100.0], true);
+    put_bullet(&mut g, 1, 0, 1, [-10.0, 100.0], false);
+    let (world, lib) = (&g.world, &g.lib);
+    let b = &g.sides[1].st.bullets;
+    assert!(b[0].within_cancel([0.0, 100.0], 30.0, world, lib));
+    assert!(!b[0].intersects_cancel([0.0, 100.0], 30.0, world, lib), "invulnerable: player cancel skips it");
+    assert!(b[1].within_cancel([0.0, 100.0], 30.0, world, lib) && b[1].intersects_cancel([0.0, 100.0], 30.0, world, lib));
+    assert!(!b[1].within_cancel([0.0, 300.0], 30.0, world, lib));
+    // bullet.anm cancel script by cancel mode (type 0 colour 1: mode 6 -> colours[1][3]).
+    let ty = &g.sides[1].st.bullet_types[0];
+    assert_eq!(b[1].cancel_script(ty), Some(ty.colours[1][3]));
+}

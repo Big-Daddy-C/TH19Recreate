@@ -145,6 +145,9 @@ pub struct Bullet {
     st: ExState,
     pub vm: Option<VmId>,
     pub delete: bool,
+    /// Removed by a cancel (not by its own script or by leaving the field): plays the
+    /// type's cancel effect when it goes (`FUN_004eeb30`).
+    pub cancelled: bool,
     pub scope_time_scale: f32,
     timer_fraction: f32,
 }
@@ -290,6 +293,7 @@ fn make_bullet(et: &Et, origin: [f32; 2], i: i32, j: i32, aim: f32, ctx: &mut Ct
         st: ExState::default(),
         vm: None,
         delete: false,
+        cancelled: false,
         scope_time_scale: 1.0,
         timer_fraction: 0.0,
     };
@@ -498,8 +502,41 @@ impl Bullet {
         }
     }
 
+    /// Mark the bullet cancelled: it is removed this tick and shows its cancel effect.
+    pub fn cancel(&mut self) {
+        self.delete = true;
+        self.cancelled = true;
+    }
+
+    /// bullet.anm script of the cancel effect (`FUN_004f11a0` +0x690 by the type's
+    /// `cancel_mode`); `None` when the type has none.
+    pub fn cancel_script(&self, ty: &th_formats::exe::BulletType) -> Option<i32> {
+        // Table 0x598c20 (the first eight entries are scripts).
+        const BY_COLOUR: [i32; 8] = [6, 10, 14, 18, 22, 26, 30, 36];
+        let c = self.color.clamp(0, 15) as usize;
+        match ty.cancel_mode {
+            0 => Some(self.color * 2 + 6),
+            1 => BY_COLOUR.get(c).copied(),
+            3 => Some(0x12),
+            4 => Some(8),
+            5 => Some(0xe),
+            6 => Some(ty.colours[c][3]),
+            _ => None,
+        }
+    }
+
+    /// FUN_004ee880 (ECL 615/616): live or appearing bullets inside the circle, invulnerable
+    /// ones included. FUN_004ee770 (below) is the player/skill version.
+    pub fn within_cancel(&self, pos: [f32;2], radius: f32, world: &World, lib: &AnmLibrary) -> bool {
+        if !matches!(self.state, 1 | 2) { return false; }
+        let half_width = self.vm.and_then(|id| world.get(id)).and_then(|vm|
+            lib.files.get(vm.file).and_then(|f| f.sprites.get(vm.sprite.max(0) as usize))
+                .map(|s| s.size[0] * vm.scale[0].abs() * 0.5)).unwrap_or(0.0);
+        (self.pos[0]-pos[0]).powi(2)+(self.pos[1]-pos[1]).powi(2) <= (radius+half_width).powi(2)
+    }
+
     /// FUN_004ee770: cancelable live/appearing bullets intersect a circle using half sprite width.
-    pub(crate) fn intersects_cancel(&self, pos: [f32;2], radius: f32, world: &World, lib: &AnmLibrary) -> bool {
+    pub fn intersects_cancel(&self, pos: [f32;2], radius: f32, world: &World, lib: &AnmLibrary) -> bool {
         if self.invuln != 0 || !matches!(self.state, 1 | 2) { return false; }
         let half_width = self.vm.and_then(|id| world.get(id)).and_then(|vm|
             lib.files.get(vm.file).and_then(|f| f.sprites.get(vm.sprite.max(0) as usize))

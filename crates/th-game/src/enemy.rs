@@ -544,8 +544,9 @@ impl EnemyHost<'_> {
         }
         if matches!(op,615|616) {
             let r=f(self,ctx,0).max(0.0);
+            // FUN_004ee880: live or appearing bullets in the circle, invulnerable ones included.
             for b in &mut self.st.bullets {
-                if b.intersects_cancel(self.e.pos,r,self.world,self.lib) { b.delete=true; }
+                if b.within_cancel(self.e.pos,r,self.world,self.lib) { b.cancel(); }
             }
             return;
         }

@@ -381,6 +381,74 @@
     "collider_create_circle": {
       "address": "005200f0",
       "decompile_sha256": "f983f0d072b122f646d399e93cd241abae93ed1b6cc48f0284a736cdb10f3e57"
+    },
+    "explosion_update": {
+      "address": "0051c8c0",
+      "decompile_sha256": "2316f6e3c03b0ead17460bc1dec24a2a346f7a69f42cde55ae7bcadb4ea16398"
+    },
+    "explosion_init": {
+      "address": "0051cc70",
+      "decompile_sha256": "116a162055dd9b3bb2baab53179b01a020a82a57d034a74d00ed21a96e6c6876"
+    },
+    "reflect_object_init": {
+      "address": "0051c250",
+      "decompile_sha256": "a819d384b6053c986313566399a71b6cd6709e49adff84ff9d019e1ace9b8e1f"
+    },
+    "reflect_object_create": {
+      "address": "0051c650",
+      "decompile_sha256": "9ca50fc3e302ca2a29f0fcbc3124952d3d83ca33874541730dd1c48f7b415d60"
+    },
+    "reflect_object_update": {
+      "address": "0051bd50",
+      "decompile_sha256": "4dfe0fb269b6e14d7d53aa0df0fcc3f10323fc3da849aabe6b070ffb3d2bdc89"
+    },
+    "ghostctrl_update": {
+      "address": "0051afe0",
+      "decompile_sha256": "05a7c9dbc3bbf5b16796f11796c085cd868a43fffdd3c150803c7ac204e6389d"
+    },
+    "bullet_cancel": {
+      "address": "004eeb30",
+      "decompile_sha256": "d47656b8f28fec5b91b0390b6d3744ad4a4fc12dd2e4551369e32a1c4fad919f"
+    },
+    "bullet_cancel_all": {
+      "address": "004edf90",
+      "decompile_sha256": "8319ee179695ba0d8dd243e078cb5c1d058ed2553dceae220512ac3cc3dd0eca"
+    },
+    "bullet_cancel_circle_script": {
+      "address": "004ee880",
+      "decompile_sha256": "b26a75c0ec2bde0845043724f293411cbaa1292b6bc520d16cd3433725407b09"
+    },
+    "bullet_cancel_circle_player": {
+      "address": "004ee770",
+      "decompile_sha256": "a1fc29e3e932ab7c549ffd1b57d4a02c99cc9a20876ef002197477b4b282b17b"
+    },
+    "bullet_cancel_drop": {
+      "address": "004ee9b0",
+      "decompile_sha256": "6742dbe278239f01b9e9b21bb683e3ac376f4c19ca0d5311343daa17eb050a63"
+    },
+    "bullet_type_setup": {
+      "address": "004f11a0",
+      "decompile_sha256": "6ca7ebf674c6318be5184cec88cc3cbf12de3a8ed474f4f5d5f93fd2ce130618"
+    },
+    "bullet_fire_et": {
+      "address": "004f1340",
+      "decompile_sha256": "22d43437f7151c3237f4594b5b6fc1936e3d3e94a860860784e15cbf6038563c"
+    },
+    "kill_explosion_create": {
+      "address": "0051d4e0",
+      "decompile_sha256": "687b785f491a92339c05ebcc48aed7f93565227399c66ca3928297790058deb5"
+    },
+    "enemy_kill": {
+      "address": "0050c1f0",
+      "decompile_sha256": "049d952ce78ef12f492f673283fcc611f112682a5f790dd3eef232a5000727b9"
+    },
+    "item_drop_counter": {
+      "address": "00521c60",
+      "decompile_sha256": "86b2c4b1467e96ce21e973f5e3c528a8c9741cf12d9eeab0fad2840524136ba4"
+    },
+    "chain_hit": {
+      "address": "00549780",
+      "decompile_sha256": "516342de187a86bc1224b45dc6b817f22b746b7e733763a6613ddd118dd7665f"
     }
   },
   "features": {
@@ -762,14 +830,31 @@
         "enemy_damage",
         "shot_collider_hits",
         "anm_manager_init",
-        "bullet_manager_init"
+        "bullet_manager_init",
+        "explosion_update",
+        "bullet_cancel",
+        "bullet_cancel_all",
+        "bullet_cancel_circle_script",
+        "bullet_cancel_circle_player",
+        "bullet_cancel_drop",
+        "bullet_type_setup",
+        "item_drop_counter",
+        "reflect_object_init",
+        "reflect_object_create",
+        "reflect_object_update",
+        "ghostctrl_update",
+        "chain_hit",
+        "bullet_fire_et"
       ],
       "code": [
         "crates/th-game/src/side.rs",
         "crates/th-game/src/enemy.rs",
-        "crates/th-game/src/bullet.rs"
+        "crates/th-game/src/bullet.rs",
+        "crates/th-game/src/reflect.rs"
       ],
-      "tests": [],
+      "tests": [
+        "crates/th-game/tests/higher_charge.rs"
+      ],
       "findings": [
         {
           "text": "Do not conflate chain timer FUN00549780 with charge meter. Enemy death calls FUN0051d4e0, which invokes several distinct reward helpers. Prior investigation has not identified natural charge-meter gain.",
@@ -806,11 +891,39 @@
             "enemy_damage"
           ],
           "evidence": "code_checked"
+        },
+        {
+          "text": "Bullet cancel eligibility by mechanism (all from the executable): (1) kill explosion FUN_0051c8c0: bullet state==1 (live) only, type (+0x1078) < 4, centre distance <= (radius+1), NO invulnerability or sprite-width test (invulnerable small bullets are cancelled; types>=4, spawning and already-cancelled bullets are not). (2) ECL 613 FUN_004edf90: every bullet of 2000 whose state is not 0 or 3, invulnerability irrelevant. (3) ECL 615/616 FUN_004ee880: state 1 or 2, circle test FUN_004ee950 with radius + sprite width/2 (+0x674), invulnerability NOT checked; counts +1 at manager+0x815708. (4) Player/skill cancels FUN_004ee770: state 1 or 2 AND bullet+0x14 (invulnerability) == 0, radius + sprite half width, at most param_4 bullets. Each cancel runs FUN_004eeb30: plays bullet.anm cancel script chosen by FUN_004f11a0 from the type's cancel_mode (0: colour*2+6; 1: table 0x598c20 {6,10,14,18,22,26,30,36}; 2 none; 3: 0x12; 4: 8; 5: 0xe; 6: colours[c][3], i.e. 164/212 for small bullets), sound 0x47, sets state 4, and FUN_004ee9b0 item drops (types 9/2 via FUN_00521c60 counters; items/meter not ported).",
+          "sources": [
+            "explosion_update",
+            "bullet_cancel",
+            "bullet_cancel_all",
+            "bullet_cancel_circle_script",
+            "bullet_cancel_circle_player",
+            "bullet_cancel_drop",
+            "bullet_type_setup",
+            "item_drop_counter"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Explosion-cancelled bullets are converted into attacks (FUN_0051c8c0 -> FUN_0051c650/FUN_0051c250 -> FUN_0051bd50): per cancelled bullet the chain hit count rises by one with no chain time (FUN_00549780(0)); a flying copy (sprite scale 0.8) leaves the explosion for the opponent's field along a Hermite curve (tangents x+-100,y-400 and x+-100,y+100), 60..159 frames, to a point x within 16 of the bullet and y in 0..32; on arrival it fires one bullet there: speed rand*0.2 + min(bullet speed+0.5, 6) + pressure/200*2, angle pi/2 +-30 degrees from the middle (|x|<64) or an inward quarter turn from the sides (APPROX: FUN_00404c90's result is hidden). The carried type is the bullet's own while the round counter (GhostCtrl+0x28) is below 3600; then 90% (3600..7199), 80% (..10799), 70% (later) keep it and the rest become type 4. Score/meter calls FUN_00548bc0/FUN_00548d00/FUN_00548c60 and the C3/C4 counters (status2 +0x20/+0x24 gain 1 per cancelled bullet at chain>9) are not ported.",
+          "sources": [
+            "explosion_update",
+            "reflect_object_init",
+            "reflect_object_create",
+            "reflect_object_update",
+            "ghostctrl_update",
+            "chain_hit",
+            "bullet_fire_et"
+          ],
+          "evidence": "code_checked"
         }
       ],
       "checks": {
         "original_game_parity": "not_run",
-        "boss_scope_audit": "2026-10-02: original-asset Reimu health all8levels and rank-specific first attack-cycle counts passed; final cargo test --release --workspace passed41tests; cargo build --release -p th19 passed."
+        "boss_scope_audit": "2026-10-02: original-asset Reimu health all8levels and rank-specific first attack-cycle counts passed; final cargo test --release --workspace passed41tests; cargo build --release -p th19 passed.",
+        "automated_cancel": "2026-10-03: workspace 58 tests: explosion cancel eligibility (type<4, invulnerable included, type 5 immune), chain hits, conversion arrives on the other field; script vs player cancel invulnerability."
       },
       "next": [
         "Trace reward recipients and pending item/graze systems before enabling meter gain."

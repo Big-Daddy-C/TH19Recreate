@@ -110,6 +110,12 @@ pub struct SideState {
     pub spirit_frames: i32,
     pub outgoing_spirits: Vec<crate::spirit::Request>,
     pub pending_spirits: Vec<crate::spirit::Pending>,
+    /// Bullets cancelled by this side's explosions, waiting to be sent across.
+    pub outgoing_reflects: Vec<crate::reflect::Request>,
+    /// Converted bullets on their way to this side.
+    pub pending_reflects: Vec<crate::reflect::Pending>,
+    /// Converted bullets that arrived this tick and fire on this side.
+    pub arrived_reflects: Vec<crate::reflect::Arrival>,
     pub sent_spirits_pending: usize,
 }
 
@@ -262,7 +268,7 @@ impl Side {
                 explosions: Vec::new(),
                 scope_circle: None,
                 spirit_credit: 0, spirit_origin: [0.0;2], spirit_pressure: 0, spirit_frames: 0,
-                outgoing_spirits: Vec::new(), pending_spirits: Vec::new(),
+                outgoing_spirits: Vec::new(), pending_spirits: Vec::new(), outgoing_reflects: Vec::new(), pending_reflects: Vec::new(), arrived_reflects: Vec::new(),
                 sent_spirits_pending: 0,
             },
             enemies: Vec::new(),
@@ -274,6 +280,7 @@ impl Side {
     /// Explosions grow, hit enemies (`FUN_00520450`'s collider rules) and cancel bullets.
     fn update_explosions(&mut self, world: &mut World) {
         let st = &mut self.st;
+        let mut cancelled: Vec<(i32, i32, f32, [f32; 2])> = Vec::new();
         for x in st.explosions.iter_mut() {
             if x.time == x.duration - 10 {
                 if let Some(id) = x.vm {
@@ -300,25 +307,36 @@ impl Side {
                     }
                 }
             }
-            // Small live bullets (types 0..3) inside the circle are cancelled.
+            // FUN_0051c8c0: live bullets of types 0..3 whose centre is inside the circle
+            // (radius + 1) are cancelled, invulnerable ones too. Each is converted into an
+            // attack for the opponent and counts as a chain hit.
             for b in st.bullets.iter_mut() {
                 let (dx, dy) = (b.pos[0] - x.pos[0], b.pos[1] - x.pos[1]);
-                if b.state == 1 && (0..4).contains(&b.kind) && dx * dx + dy * dy <= (x.radius + 1.0).powi(2) {
-                    b.delete = true;
+                if b.state == 1 && !b.delete && (0..4).contains(&b.kind) && dx * dx + dy * dy <= (x.radius + 1.0).powi(2) {
+                    b.cancel();
+                    cancelled.push((b.kind, b.color, b.speed, b.pos));
                 }
             }
             x.time += 1;
         }
         st.explosions.retain(|x| x.time < x.duration);
+        for (kind, color, speed, origin) in cancelled {
+            let roll = st.rand();
+            let kind = crate::reflect::converted_kind(kind, st.spirit_frames, roll);
+            st.outgoing_reflects.push(crate::reflect::Request { kind, color, speed, origin });
+            // FUN_00549780(0): one more chain hit, no extra chain time.
+            st.chain += 1;
+            st.chain_max = st.chain_max.max(st.chain);
+        }
     }
 
     fn update_bullets(&mut self, world: &mut World, lib: &AnmLibrary) {
         let st = &mut self.st;
+        // ECL 613 (FUN_004edf90): every bullet that is not already gone is cancelled,
+        // whatever its invulnerability.
         if std::mem::take(&mut st.cancel_bullets) {
-            for b in st.bullets.drain(..) {
-                if let Some(id) = b.vm {
-                    world.delete(id);
-                }
+            for b in st.bullets.iter_mut() {
+                b.cancel();
             }
         }
         let Some(anm) = st.anm_files[0] else { return };
@@ -345,25 +363,40 @@ impl Side {
             let d2 = dx * dx + dy * dy;
             if let Some(r) = cancel {
                 if d2 <= r * r && b.invuln == 0 {
-                    b.delete = true;
+                    b.cancel();
                     continue;
                 }
             }
             if self.player.as_ref().is_some_and(|p| p.cancel_circles.iter().any(|(pos,r)|
-                b.intersects_cancel(*pos,*r,ctx.world,ctx.lib))) { b.delete=true; continue; }
+                b.intersects_cancel(*pos,*r,ctx.world,ctx.lib))) { b.cancel(); continue; }
             // FUN_00549e00: hit when d^2 < player_r^2 + bullet_r^2.
             if b.state == 1 && !b.delete && player_r > 0.0 && d2 < player_r * player_r + b.hitbox * b.hitbox {
                 hit = Some(b.pos);
             }
         }
+        let field = st.field;
         st.bullets.retain(|b| {
             if b.delete {
                 if let Some(id) = b.vm {
                     ctx.world.delete(id);
                 }
+                // The cancel effect (bullet.anm script chosen by the type's cancel mode).
+                if b.cancelled {
+                    let script = ctx.types.get(b.kind.max(0) as usize).and_then(|ty| b.cancel_script(ty));
+                    if let Some(script) = script.filter(|&s| s >= 0) {
+                        let at = crate::enemy::field_to_canvas(field, b.pos);
+                        ctx.world.spawn_clipped(ctx.lib, ctx.anm, script as usize, at, field);
+                    }
+                }
             }
             !b.delete
         });
+        // Converted bullets that arrived fire on this field (FUN_0051bd50).
+        for a in std::mem::take(&mut st.arrived_reflects) {
+            let et = bullet::Et { sprite: a.kind, color: a.color, absolute: true, angle: [a.angle, 0.0],
+                speed: [a.speed, 0.0], count: [1, 1], aim: 1, ..bullet::Et::default() };
+            bullet::fire(&et, a.pos, &mut ctx, &mut st.bullets);
+        }
         if let Some(from) = hit {
             if let Some(p) = &mut self.player {
                 p.hit(from, ctx.world, lib, st.field);
@@ -458,6 +491,14 @@ impl Side {
             if let Some(req) = p.tick(self.st.ghost_anm,world,lib) { requests.push(req); false } else { true }
         });
         for req in requests { self.st.request(req); }
+        let mut pending = std::mem::take(&mut self.st.pending_reflects);
+        let types = self.st.bullet_types.clone();
+        let anm = self.st.anm_files[0];
+        pending.retain_mut(|p| match p.tick(anm, &types, &mut self.st, world, lib) {
+            Some(arrival) => { self.st.arrived_reflects.push(arrival); false }
+            None => true,
+        });
+        self.st.pending_reflects = pending;
         if let Some(stage) = &mut self.stage {
             stage.update(prog, &mut self.st, world, lib);
         }
@@ -546,6 +587,15 @@ pub fn dispatch_charges(sides: &mut [Side]) {
             }
         }
     }
+    // Bullets cancelled by a kill explosion fly to the opponent's field and fire there.
+    for sender in 0..2 {
+        let field = sides[sender].st.field;
+        for req in std::mem::take(&mut sides[sender].st.outgoing_reflects) {
+            let receiver = &mut sides[1 - sender].st;
+            let pending = crate::reflect::Pending::new(req, field, receiver);
+            receiver.pending_reflects.push(pending);
+        }
+    }
     sides[0].st.sent_spirits_pending = sides[1].st.pending_spirits.len();
     sides[1].st.sent_spirits_pending = sides[0].st.pending_spirits.len();
     let events: [Option<crate::charge::Level>;2] = std::array::from_fn(|i| sides[i].player.as_mut().and_then(|p| p.charge_event.take()));
@@ -594,6 +644,9 @@ impl Side {
             e.remove_sprites(world);
         }
         self.st.spawn.clear();
+        self.st.outgoing_reflects.clear();
+        self.st.arrived_reflects.clear();
+        for r in self.st.pending_reflects.drain(..) { r.delete(world); }
         self.st.outgoing_spirits.clear();
         for spirit in self.st.pending_spirits.drain(..) { spirit.delete(world); }
         self.st.sent_spirits_pending = 0;
