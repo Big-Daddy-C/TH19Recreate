@@ -945,3 +945,18 @@ fn bomb_pressed_in_the_hit_window_cancels_the_death() {
     for _ in 0..30 { g.tick([0, 0]); }
     assert_eq!(g.sides[0].player.as_ref().unwrap().lives, lives, "no heart lost");
 }
+
+/// The development rain drops bullets and spirits onto the chosen field only.
+#[test]
+fn rain_drops_bullets_and_spirits_on_the_chosen_field() {
+    let Some(mut g) = setup() else { return };
+    g.sides[1].start_rain();
+    let (mut bullets, mut spirits) = (0, 0);
+    for _ in 0..200 {
+        g.tick([0; 2]);
+        bullets = bullets.max(g.sides[1].st.bullets.len());
+        spirits = spirits.max(g.sides[1].enemies.iter().filter(|e| e.data.sub.starts_with("Ghost")).count());
+    }
+    assert!(bullets > 20 && spirits >= 1, "bullets {bullets}, spirits {spirits}");
+    assert!(g.sides[0].st.bullets.is_empty() && g.sides[0].enemies.iter().all(|e| !e.data.sub.starts_with("Ghost")));
+}

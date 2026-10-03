@@ -231,6 +231,9 @@ impl Viewer {
                 self.debug_extra_attack();
             }
             self.debug_spawn();
+            if std::env::var("TH19_DEBUG_RAIN").ok().and_then(|v| v.parse::<u64>().ok()) == Some(self.frames) {
+                if let Some(g) = &mut self.game { g.sides[1].start_rain(); }
+            }
             // Development: `TH19_DEBUG_BOMB=frame` presses the bomb button for one frame.
             if let Some(f) = std::env::var("TH19_DEBUG_BOMB").ok().and_then(|v| v.parse::<u64>().ok()) {
                 if f == self.frames { self.held.insert(KeyCode::KeyC); }
@@ -486,6 +489,14 @@ impl Viewer {
                 self.show_all = !self.show_all;
                 self.restart();
             }
+            // Development rain of bullets and spirits: T on the opponent, Shift+T on yourself.
+            KeyCode::KeyT if self.mode == Mode::Game => {
+                let own = self.held.contains(&KeyCode::ShiftLeft) || self.held.contains(&KeyCode::ShiftRight);
+                if let Some(g) = &mut self.game {
+                    g.sides[if own { 0 } else { 1 }].start_rain();
+                    log::info!("rain on {}", if own { "player 1" } else { "player 2" });
+                }
+            }
             // Development: clear both fields (bullets, enemies, bosses, EX attacks).
             KeyCode::KeyB if self.mode == Mode::Game => {
                 if let Some(g) = &mut self.game {
@@ -719,7 +730,7 @@ fn main() {
     println!(
         "Controls: Tab = switch ANM viewer / stage viewer / game, Left/Right = file or stage, Up/Down = single script,\n\
          A = all scripts, C = toggle centre origin, F = fast-forward x8, V = toggle field divider,\n\
-         R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (1 shot / 2 skill / 3 EX / 4 boss; free meter), C = bomb (full meter), B = clear fields, G = godmode, 1-4 = instant charge tier (4 = boss; Shift+1-4 = opponent's), Shift = focus, PgUp/PgDn = stage,\n\
+         R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (1 shot / 2 skill / 3 EX / 4 boss; free meter), C = bomb (full meter), B = clear fields, T = rain on the opponent (Shift+T on you), G = godmode, 1-4 = instant charge tier (4 = boss; Shift+1-4 = opponent's), Shift = focus, PgUp/PgDn = stage,\n\
          . = step frame, 0-9 = send interrupt, Esc = quit"
     );
 

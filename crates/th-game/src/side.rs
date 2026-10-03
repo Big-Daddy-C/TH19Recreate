@@ -118,6 +118,8 @@ pub struct SideState {
     pub pending_reflects: Vec<crate::reflect::Pending>,
     /// Converted bullets that arrived this tick and fire on this side.
     pub arrived_reflects: Vec<crate::reflect::Arrival>,
+    /// Development rain (frames left): bullets and spirits fall on this field.
+    pub rain: i32,
     pub sent_spirits_pending: usize,
 }
 
@@ -334,7 +336,7 @@ impl Side {
                 explosions: Vec::new(),
                 scope_circle: None,
                 spirit_credit: 0, spirit_origin: [0.0;2], spirit_pressure: 0, spirit_frames: 0,
-                outgoing_spirits: Vec::new(), pending_spirits: Vec::new(), outgoing_reflects: Vec::new(), pending_reflects: Vec::new(), arrived_reflects: Vec::new(),
+                outgoing_spirits: Vec::new(), pending_spirits: Vec::new(), outgoing_reflects: Vec::new(), pending_reflects: Vec::new(), arrived_reflects: Vec::new(), rain: 0,
                 sent_spirits_pending: 0,
             },
             enemies: Vec::new(),
@@ -567,6 +569,7 @@ impl Side {
             None => true,
         });
         self.st.pending_reflects = pending;
+        self.rain_tick();
         if let Some(stage) = &mut self.stage {
             stage.update(prog, &mut self.st, world, lib);
         }
@@ -723,6 +726,42 @@ impl Side {
             }
         }
     }
+    /// Frames a development rain lasts.
+    pub const RAIN_FRAMES: i32 = 600;
+
+    /// Development aid (not a game mechanic): rain bullets and spirits onto this field. Every
+    /// other frame a small bullet falls from the top at a random place; every 40th frame a
+    /// spirit of a random kind appears in the upper part.
+    pub fn start_rain(&mut self) {
+        self.st.rain = Self::RAIN_FRAMES;
+    }
+
+    fn rain_tick(&mut self) {
+        if self.st.rain <= 0 {
+            return;
+        }
+        self.st.rain -= 1;
+        let left = self.st.rain;
+        let st = &mut self.st;
+        if left % 2 == 0 {
+            let x = st.randf2() * 140.0;
+            let a = crate::reflect::Arrival {
+                kind: (st.rand() % 4) as i32,
+                color: (st.rand() % 16) as i32,
+                speed: 2.0 + st.randf() * 1.5,
+                angle: std::f32::consts::FRAC_PI_2 + st.randf2() * 0.15,
+                pos: [x, 0.0],
+            };
+            st.arrived_reflects.push(a);
+        }
+        if left % 40 == 0 {
+            let sub = ["GhostPure", "GhostWolf", "GhostOtterL", "GhostOtterR", "GhostEagle"][(st.rand() % 5) as usize];
+            let pos = [st.randf2() * 120.0, 40.0 + st.randf() * 120.0];
+            st.request(SpawnRequest { id: 0, difficulty: 0, sub: sub.into(), pos, hp: 200, score: 0, item: -1,
+                mirrored: false, ivars: [1, 0, 1, 0], fvars: [0.0; 8] });
+        }
+    }
+
     /// Development aid (not a game mechanic): remove every bullet, enemy, boss and
     /// EX/boss attack script on this field at once, without death effects or rewards.
     /// The stage script keeps running.
@@ -731,6 +770,7 @@ impl Side {
             e.remove_sprites(world);
         }
         self.st.spawn.clear();
+        self.st.rain = 0;
         self.st.outgoing_reflects.clear();
         self.st.arrived_reflects.clear();
         for r in self.st.pending_reflects.drain(..) { r.delete(world); }
