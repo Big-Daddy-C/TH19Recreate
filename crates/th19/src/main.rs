@@ -619,6 +619,7 @@ impl Viewer {
             }
             KeyCode::KeyR => self.restart(),
             KeyCode::Space => self.paused = !self.paused,
+            KeyCode::Escape if self.mode == Mode::Game => self.paused = !self.paused,
             KeyCode::Period if self.paused => {
                 let fast = std::mem::replace(&mut self.fast, false);
                 self.tick();
@@ -766,8 +767,12 @@ impl ApplicationHandler for App {
                 if repeat {
                     return;
                 }
+                // In a game Esc pauses (as in the original) and Shift+Esc quits; elsewhere Esc quits.
                 if code == KeyCode::Escape {
-                    event_loop.exit();
+                    let shift = self.viewer.held.contains(&KeyCode::ShiftLeft) || self.viewer.held.contains(&KeyCode::ShiftRight);
+                    if self.viewer.mode != Mode::Game || shift {
+                        event_loop.exit();
+                    }
                 }
                 let before = (self.viewer.file_idx, self.viewer.stage_idx, self.viewer.mode);
                 self.viewer.key(code);
@@ -838,7 +843,7 @@ fn main() {
         "Controls: Tab = switch ANM viewer / stage viewer / game, Left/Right = file or stage, Up/Down = single script,\n\
          A = all scripts, C = toggle centre origin, F = fast-forward x8, V = toggle field divider,\n\
          R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (1 shot / 2 skill / 3 EX / 4 boss), M = toggle full-charge practice, C = bomb, B = clear fields, T = rain on the opponent (Shift+T on you), G = godmode, 1-4 = instant charge tier (4 = boss; Shift+1-4 = opponent's), Shift = focus, [ / ] = bot character (Shift for player), K = opponent bot/dummy, L = opponent does nothing, Shift+K = player AI/manual, - / + = volume, PgUp/PgDn = stage,\n\
-         . = step frame, 0-9 = send interrupt, Esc = quit"
+         . = step frame, 0-9 = send interrupt, Esc = pause in a game (Shift+Esc quits; elsewhere Esc quits)"
     );
 
     let mut viewer = Viewer::new(dat);
