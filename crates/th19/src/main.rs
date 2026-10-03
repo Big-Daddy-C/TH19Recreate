@@ -86,6 +86,8 @@ struct Viewer {
     godmode: bool,
     /// Player 2 is run by the game's bot (K) instead of just holding the shot button.
     bot_ai: bool,
+    /// L: the opponent does nothing at all (no movement, shooting or bombs), for testing.
+    opponent_idle: bool,
     /// Shift+K gives player 1 an independent copy of the same AI controller.
     player_bot_ai: bool,
     player_bot: th_game::bot::Bot,
@@ -132,6 +134,7 @@ impl Viewer {
             held: Default::default(),
             godmode: false,
             bot_ai: true,
+            opponent_idle: false,
             player_bot_ai: false,
             player_bot: th_game::bot::Bot::new(),
             chars: [th_game::character::Character::Reimu; 2],
@@ -293,7 +296,7 @@ impl Viewer {
                     // keyboard input immediately when Shift+K disables its controller.
                     let k = if i == 0 {
                         if self.player_bot_ai { self.player_bot.think(s) } else { keys }
-                    } else if self.bot_ai { self.bot.think(s) } else { th_game::player::input::SHOT };
+                    } else if self.opponent_idle { 0 } else if self.bot_ai { self.bot.think(s) } else { th_game::player::input::SHOT };
                     if let Some(p) = &mut s.player {
                         p.godmode = self.godmode;
                         p.free_charge = self.full_charge;
@@ -448,7 +451,7 @@ impl Viewer {
                 return format!(
                     "th19-rs - {name}{}{} - {} - {} VMs{}{} - points {}:{} {:?}",
                     self.audio.as_ref().map_or(String::new(), |a| format!(" - VOL {:.0}%", a.volume() * 100.0)),
-                    format!("{}{}{}{}", if self.godmode { " - GODMODE" } else { "" }, if self.full_charge { " - FULLCHARGE" } else { "" }, if self.bot_ai { " - BOT" } else { " - DUMMY" }, if self.player_bot_ai { " - P1 AI" } else { "" }),
+                    format!("{}{}{}{}", if self.godmode { " - GODMODE" } else { "" }, if self.full_charge { " - FULLCHARGE" } else { "" }, if self.opponent_idle { " - IDLE" } else if self.bot_ai { " - BOT" } else { " - DUMMY" }, if self.player_bot_ai { " - P1 AI" } else { "" }),
                     n.join(" | "),
                     self.world.len(),
                     if self.fast { " - x8" } else { "" },
@@ -540,6 +543,11 @@ impl Viewer {
                     self.bot = th_game::bot::Bot::new();
                     log::info!("bot ai {}", if self.bot_ai { "on" } else { "off (holds shot)" });
                 }
+            }
+            // L: the opponent stands still and does nothing.
+            KeyCode::KeyL if self.mode == Mode::Game => {
+                self.opponent_idle = !self.opponent_idle;
+                log::info!("opponent idle {}", self.opponent_idle);
             }
             // Sound volume: `-` / `+` (also the numpad keys) in steps of 5%.
             KeyCode::Minus | KeyCode::NumpadSubtract | KeyCode::Equal | KeyCode::NumpadAdd => {
@@ -829,7 +837,7 @@ fn main() {
     println!(
         "Controls: Tab = switch ANM viewer / stage viewer / game, Left/Right = file or stage, Up/Down = single script,\n\
          A = all scripts, C = toggle centre origin, F = fast-forward x8, V = toggle field divider,\n\
-         R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (1 shot / 2 skill / 3 EX / 4 boss), M = toggle full-charge practice, C = bomb, B = clear fields, T = rain on the opponent (Shift+T on you), G = godmode, 1-4 = instant charge tier (4 = boss; Shift+1-4 = opponent's), Shift = focus, [ / ] = bot character (Shift for player), K = opponent bot/dummy, Shift+K = player AI/manual, - / + = volume, PgUp/PgDn = stage,\n\
+         R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (1 shot / 2 skill / 3 EX / 4 boss), M = toggle full-charge practice, C = bomb, B = clear fields, T = rain on the opponent (Shift+T on you), G = godmode, 1-4 = instant charge tier (4 = boss; Shift+1-4 = opponent's), Shift = focus, [ / ] = bot character (Shift for player), K = opponent bot/dummy, L = opponent does nothing, Shift+K = player AI/manual, - / + = volume, PgUp/PgDn = stage,\n\
          . = step frame, 0-9 = send interrupt, Esc = quit"
     );
 
