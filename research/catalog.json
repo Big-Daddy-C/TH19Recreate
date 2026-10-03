@@ -522,6 +522,11 @@
             "barrier_restore"
           ],
           "evidence": "prior_session"
+        },
+        {
+          "text": "Round end: the viewer used to stop ticking both fields forever after a KO (looked like a frozen boss). Now the decided round is held 180 frames, then both fields restart with the score kept (round.rs NEXT_ROUND_DELAY). The original transition (KO display, banners, what carries over, match length) is not researched; delay and full reset are approximations.",
+          "sources": [],
+          "evidence": "assumption"
         }
       ],
       "checks": {
@@ -529,6 +534,9 @@
       },
       "next": [
         "Full multi-round match progression and original-game comparison."
+      ],
+      "user_observations": [
+        "2026-10-02: user saw the spell card phase 'do nothing'; cause was the KO freeze (the shooting-only bot dies to Lv5 bosses), not the card scripts, which fire in tests."
       ]
     },
     "combat": {

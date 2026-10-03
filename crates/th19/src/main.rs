@@ -245,6 +245,19 @@ impl Viewer {
                 let defeated = std::array::from_fn(|i| g.sides[i].player.as_ref()
                     .is_some_and(|p| p.state == th_game::player::State::GameOver));
                 g.round.resolve(defeated);
+                // APPROX: after a KO, hold briefly, then start the next round on fresh
+                // fields with the score kept (the original transition is not ported yet).
+                if g.round.hold() {
+                    let round = g.round.next();
+                    let fast = self.fast;
+                    self.load_stage();
+                    self.fast = fast;
+                    if let Some(g) = &mut self.game {
+                        g.round = round;
+                    }
+                    log::info!("next round");
+                    continue;
+                }
             }
             self.world.tick(&self.lib);
         }

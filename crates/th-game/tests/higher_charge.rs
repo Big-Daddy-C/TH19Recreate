@@ -460,3 +460,4 @@ fn spell_cards_take_a_seventh_of_damage_and_show_their_background() {
     }
     assert!(g.sides[1].st.spell_background.is_none(), "BossDead ends the card");
 }
+
