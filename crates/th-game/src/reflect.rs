@@ -22,6 +22,13 @@ pub struct Request {
     pub special_rank: Option<i32>,
     /// Side whose character's program runs a special bullet's attack.
     pub owner: usize,
+    /// Fly as this `bullet.anm` script instead of the bullet's own sprite (Marisa's laser
+    /// projectile, script 63).
+    pub script: Option<i32>,
+    /// Hermite tangents (start, end) instead of the random ones (Marisa's skill).
+    pub tangents: Option<([f32; 2], [f32; 2])>,
+    /// Land at the opponent player's x on the bottom row (y 448) instead of `target`.
+    pub aim_player: bool,
 }
 
 /// The type the converted bullet takes (`FUN_0051c8c0`): the cancelled bullet's own type
@@ -49,6 +56,7 @@ pub struct Pending {
     vm: Option<VmId>,
     special_rank: Option<i32>,
     owner: usize,
+    script: Option<i32>,
 }
 
 /// A converted bullet reaching the opponent's field.
@@ -81,15 +89,23 @@ impl Pending {
         let start = field_to_canvas(source_field, req.origin);
         let end = field_to_canvas(receiver.field, target);
         let mut curve = Interp::default();
-        curve.start_bezier(start, [receiver.randf2() * 100.0, -400.0], end, [receiver.randf2() * 100.0, 100.0], delay);
-        Self { kind: req.kind, color: req.color, speed: (req.speed + 0.5).min(6.0), target, delay, time: 0, start, curve, vm: None, special_rank: req.special_rank, owner: req.owner }
+        let (t0, t1) = req.tangents.unwrap_or_else(|| ([receiver.randf2() * 100.0, -400.0], [receiver.randf2() * 100.0, 100.0]));
+        curve.start_bezier(start, t0, end, t1, delay);
+        Self { kind: req.kind, color: req.color, speed: (req.speed + 0.5).min(6.0), target, delay, time: 0, start, curve, vm: None, special_rank: req.special_rank, owner: req.owner, script: req.script }
     }
 
     /// One frame: the bullet's sprite (0.8 scale) flies; on arrival it becomes a bullet
     /// (`FUN_0051bd50`): speed random*0.2 + the carried speed + pressure/200*2, aimed down
     /// within 30 degrees from the middle of the field and inward from the sides.
     pub fn tick(&mut self, anm: Option<usize>, types: &[BulletType], receiver: &mut SideState, world: &mut World, lib: &AnmLibrary) -> Option<Arrival> {
-        if self.time == 0 {
+        if self.time == 0 && self.script.is_some() {
+            if let (Some(file), Some(script)) = (anm, self.script) {
+                let id = world.spawn_clipped(lib, file, script as usize, self.start, [0.0, 0.0, 640.0, 480.0]);
+                world.set_draw_priority(id, crate::bullet::BULLET_DRAW_PRIORITY);
+                if let Some(vm) = world.get_mut(id) { vm.scale = [0.8, 0.8]; }
+                self.vm = Some(id);
+            }
+        } else if self.time == 0 {
             if let (Some(file), Some(ty)) = (anm, types.get(self.kind.max(0) as usize)) {
                 let remap = ty.colours[self.color.clamp(0, 15) as usize];
                 let id = world.spawn_remapped(lib, file, ty.script as usize, self.start, [0.0, 0.0, 640.0, 480.0], remap);

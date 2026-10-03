@@ -1,5 +1,7 @@
-//! The game's computer player (`CPUInf`, `CPUHitInf`, `CPUHitReimuInf`): a controller that turns
-//! the field into the same input bits a human presses. Ported for Reimu at Normal difficulty.
+//! The game's computer player (`CPUInf`, `CPUHitInf`, `CPUHitReimuInf` / `CPUHitMarisaInf`): a
+//! controller that turns the field into the same input bits a human presses. Ported for Reimu and
+//! Marisa at Normal difficulty. Marisa differs from Reimu only in the target choice (`FUN_004f9810`:
+//! no third-distance bonus for spirits above her) and the approach rule (`FUN_004f8d10`).
 //!
 //! One frame is `FUN_004fa2a0` (ramp), `FUN_004f9ac0` (collect hazards and targets) and the
 //! brain `FUN_004fa3e0`, with Reimu's target choice `FUN_004f8930` and approach rule
@@ -8,6 +10,7 @@
 //! mode helper objects, and the other characters' target rules.
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
+use crate::character::Character;
 use crate::enemy::flag;
 use crate::player::{input, State};
 use crate::side::Side;
@@ -111,6 +114,7 @@ impl Bot {
             self.level += 1;
         }
         let pos = p.pos;
+        let p_character = p.character;
         let speeds = [p.sht.speed, p.sht.speed_focused, p.sht.speed_diagonal, p.sht.speed_focused_diagonal];
         let meter = if p.free_charge { 2500 } else { p.meter }.clamp(0, 2500);
         let charge_now = p.charge.value;
@@ -182,7 +186,8 @@ impl Bot {
             self.mode = (side.st.rand() % 3) as i32 + 2;
         }
 
-        let chosen = pick_target(&targets, pos);
+        let marisa = p_character == Character::Marisa;
+        let chosen = pick_target(&targets, pos, !marisa);
         // The cooldowns tick down whenever the enemy is looked at.
         for t in targets.iter().filter(|t| t.cooldown >= 1) {
             side.enemies[t.index].data.bot_cooldown -= 1;
@@ -200,17 +205,21 @@ impl Bot {
                     if target.pos[0] - 64.0 < pos[0] && pos[0] < target.pos[0] + 64.0 {
                         focus = true;
                     }
-                    let (mut tolerance, mut below) = (12.0, 160.0);
+                    let (mut tolerance, mut below, mut above) = (12.0, 160.0, 256.0);
                     if target.spirit {
                         self.spirit_count += 1;
                         charge = true;
                         self.charge_hold = 20;
                         if pos[1] > 128.0 {
-                            tolerance = 8.0;
-                            below = 80.0;
+                            if marisa {
+                                // Close under the spirit: 16 to 40 pixels below it.
+                                (below, above) = (16.0, 40.0);
+                            } else {
+                                (tolerance, below) = (8.0, 80.0);
+                            }
                         }
                     }
-                    dir = approach(target.pos, pos, tolerance, below);
+                    dir = approach(target.pos, pos, tolerance, below, above);
                 }
             }
             let before = dir;
@@ -330,13 +339,13 @@ fn danger_mask(hazards: &[Hazard], pos: [f32; 2], speeds: [f32; 4], margin: f32)
 }
 
 /// `FUN_004f8930`: the enemy to go for.
-fn pick_target(targets: &[Target], pos: [f32; 2]) -> Option<usize> {
+fn pick_target(targets: &[Target], pos: [f32; 2], spirit_bonus: bool) -> Option<usize> {
     let mut best: Option<usize> = None;
     let mut best_d = 998001.0f32;
     for (i, t) in targets.iter().enumerate() {
         let (dx, dy) = (pos[0] - t.pos[0], pos[1] - t.pos[1]);
         let mut d = dx * dx + dy * dy;
-        if t.spirit && dx.abs() < 64.0 {
+        if spirit_bonus && t.spirit && dx.abs() < 64.0 {
             d /= 3.0;
         }
         if t.cooldown >= 1 || t.disabled_spirit {
@@ -368,14 +377,14 @@ fn pick_target(targets: &[Target], pos: [f32; 2]) -> Option<usize> {
 }
 
 /// `FUN_004f8dd0`: move under the target, `below` to 256 pixels beneath it.
-fn approach(target: [f32; 2], pos: [f32; 2], tolerance: f32, below: f32) -> usize {
+fn approach(target: [f32; 2], pos: [f32; 2], tolerance: f32, below: f32, above: f32) -> usize {
     let mut dir = 0;
     if target[0] - tolerance > pos[0] {
         dir = 4;
     } else if pos[0] > target[0] + tolerance {
         dir = 3;
     }
-    if pos[1] > target[1] + 256.0 {
+    if pos[1] > target[1] + above {
         dir = match dir {
             4 => 6,
             3 => 5,
@@ -571,18 +580,18 @@ mod tests {
         let targets = [t(80.0, 100.0, 0), t(10.0, 150.0, 0), t(-5.0, 340.0, 0)];
         let player = [0.0, 380.0];
         // The 340 one is below the 16 px rule (the player is 40 below it): near and above.
-        assert_eq!(pick_target(&targets, player), Some(2));
+        assert_eq!(pick_target(&targets, player, true), Some(2));
         let skipped = [t(80.0, 100.0, 0), t(10.0, 150.0, 0), t(-5.0, 340.0, 3)];
-        assert_eq!(pick_target(&skipped, player), Some(1), "next best within 256 above and |x| < 100");
-        assert_eq!(pick_target(&[t(150.0, 100.0, 0)], player), None, "off to the side and out of range");
+        assert_eq!(pick_target(&skipped, player, true), Some(1), "next best within 256 above and |x| < 100");
+        assert_eq!(pick_target(&[t(150.0, 100.0, 0)], player, true), None, "off to the side and out of range");
     }
 
     #[test]
     fn approach_aligns_under_the_target_in_the_right_band() {
-        assert_eq!(approach([50.0, 100.0], [0.0, 300.0], 12.0, 160.0), 4, "target to the right, already in band");
-        assert_eq!(approach([-50.0, 100.0], [0.0, 400.0], 12.0, 160.0), 5, "too far below: up and left");
-        assert_eq!(approach([0.0, 250.0], [0.0, 300.0], 12.0, 160.0), 2, "too close: back off down");
-        assert_eq!(approach([0.0, 100.0], [0.0, 300.0], 12.0, 160.0), 0, "aligned and 200 below: hold");
+        assert_eq!(approach([50.0, 100.0], [0.0, 300.0], 12.0, 160.0, 256.0), 4, "target to the right, already in band");
+        assert_eq!(approach([-50.0, 100.0], [0.0, 400.0], 12.0, 160.0, 256.0), 5, "too far below: up and left");
+        assert_eq!(approach([0.0, 250.0], [0.0, 300.0], 12.0, 160.0, 256.0), 2, "too close: back off down");
+        assert_eq!(approach([0.0, 100.0], [0.0, 300.0], 12.0, 160.0, 256.0), 0, "aligned and 200 below: hold");
     }
 
     #[test]

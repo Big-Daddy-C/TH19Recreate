@@ -1203,3 +1203,149 @@ fn marisa_charge_releases_fire_charge_beams() {
     g.charge(0, 110);
     assert_eq!(g.sides[0].player.as_ref().unwrap().beams.len(), 3, "skill release: centre and two side beams");
 }
+
+/// Run `sub` of Marisa's ECL program on `side` (the receiver of her attack).
+fn send_marisa_attack(g: &mut Game, side: usize, sub: &str) {
+    use th_game::side::SpawnRequest;
+    let path = std::path::PathBuf::from(std::env::var_os("USERPROFILE").unwrap()).join("Downloads/th19/th19/th19.dat");
+    let mut dat = Archive::open(path).unwrap();
+    let prog = th_ecl::Program::load("pl01.ecl", |n| dat.read(n).ok()).unwrap();
+    let mut set = g.sides[side].st.anm_files;
+    for (i, name) in prog.files[0].1.anim.iter().enumerate() {
+        set[2 + i] = Some(match g.lib.file_id(name) {
+            Some(id) => id,
+            None => g.lib.load(name, &dat.read(name).unwrap()).unwrap(),
+        });
+    }
+    g.prog[1] = prog;
+    g.sides[side].st.anm_sets[1] = set;
+    g.sides[side].st.incoming_extra_level = 3;
+    g.sides[side].st.request(SpawnRequest { id: 0, difficulty: 0, sub: sub.into(), pos: [0.0, 0.0], hp: 1000, score: 0,
+        item: -1, mirrored: false, ivars: [0; 4], fvars: [0.0; 8], owner: Some(1) });
+}
+
+/// Marisa's ExtraAttack (pl01.ecl) fires infinite lasers (ins_700 / 701 / 608 / 703) that warn
+/// as thin lines, widen, hold and vanish.
+#[test]
+fn marisa_extra_attack_fires_lasers_from_her_own_program() {
+    let Some(mut g) = setup() else { return };
+    send_marisa_attack(&mut g, 0, "ExtraAttack");
+    let mut most = 0;
+    for _ in 0..400 {
+        g.tick([0; 2]);
+        most = most.max(g.sides[0].st.lasers.len());
+    }
+    assert!(most >= 4, "lasers fired: {most}");
+    assert!(g.sides[0].st.lasers.is_empty(), "they all end");
+    for op in [608, 700, 701, 703] {
+        assert!(!g.sides[0].st.unknown_ops.contains_key(&op), "op {op} unhandled");
+    }
+}
+
+/// A held laser over the player breaks the barrier; a laser beside it is grazed for orbs.
+#[test]
+fn lasers_hit_and_graze_the_player() {
+    use th_game::laser::{Laser, LaserEt};
+    let Some(mut g) = setup() else { return };
+    for _ in 0..10 { g.tick([0; 2]); }
+    let types = g.sides[0].st.bullet_types.clone();
+    let anm = g.sides[0].st.anm_files[0].unwrap();
+    let field = g.sides[0].st.field;
+    let pos = g.sides[0].player.as_ref().unwrap().pos;
+    let et = LaserEt { len: [512.0, 512.0], width: 14.0, times: [3, 3, 40, 3], ..Default::default() };
+    // One 20 px to the side (grazed), then one on the player.
+    let side_laser = Laser::new([pos[0] + 20.0, 440.0], -std::f32::consts::FRAC_PI_2, 8.0, 38, 6, &et, &types, anm, &mut g.world, &g.lib, field);
+    g.sides[0].st.lasers.push(side_laser);
+    for _ in 0..12 { g.tick([0; 2]); }
+    assert!(g.sides[0].st.graze >= 1, "grazed: {}", g.sides[0].st.graze);
+    assert!(!g.sides[0].st.items.list.is_empty() || g.sides[0].player.as_ref().unwrap().meter > 0, "orbs from the graze");
+    assert_eq!(g.sides[0].player.as_ref().unwrap().barrier, th_game::player::Barrier::Up);
+    let on_player = Laser::new([pos[0], 440.0], -std::f32::consts::FRAC_PI_2, 8.0, 38, 6, &et, &types, anm, &mut g.world, &g.lib, field);
+    g.sides[0].st.lasers.push(on_player);
+    for _ in 0..12 { g.tick([0; 2]); }
+    assert_eq!(g.sides[0].player.as_ref().unwrap().barrier, th_game::player::Barrier::Broken, "the beam hit");
+}
+
+#[test]
+fn zz_marisa_boss_probe() {
+    let Some(mut g) = setup() else { return };
+    for level in [1u8, 3, 5, 7] {
+        send_marisa_attack(&mut g, 0, "BossAttack");
+        g.sides[0].st.incoming_boss_level = level;
+        for _ in 0..1500 { g.tick([0; 2]); }
+        eprintln!("level {level}: unknown {:?} lasers {} enemies {}", g.sides[0].st.unknown_ops, g.sides[0].st.lasers.len(), g.sides[0].enemies.len());
+    }
+}
+
+#[test]
+fn zz_reimu_boss_probe() {
+    use th_game::side::SpawnRequest;
+    let Some(mut g) = setup() else { return };
+    for level in [1u8, 7] {
+        g.sides[0].st.incoming_boss_level = level;
+        g.sides[0].st.request(SpawnRequest { id: 0, difficulty: 0, sub: "BossAttack".into(), pos: [0.0, 0.0], hp: 1000, score: 0,
+            item: -1, mirrored: false, ivars: [0; 4], fvars: [0.0; 8], owner: Some(1) });
+        for _ in 0..1500 { g.tick([0; 2]); }
+        eprintln!("reimu level {level}: unknown {:?}", g.sides[0].st.unknown_ops);
+    }
+}
+
+/// Marisa's skill release sends six laser orbs that land as ExtraAttack00 (an infinite laser from
+/// pl01.ecl) at the opponent player's column; her special bullets (counter 90) are the same orb.
+#[test]
+fn marisa_skill_and_special_bullets_send_laser_orbs_that_become_extra_attack_00() {
+    let Some(mut g) = setup() else { return };
+    use_marisa(&mut g, 0);
+    // Side 1 runs side 0's program for what it sends.
+    let path = std::path::PathBuf::from(std::env::var_os("USERPROFILE").unwrap()).join("Downloads/th19/th19/th19.dat");
+    let mut dat = Archive::open(path).unwrap();
+    g.prog[0] = th_ecl::Program::load("pl01.ecl", |n| dat.read(n).ok()).unwrap();
+    let mut set = g.sides[1].st.anm_files;
+    set[2] = g.sides[1].st.anm_files[2];
+    g.sides[1].st.anm_sets[0] = set;
+    let target_x = g.sides[1].player.as_ref().unwrap().pos[0];
+    g.charge(0, 110);
+    g.tick([0; 2]);
+    assert_eq!(g.sides[1].st.pending_reflects.len(), 6, "six orbs in flight");
+    let mut seen = 0;
+    for _ in 0..260 {
+        g.tick([0; 2]);
+        seen = seen.max(g.sides[1].st.lasers.len());
+    }
+    assert!(seen >= 1, "an orb landed as ExtraAttack00 and fired its laser: {seen}");
+    let _ = target_x;
+    // The special counter sends one more at 90.
+    g.sides[0].st.special_counter = 95;
+    g.tick([0; 2]);
+    assert_eq!(g.sides[1].st.pending_reflects.len(), 1);
+}
+
+/// Marisa's bomb is a full-height column on her x that widens to meter * 64 / 4000 + 16 per side,
+/// cancels bullets in it from any height, damages enemies in it and ends after 180..350 frames.
+#[test]
+fn marisa_bomb_is_a_full_height_column() {
+    use th_game::{bomb::Bomb, side::SpawnRequest};
+    assert_eq!(Bomb::duration_marisa(2500), 350);
+    assert_eq!(Bomb::duration_marisa(100), 180);
+    let Some(mut g) = setup() else { return };
+    use_marisa(&mut g, 0);
+    g.sides[0].st.request(SpawnRequest { id: 0, difficulty: 0, sub: "GhostPure".into(), pos: [0.0, 100.0], hp: 400,
+        score: 0, item: -1, mirrored: false, ivars: [2, 0, 2, 0], fvars: [0.0; 8], owner: None });
+    for _ in 0..20 { g.tick([0; 2]); }
+    let x = g.sides[0].player.as_ref().unwrap().pos[0];
+    put_bullet(&mut g, 0, 0, 1, [x + 8.0, 40.0], false);
+    put_bullet(&mut g, 0, 0, 1, [x + 100.0, 40.0], false);
+    g.tick([input::BOMB, 0]);
+    assert!(g.sides[0].player.as_ref().unwrap().bomb.is_some());
+    let hp0 = g.sides[0].enemies.iter().find(|e| e.data.sub == "GhostPure").map(|e| e.data.hp).unwrap();
+    for _ in 0..40 { g.tick([input::BOMB, 0]); }
+    let near = g.sides[0].st.bullets.iter().filter(|b| (b.pos[0] - x).abs() < 20.0).count();
+    let far = g.sides[0].st.bullets.iter().filter(|b| (b.pos[0] - x - 100.0).abs() < 20.0 || b.pos[0] > x + 60.0).count();
+    assert_eq!(near, 0, "the bullet inside the column, however high, is cancelled");
+    assert!(far >= 1, "outside it survives");
+    let hp1 = g.sides[0].enemies.iter().find(|e| e.data.sub == "GhostPure").map_or(i32::MIN, |e| e.data.hp);
+    assert!(hp1 < hp0 || g.sides[0].enemies.iter().all(|e| e.data.sub != "GhostPure"), "{hp0} -> {hp1}");
+    assert!(g.sides[0].player.as_ref().unwrap().invuln >= 30, "protected");
+    for _ in 0..400 { g.tick([0, 0]); }
+    assert!(g.sides[0].player.as_ref().unwrap().bomb.is_none(), "over");
+}

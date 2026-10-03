@@ -23,6 +23,7 @@ pub mod scope;
 pub mod spirit;
 pub mod reflect;
 pub mod bot;
+pub mod laser;
 pub mod beam;
 pub mod character;
 pub mod item;

@@ -136,6 +136,8 @@ pub struct Player {
     pub bomb: Option<crate::bomb::Bomb>,
     bomb_prev: bool,
     pub cancel_circles: Vec<([f32;2], f32)>,
+    /// Marisa's bomb: full-height bands (centre x, half width) that cancel bullets.
+    pub cancel_columns: Vec<(f32, f32)>,
     damage_circles: Vec<crate::skill::DamageCircle>,
     skill_rng: u32,
     charge_timer: Option<i32>,
@@ -206,7 +208,7 @@ impl Player {
             charge: crate::charge::Gauge::default(),
             meter: charge_settings.attack,
             free_charge: false, opponent_boss_active: false, charge_event: None, last_charge: None,
-            skills: Vec::new(), bomb: None, bomb_prev: false, cancel_circles: Vec::new(), damage_circles: Vec::new(), skill_rng: 0x1cafe777,
+            skills: Vec::new(), bomb: None, bomb_prev: false, cancel_circles: Vec::new(), cancel_columns: Vec::new(), damage_circles: Vec::new(), skill_rng: 0x1cafe777,
             charge_timer: None,
             wide_charge: false,
             aura_anm: None,
@@ -423,6 +425,7 @@ impl Player {
         self.scope.update(self.charge.value > 0 && keys & input::CHARGE != 0
             && self.state == State::Normal, self.character == Character::Marisa, self.pos, self.anm_file, world, lib, field);
         self.cancel_circles.clear();
+        self.cancel_columns.clear();
         self.skills.retain_mut(|s| s.tick(world, field, &mut self.cancel_circles, &mut self.damage_circles));
         // The bomb button (FUN_00546320 states 1 and 4): pressing it starts the bomb, and during
         // the 8-frame hit window it also cancels the death (a deathbomb). Practice economy: no
@@ -430,16 +433,21 @@ impl Player {
         // and read the meter, both deferred).
         let bomb_pressed = keys & input::BOMB != 0 && !self.bomb_prev;
         self.bomb_prev = keys & input::BOMB != 0;
-        if bomb_pressed && self.bomb.is_none() && self.character == Character::Reimu && matches!(self.state, State::Normal | State::Hit) {
+        if bomb_pressed && self.bomb.is_none() && matches!(self.state, State::Normal | State::Hit) {
             if self.state == State::Hit {
                 self.state = State::Normal;
                 self.state_time = 0;
             }
-            self.bomb = Some(crate::bomb::Bomb::new(self.pos, crate::bomb::MAX_METER, self.anm_file, world, lib, field));
+            let meter = if self.free_charge { crate::bomb::MAX_METER } else { self.meter };
+            self.bomb = Some(if self.character == Character::Marisa {
+                crate::bomb::Bomb::new_marisa(self.pos, meter, self.anm_file, world, lib, field)
+            } else {
+                crate::bomb::Bomb::new(self.pos, meter, self.anm_file, world, lib, field)
+            });
         }
         if let Some(b) = &mut self.bomb {
             let protecting = b.protecting();
-            if !b.tick(self.pos, world, field, &mut self.cancel_circles, &mut self.damage_circles) {
+            if !b.tick(self.pos, world, field, &mut self.cancel_circles, &mut self.cancel_columns, &mut self.damage_circles) {
                 self.bomb = None;
             }
             if protecting {
@@ -451,9 +459,15 @@ impl Player {
             for (index, enemy) in enemies.iter_mut().enumerate() {
                 let d = &mut enemy.data;
                 if d.delete || d.flags & flag::NO_HURTBOX != 0 || d.hurtbox[0] <= 0.0 { continue; }
-                let x = circle.pos[0].clamp(d.pos[0]-d.hurtbox[0]/2.0,d.pos[0]+d.hurtbox[0]/2.0);
-                let y = circle.pos[1].clamp(d.pos[1]-d.hurtbox[1]/2.0,d.pos[1]+d.hurtbox[1]/2.0);
-                if dist2(circle.pos,[x,y]) <= circle.radius.powi(2) {
+                let hit = if let Some(size) = circle.rect {
+                    (circle.pos[0] - d.pos[0]).abs() <= size[0] / 2.0 + d.hurtbox[0] / 2.0
+                        && (circle.pos[1] - d.pos[1]).abs() <= size[1] / 2.0 + d.hurtbox[1] / 2.0
+                } else {
+                    let x = circle.pos[0].clamp(d.pos[0]-d.hurtbox[0]/2.0,d.pos[0]+d.hurtbox[0]/2.0);
+                    let y = circle.pos[1].clamp(d.pos[1]-d.hurtbox[1]/2.0,d.pos[1]+d.hurtbox[1]/2.0);
+                    dist2(circle.pos,[x,y]) <= circle.radius.powi(2)
+                };
+                if hit {
                     damage[index].0 += circle.damage;
                     damage[index].1 = circle.pos;
                 }
@@ -1006,7 +1020,7 @@ fn combined_player_colliders_obey_original_damage_cap() {
     assert_eq!(i32::from_le_bytes(p.sht.params_raw[8..12].try_into().unwrap()),90);
     // Three skill colliders total 120 this frame; the original caps their sum at 90.
     p.damage_circles=(0..3).map(|_|crate::skill::DamageCircle {
-        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1
+        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1,rect:None
     }).collect();
     let mut enemies=[crate::Enemy {
         threads:th_ecl::Threads::new(th_ecl::Context::new(th_ecl::SubRef{file:0,sub:0})),
@@ -1016,7 +1030,7 @@ fn combined_player_colliders_obey_original_damage_cap() {
     assert_eq!(enemies[0].data.hp,4910);
     enemies[0].data.hp=1500; enemies[0].data.spell_hp7=Some(10500);
     p.damage_circles=(0..3).map(|_|crate::skill::DamageCircle {
-        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1
+        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1,rect:None
     }).collect();
     p.update(0,&mut enemies,&mut world,&lib,crate::FIELDS[0]);
     assert_eq!(enemies[0].data.spell_hp7,Some(10410));
@@ -1024,7 +1038,7 @@ fn combined_player_colliders_obey_original_damage_cap() {
     p.state=State::Entering;
     enemies[0].data.hp=5000;enemies[0].data.spell_hp7=None;
     p.damage_circles=(0..3).map(|_|crate::skill::DamageCircle {
-        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1
+        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1,rect:None
     }).collect();
     p.update(0,&mut enemies,&mut world,&lib,crate::FIELDS[0]);
     assert_eq!(enemies[0].data.hp,4982,"Entering divides the capped 90 damage by five");

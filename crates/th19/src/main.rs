@@ -635,7 +635,8 @@ impl Viewer {
                 mirrored: false,
                 ivars: [0; 4],
                 fvars: [0.0; 8],
-                owner: None,
+                // Sent by player 2, so it runs that character's program.
+                owner: Some(1),
             });
         }
     }

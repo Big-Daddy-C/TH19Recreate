@@ -1820,7 +1820,7 @@
     },
     "marisa": {
       "implementation": "partial",
-      "summary": "Marisa is selectable (] / [ for the bot, Shift for the player; --p1 / --p2 N): her own pl01 shots, option beams, charge beams, charging column and ECL program per side. Her skill, bomb, special bullet, ECL lasers and bot rules are not ported.",
+      "summary": "Marisa is selectable (] / [ for the bot, Shift for the player; --p1 / --p2 N): her own pl01 shots, option beams, charge beams, charging column, skill and special bullets (laser orbs landing as ExtraAttack00), bomb column, the bot's Marisa rules, and infinite lasers (ECL 700/701/608/703). Line lasers (ECL 702), ray/aim ops 569/624 and laser cancels are not ported.",
       "symbols": [
         "shot_record_to_bullet",
         "shot_record_pick",
@@ -1850,11 +1850,16 @@
         "crates/th-game/src/scope.rs",
         "crates/th-game/src/player.rs",
         "crates/th-game/src/side.rs",
-        "crates/th19/src/main.rs"
+        "crates/th19/src/main.rs",
+        "crates/th-game/src/laser.rs",
+        "crates/th-game/src/bomb.rs",
+        "crates/th-game/src/reflect.rs",
+        "crates/th-game/src/bot.rs"
       ],
       "tests": [
         "crates/th-game/tests/higher_charge.rs",
-        "crates/th-game/src/beam.rs"
+        "crates/th-game/src/beam.rs",
+        "crates/th-game/src/laser.rs"
       ],
       "findings": [
         {
@@ -1903,22 +1908,72 @@
           "evidence": "code_checked"
         },
         {
-          "text": "What is still Reimu-only or missing for Marisa: her skill (FUN_00417b90 creates six EXLaserInf objects, 6.28/6 apart, vtable 0x5a8b8c), her special bullet (FUN_0053cf00 creates an EXLaserInf at a random x within +-120 on the opponent's field; thresholds table 0x59d7d8) and bomb (BombMarisaInf, vtable 0x5a8c28, update FUN_0053d9b0) are laser-object based and not ported; ECL laser ops 700..703 (cases 0x8d..0x90 of FUN_004fecc0) used by pl01.ecl are not handled, so her ExtraAttack / Boss scripts run without their lasers; the bot has no Marisa rules (CPUHitMarisaInf, vtable 0x5a8444: 0x4f9810 target, 0x4f8d10 approach). For Marisa the skill, bomb and special bullets are disabled rather than borrowed from Reimu.",
+          "text": "Marisa's skill and special bullet are laser orbs, not local effects: FUN_00417b90 (skill) makes six EXLaserInf objects (vtable 0x5a8b8c; init FUN_0053d280, update FUN_0053d150) from her position to the opponent player's x on y = 448 along Hermite curves whose two tangents are 600 long, rotated a sixth of a turn apart starting at straight up; FUN_0053cf00 (special bullet; thresholds 0x59d7d8 = 100/90/90/80 like Reimu's) makes one with random tangents like Reimu's yin-yang (x within +-120). The orb flies bullet.anm script 63 (sprite 326, scale 0.8) for 60..159 frames and on arrival requests ExtraAttack00 (hp 200) on the other field, run from the sender's program (pl01.ecl: an infinite laser). EXOnmyoInf (Reimu) is the same object with the bullet-type-44 sprite.",
           "sources": [
             "marisa_skill_start",
             "marisa_special_send",
-            "marisa_bomb_update",
-            "marisa_laser_object",
-            "ecl_cases_laser"
+            "marisa_laser_object"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Marisa's bomb (BombMarisaInf, FUN_0053dc50 start / FUN_0053d9b0 update): pl01.anm script 23 (flash) and 18 (column, scale x = half width) at her position; the half width interpolates (mode 4) from 1 to meter * 64 / 4000 + 16 over max(180, 350 * meter / 2500) frames (FUN_004ed3d0(0xb4, 0x15e)); each frame it holds her protected 40 frames, cancels bullets in the band centred on her x (y 224, full height; FUN_004ee0d0, live or appearing, not flagged) and lasers (FUN_005303f0, not ported) and damages enemies in it for 20 (FUN_0051f320(.., life 1, 0x14)); 10 frames after the duration it ends.",
+          "sources": [
+            "marisa_bomb_update"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Marisa's bot rules (CPUHitMarisaInf, vtable 0x5a8444): FUN_004f9810 picks targets like Reimu's but without the third-distance bonus for spirits within 64 px; FUN_004f8d10 uses x tolerance 12, minimum distance 160 and maximum 256 below the target, and for a spirit when she is below y 128 stays 16..40 px beneath it (Reimu 8 px / 80..256).",
+          "sources": [
+            "bot_reimu_target",
+            "bot_reimu_approach"
           ],
           "evidence": "code_checked"
         }
       ],
       "checks": {
-        "automated_marisa": "2026-10-03: marisa_beams_grow_cut_at_enemies_damage_and_end_with_the_shot_button, marisa_charge_releases_fire_charge_beams, ray_enters_a_circle_ahead"
+        "automated_marisa": "2026-10-03: marisa_beams_grow_cut_at_enemies_damage_and_end_with_the_shot_button, marisa_charge_releases_fire_charge_beams, ray_enters_a_circle_ahead",
+        "automated_marisa_more": "2026-10-03: marisa_extra_attack_fires_lasers_from_her_own_program, lasers_hit_and_graze_the_player, marisa_skill_and_special_bullets_send_laser_orbs_that_become_extra_attack_00, marisa_bomb_is_a_full_height_column, laser unit tests"
       },
       "next": [
-        "Port the laser system (ECL ops 700..703, LaserInf family, collisions, graze, cancel), then Marisa's skill, special bullet, bomb and bot rules; verify beam alpha (script sets 96) against footage."
+        "Port LaserLineInf (ECL 702) with its Ex program, ECL 569 / 624 (ray to the field edge), laser cancels (FUN_00530c60 / 005303f0), the other laser types, Marisa's boss attacks' remaining unknown ops; verify beam alpha against footage."
+      ]
+    },
+    "lasers": {
+      "implementation": "partial",
+      "summary": "Infinite lasers (ECL 703) fired by enemy scripts: warn, widen, hold, shrink; hurt and graze the player.",
+      "symbols": [
+        "ecl_cases_laser"
+      ],
+      "code": [
+        "crates/th-game/src/laser.rs",
+        "crates/th-game/src/enemy.rs",
+        "crates/th-game/src/side.rs"
+      ],
+      "tests": [
+        "crates/th-game/src/laser.rs",
+        "crates/th-game/tests/higher_charge.rs"
+      ],
+      "findings": [
+        {
+          "text": "ECL 700 sets an ET slot's laser floats (length now +8, length cap +0xc, +0x10, full width +0x448); 701 the four phase times and flags (+0x458..+0x468); 608 two sound ids (+0x478, +0x47c); 702 (case 0x8f) creates a LaserLineInf, 703 (case 0x90) a LaserInfiniteInf (vtable 0x5a873c, FUN_00530df0 type 1) at the ET's origin (absolute or enemy + offset) along its first angle with the ET sprite / colour as the laser type and colour; the ET speed is the length growth per frame. FUN_0052b550 runs it: while length <= cap it grows by the speed; state 3 (2 px warning line) for time1 frames, state 4 widening width = t * max / time2, state 2 held for time3, state 5 shrinking max - t * max / time4, then gone. FUN_0052b0e0: only while widening or held and longer than 16 it hurts, as a rectangle centred half a length out, 0.95 of the length long and (width >= 32 ? width - (width + 16) / 3 : width / 2) wide. FUN_00549570: the player's hit circle (3) inside it is a hit, the circle + 30 a graze; FUN_0052b250 grazes (an orb) every 8th frame of the laser's life. Drawn from bullet type table[sprite] script (161 for type 38) remapped with the colour's sprites (a 16 x 14 gradient tile, 358 for colour 6) stretched to length / 14 by width / 16, chain priority 0x27, render mode 1.",
+          "sources": [
+            "ecl_cases_laser"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Not ported: the line laser (702; its Ex-instruction program, FUN_0052f080), curve and beam lasers, laser Ex lists (ETs' etEx lists are copied into the laser), cancels (bombs and kill explosions do not remove lasers), the hit callback FUN_0052b250 line 91 branch (a hit with the barrier), ECL 569 / 624.",
+          "sources": [],
+          "evidence": "assumption"
+        }
+      ],
+      "checks": {
+        "automated_lasers": "2026-10-03: laser unit tests, lasers_hit_and_graze_the_player, marisa_extra_attack_fires_lasers_from_her_own_program"
+      },
+      "next": [
+        "Port the line laser and the cancel functions."
       ]
     }
   }

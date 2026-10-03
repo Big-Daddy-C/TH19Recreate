@@ -117,6 +117,8 @@ pub struct SideState {
     pub combo_shown: i32,
     pub combo_age: i32,
     pub combo_vms: Vec<th_anm::VmId>,
+    /// Lasers fired at this field's player.
+    pub lasers: Vec<crate::laser::Laser>,
     /// Meter orbs and the other items (`ItemInf`), and the graze count (status +0x80).
     pub items: crate::item::Items,
     pub graze: i32,
@@ -400,6 +402,7 @@ impl Side {
                 combo_shown: 0,
                 combo_age: 0,
                 combo_vms: Vec::new(),
+                lasers: Vec::new(),
                 items: crate::item::Items::new(),
                 graze: 0,
                 explosions: Vec::new(),
@@ -461,7 +464,7 @@ impl Side {
         for (kind, color, speed, origin) in cancelled {
             let roll = st.rand();
             let kind = crate::reflect::converted_kind(kind, st.spirit_frames, roll);
-            st.outgoing_reflects.push(crate::reflect::Request { kind, color, speed, origin, target: None, special_rank: None, owner: 0 });
+            st.outgoing_reflects.push(crate::reflect::Request { kind, color, speed, origin, target: None, special_rank: None, owner: 0, script: None, tangents: None, aim_player: false });
             // FUN_00548bc0(30) and FUN_00548d00(1) per cancelled bullet.
             st.add_dots(30, origin);
             st.add_special(1, origin);
@@ -510,6 +513,9 @@ impl Side {
                     continue;
                 }
             }
+            // Marisa's bomb band (FUN_004ee0d0): a live or appearing bullet touching the column.
+            if self.player.as_ref().is_some_and(|p| p.cancel_columns.iter().any(|&(x, w)|
+                b.invuln == 0 && matches!(b.state, 1 | 2) && (b.pos[0] - x).abs() <= w + b.hitbox)) { b.cancel(); continue; }
             if self.player.as_ref().is_some_and(|p| p.cancel_circles.iter().any(|(pos,r)|
                 b.intersects_cancel(*pos,*r,ctx.world,ctx.lib))) { b.cancel(); continue; }
             // FUN_00549e00: hit when d^2 < player_r^2 + bullet_r^2.
@@ -739,6 +745,7 @@ impl Side {
         self.st.scope_circle = self.player.as_ref().filter(|p| p.scope.active()).map(|p| (p.scope.pos,p.scope.radius));
         self.st.scope_column = self.player.as_ref().is_some_and(|p| p.character == crate::character::Character::Marisa);
         self.update_bullets(world, lib);
+        self.update_lasers(world, lib);
         self.update_explosions(world);
         for e in &mut self.enemies {
             if std::mem::take(&mut e.data.killed) && !e.data.delete {
@@ -803,6 +810,47 @@ impl Side {
 }
 
 impl Side {
+    /// The lasers on this field: widen, hurt the player or get grazed (`FUN_0052b550`,
+    /// `FUN_0052b250`).
+    fn update_lasers(&mut self, world: &mut World, lib: &AnmLibrary) {
+        let field = self.st.field;
+        let mut lasers = std::mem::take(&mut self.st.lasers);
+        let mut hit = false;
+        let mut grazed = None;
+        let player = self.player.as_ref().map(|p| (p.pos, p.hitbox_radius().max(3.0), p.hitbox_radius() > 0.0));
+        lasers.retain_mut(|l| {
+            let alive = l.update(world, field);
+            if let Some((pos, radius, vulnerable)) = player {
+                match l.contact(pos, radius) {
+                    crate::laser::Contact::Hit if vulnerable => hit = true,
+                    crate::laser::Contact::Hit | crate::laser::Contact::Graze if l.graze_tick() => grazed = Some(pos),
+                    _ => {}
+                }
+            }
+            if !alive {
+                l.delete(world);
+            }
+            alive
+        });
+        self.st.lasers = lasers;
+        if let Some(at) = grazed {
+            self.st.graze += 1;
+            let mut seed = self.st.rand() | 1;
+            self.st.items.drop_orbs(at, || {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                (seed >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0
+            });
+        }
+        if hit {
+            if let Some(p) = self.player.as_mut() {
+                let from = p.pos;
+                p.hit(from, world, lib, field);
+            }
+        }
+    }
+
     /// `FUN_00546080`: the combo counter. A chain of two or more that beats the best shown while
     /// the chain timer runs becomes the number; it stays up for the round, blinking gray once
     /// the chain has ended. The number ends at x = 48 (left field) / 360 (right) with "hits" in
@@ -889,25 +937,30 @@ pub fn dispatch_charges(sides: &mut [Side]) {
             let target = [st.randf2() * 148.0, st.randf() * 16.0];
             let color = (st.rand() & 0xf) as i32;
             st.outgoing_reflects.push(crate::reflect::Request { kind: crate::reflect::dot_kind(frames, roll), color,
-                speed: 0.5, origin, target: Some(target), special_rank: None, owner: 0 });
+                speed: 0.5, origin, target: Some(target), special_rank: None, owner: 0, script: None, tangents: None, aim_player: false });
         }
         // Special bullets: threshold 100/90/90/80 by difficulty (Normal assumed), limited.
-        // Only Reimu's special bullet (the yin-yang, EXOnmyoInf) is ported; Marisa's is a laser
-        // object (EXLaserInf) and is not.
+        // Reimu's special bullet is a yin-yang (EXOnmyoInf); Marisa's a laser orb (EXLaserInf,
+        // bullet.anm script 63). Both land as ExtraAttack00 of the sender's program.
         const THRESHOLD: i32 = 90;
-        while st.special_counter >= THRESHOLD && reimu {
+        while st.special_counter >= THRESHOLD {
             st.special_counter -= THRESHOLD;
             if active >= crate::reflect::special_limit(frames) { break; }
             active += 1;
             let target = [st.randf2() * 160.0, st.randf() * 60.0];
             st.outgoing_reflects.push(crate::reflect::Request { kind: 44, color: 1, speed: 0.0,
-                origin: st.last_special_pos, target: Some(target), special_rank: Some(rank), owner: sender });
+                origin: st.last_special_pos, target: Some(target), special_rank: Some(rank), owner: sender,
+                script: if reimu { None } else { Some(63) }, tangents: None, aim_player: false });
         }
     }
     // Bullets cancelled by a kill explosion fly to the opponent's field and fire there.
     for sender in 0..2 {
         let field = sides[sender].st.field;
-        for req in std::mem::take(&mut sides[sender].st.outgoing_reflects) {
+        for mut req in std::mem::take(&mut sides[sender].st.outgoing_reflects) {
+            if req.aim_player {
+                let x = sides[1 - sender].player.as_ref().map_or(0.0, |p| p.pos[0]);
+                req.target = Some([x, 448.0]);
+            }
             let receiver = &mut sides[1 - sender].st;
             let pending = crate::reflect::Pending::new(req, field, receiver);
             receiver.pending_reflects.push(pending);
@@ -937,9 +990,22 @@ pub fn dispatch_charges(sides: &mut [Side]) {
                 sides[1-sender].st.incoming_boss_level=rank;
                 sides[1-sender].st.request(script_request("BossAttack",[0.0,0.0],Some(sender)));
             }
+            // Marisa's skill sends six laser orbs that curve down to the opponent player's column
+            // (FUN_00417b90): tangents of length 600 turned a sixth of a turn apart from straight up.
+            Some(Level::Skill) if sides[sender].player.as_ref().is_some_and(|p| p.character == crate::character::Character::Marisa) => {
+                let rank = sides[sender].st.extra_level as i32;
+                let origin = sides[sender].player.as_ref().map_or([0.0; 2], |p| p.pos);
+                for k in 0..6 {
+                    let a = -std::f32::consts::FRAC_PI_2 + k as f32 * std::f32::consts::FRAC_PI_3;
+                    let t = [a.cos() * 600.0, a.sin() * 600.0];
+                    sides[sender].st.outgoing_reflects.push(crate::reflect::Request { kind: 44, color: 1, speed: 0.0, origin,
+                        target: None, special_rank: Some(rank), owner: sender, script: Some(63), tangents: Some((t, t)), aim_player: true });
+                }
+            }
             _ => {}
         }
     }
+    // Requests the events above made go out on the next frame's pass.
 }
 impl Side {
     /// ECL 525 (FUN_0050ca70): every enemy without flags 0x20/0x80/0x400 (or with 0x100)

@@ -623,6 +623,36 @@ impl EnemyHost<'_> {
                     e.ex_next = k + 1;
                 }
             }
+            // Laser parameters (cases 0x8d, 0x8e, 0x78): lengths and width, the four phase times
+            // and flags, sound ids.
+            700 => {
+                let (a, b, _, w) = (f(self, ctx, 1), f(self, ctx, 2), f(self, ctx, 3), f(self, ctx, 4));
+                let l = &mut self.e.ets[slot].laser;
+                l.len = [a, b];
+                l.width = w;
+            }
+            701 => {
+                let t = [i(self, ctx, 1), i(self, ctx, 2), i(self, ctx, 3), i(self, ctx, 4)];
+                let flags = i(self, ctx, 5);
+                let l = &mut self.e.ets[slot].laser;
+                l.times = t;
+                l.flags = flags;
+            }
+            608 => {
+                let (a, b) = (i(self, ctx, 1), i(self, ctx, 2));
+                self.e.ets[slot].laser.sound = [a, b];
+            }
+            // Infinite laser (case 0x90) at the ET's origin along its first angle.
+            703 => {
+                let e = &self.e.ets[slot];
+                let origin =
+                    if e.absolute { e.offset } else { [self.e.pos[0] + e.offset[0], self.e.pos[1] + e.offset[1]] };
+                if let Some(anm) = self.st.anm_files[0] {
+                    let laser = crate::laser::Laser::new(origin, e.angle[0], e.speed[0], e.sprite, e.color, &e.laser,
+                        &self.st.bullet_types, anm, self.world, self.lib, self.st.field);
+                    self.st.lasers.push(laser);
+                }
+            }
             614 => {
                 let src = i(self, ctx, 1);
                 if let Some(s) = self.e.ets.get(src as usize).cloned() {
@@ -939,7 +969,7 @@ impl EnemyHost<'_> {
                 let v = f!(1 + d);
                 ctx.set_float_var(ins, 0, v, self);
             }
-            600..=620 => self.et_op(ctx, ins),
+            600..=620 | 700 | 701 | 703 => self.et_op(ctx, ins),
             621 => {
                 let radius = f!(0);
                 let color = i!(1) as u32;

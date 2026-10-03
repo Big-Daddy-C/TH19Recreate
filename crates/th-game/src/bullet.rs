@@ -67,6 +67,8 @@ pub struct Et {
     pub aim: i32,
     /// Bullets start this far out along their direction (`ins_619`).
     pub distance: f32,
+    /// Laser parameters set by `ins_700` / `ins_701` / `ins_608`.
+    pub laser: crate::laser::LaserEt,
     pub ex: [Ex; 24],
     /// Next index for `ins_611`/`ins_612`, which append (reset by `ins_600`).
     pub ex_next: usize,
@@ -85,6 +87,7 @@ impl Default for Et {
             count: [1, 1],
             aim: 0,
             distance: 0.0,
+            laser: crate::laser::LaserEt::default(),
             ex: [Ex::default(); 24],
             ex_next: 0,
         }

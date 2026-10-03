@@ -8,6 +8,8 @@ pub struct DamageCircle {
     pub damage: i32,
     pub remaining: i32,
     pub growth: f32,
+    /// A full-height column of this size centred on `pos` (Marisa's bomb) instead of a circle.
+    pub rect: Option<[f32; 2]>,
 }
 pub struct Skill {
     pub time: i32,
@@ -86,7 +88,7 @@ impl Skill {
                         radius: 64.0,
                         damage: 4,
                         remaining: 1,
-                        growth: 0.0,
+                        growth: 0.0, rect: None,
                     });
                 }
             }
@@ -97,7 +99,7 @@ impl Skill {
                 radius: 64.0,
                 damage: 1,
                 remaining: 24,
-                growth: 1.0,
+                growth: 1.0, rect: None,
             });
         }
         self.time += 1;
