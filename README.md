@@ -20,6 +20,7 @@ Right now the `th19` binary is an **ANM + stage viewer** used to validate the pi
 | --- | --- |
 | Tab | cycle ANM viewer → stage (STD) viewer → game (stage + waves) |
 | Game mode | arrows = move, Z = shot, X = hold/release charge (all four tiers), B = debug EX on own field, Shift = focus, PgUp/PgDn = stage (`--game N` starts here) |
+| G (game mode) | development godmode: neither player can be hit |
 | ← / → | previous / next `.anm` file, or stage |
 | ↑ / ↓ | step through individual scripts |
 | A | toggle "all scripts at once" |

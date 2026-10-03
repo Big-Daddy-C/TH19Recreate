@@ -255,3 +255,100 @@ fn skill_damages_nearby_enemies_without_the_basic_charge_shots() {
         "Skill must respect enemy damage invulnerability"
     );
 }
+
+/// Level bookkeeping from th19.exe FUN_004e79e0 (+1 after dispatch, cap 7) and the
+/// opponent-status read of ECL 1034/1035: each attack plays at the sender's raised level.
+#[test]
+fn ex_levels_advance_per_use_and_attacks_play_at_the_raised_level() {
+    let Some(mut g) = setup() else { return };
+    g.sides[1].player.as_mut().unwrap().godmode = true;
+    let mut ranks = Vec::new();
+    for use_no in 1..=3u8 {
+        g.charge(0, 170);
+        assert_eq!(g.sides[0].player.as_ref().unwrap().last_charge, Some(Level::Extra));
+        assert_eq!(g.sides[0].st.extra_level, use_no);
+        assert_eq!(g.sides[1].st.incoming_extra_level, use_no);
+        g.tick([0; 2]);
+        let rank = g.sides[1]
+            .enemies
+            .iter()
+            .filter(|e| e.data.sub == "ExtraAttack")
+            .filter_map(|e| e.data.script_rank)
+            .max();
+        ranks.push(rank);
+        for _ in 0..40 {
+            g.tick([0; 2]);
+        }
+    }
+    assert_eq!(ranks, vec![Some(1), Some(2), Some(3)]);
+    // The other side's levels are independent.
+    assert_eq!(g.sides[1].st.extra_level, 0);
+}
+
+#[test]
+fn boss_level_advances_and_caps_at_seven() {
+    let Some(mut g) = setup() else { return };
+    g.sides[0].st.boss_level = 6;
+    g.charge(0, 250);
+    assert_eq!(g.sides[0].player.as_ref().unwrap().last_charge, Some(Level::Boss));
+    assert_eq!(g.sides[0].st.boss_level, 7);
+    assert_eq!(g.sides[1].st.incoming_boss_level, 7);
+}
+
+#[test]
+fn godmode_ignores_hits_and_death_raises_low_levels() {
+    let Some(mut g) = setup() else { return };
+    let et = th_game::bullet::Et { sprite: 0, count: [1, 1], speed: [0.0; 2], ..Default::default() };
+    // Godmode: a bullet on the player changes nothing.
+    g.sides[0].player.as_mut().unwrap().godmode = true;
+    let pos = g.sides[0].player.as_ref().unwrap().pos;
+    g.sides[0].st.fire(&et, pos, &mut g.world, &g.lib);
+    for _ in 0..20 {
+        g.tick([0; 2]);
+    }
+    let p = g.sides[0].player.as_ref().unwrap();
+    assert_eq!((p.hits, p.barrier, p.lives), (0, Barrier::Up, 2));
+    // Without godmode and without the barrier, a hit costs a heart; EX/boss levels
+    // below 3 rise by one (FUN_00549830).
+    {
+        let p = g.sides[0].player.as_mut().unwrap();
+        p.godmode = false;
+        p.barrier = Barrier::Broken;
+    }
+    g.sides[0].st.extra_level = 2;
+    g.sides[0].st.boss_level = 3;
+    g.sides[0].st.bullets.clear();
+    let pos = g.sides[0].player.as_ref().unwrap().pos;
+    g.sides[0].st.fire(&et, pos, &mut g.world, &g.lib);
+    for _ in 0..30 {
+        g.tick([0; 2]);
+    }
+    let p = g.sides[0].player.as_ref().unwrap();
+    assert_eq!(p.lives, 1);
+    assert_eq!(g.sides[0].st.extra_level, 3);
+    assert_eq!(g.sides[0].st.boss_level, 3);
+}
+
+/// The attack's script picks rank-dependent values (ECL 570/571) and rank-masked
+/// instructions, so different levels must produce different bullet patterns.
+#[test]
+fn extra_attack_pattern_depends_on_level() {
+    let mut counts = Vec::new();
+    for rank in [1u8, 4, 7] {
+        let Some(mut g) = setup() else { return };
+        g.sides[1].player.as_mut().unwrap().godmode = true;
+        g.sides[0].st.extra_level = rank - 1;
+        g.charge(0, 170);
+        assert_eq!(g.sides[1].st.incoming_extra_level, rank);
+        let mut peak = 0;
+        let mut kinds = std::collections::BTreeSet::new();
+        for _ in 0..300 {
+            g.tick([0; 2]);
+            peak = peak.max(g.sides[1].st.bullets.len());
+            kinds.extend(g.sides[1].st.bullets.iter().map(|b| b.kind));
+        }
+        println!("EX rank {rank}: peak bullets {peak}, sprite kinds {kinds:?}");
+        counts.push(peak);
+    }
+    assert!(counts.windows(2).any(|w| w[0] != w[1]), "levels should change the pattern: {counts:?}");
+}

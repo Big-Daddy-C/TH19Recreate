@@ -80,6 +80,8 @@ struct Viewer {
     game: Option<Game>,
     /// Keys currently held (gameplay input).
     held: std::collections::HashSet<KeyCode>,
+    /// Development godmode (G): neither player can be hit.
+    godmode: bool,
     /// Bullet sprite table read from th19.exe.
     bullet_types: std::rc::Rc<Vec<th_formats::exe::BulletType>>,
     /// Frames simulated since start (debug triggers).
@@ -113,6 +115,7 @@ impl Viewer {
             show_all: true,
             game: None,
             held: Default::default(),
+            godmode: false,
             bullet_types: Default::default(),
             frames: 0,
         };
@@ -229,6 +232,9 @@ impl Viewer {
                 for (i, s) in g.sides.iter_mut().enumerate().filter(|_| g.round.outcome.is_none()) {
                     // Side 2 has no controller yet: it just holds the shot button.
                     let k = if i == 0 { keys } else { th_game::player::input::SHOT };
+                    if let Some(p) = &mut s.player {
+                        p.godmode = self.godmode;
+                    }
                     s.tick(&g.prog, k, &mut self.world, &self.lib);
                 }
                 th_game::side::dispatch_charges(&mut g.sides);
@@ -332,7 +338,9 @@ impl Viewer {
                     .iter()
                     .map(|s| {
                         let lives = s.player.as_ref().map_or(0, |p| p.lives);
-                        format!("{} enemies, {} hearts, charge {} (free), last {:?}",s.enemies.len(),lives,
+                        // Levels as the HUD labels them (stored level + 1, FUN_004e8a20).
+                        format!("{} enemies, {} hearts, EX Lv.{} Boss Lv.{}, charge {} (free), last {:?}",s.enemies.len(),lives,
+                            s.st.extra_level+1, s.st.boss_level+1,
                             s.player.as_ref().map_or("none",|p| {
                                 let v=p.charge.value;let c=p.charge_settings;
                                 if v>=c.boss {"4 BOSS"} else if v>=c.extra {"3 EX"} else if v>=c.skill {"2 SKILL"}
@@ -341,7 +349,8 @@ impl Viewer {
                     })
                     .collect();
                 return format!(
-                    "th19-rs - {name} - {} - {} VMs{}{} - points {}:{} {:?}",
+                    "th19-rs - {name}{} - {} - {} VMs{}{} - points {}:{} {:?}",
+                    if self.godmode { " - GODMODE" } else { "" },
                     n.join(" | "),
                     self.world.len(),
                     if self.fast { " - x8" } else { "" },
@@ -416,6 +425,11 @@ impl Viewer {
                 self.restart();
             }
             KeyCode::KeyF => self.fast = !self.fast,
+            // Development godmode: neither player can be hit.
+            KeyCode::KeyG if self.mode == Mode::Game => {
+                self.godmode = !self.godmode;
+                log::info!("godmode {}", if self.godmode { "on" } else { "off" });
+            }
             // Debug: send an extra attack into player 1's field.
             KeyCode::KeyB if self.mode == Mode::Game => self.debug_extra_attack(),
             KeyCode::KeyV => self.show_fields = !self.show_fields,
@@ -629,7 +643,7 @@ fn main() {
     println!(
         "Controls: Tab = switch ANM viewer / stage viewer / game, Left/Right = file or stage, Up/Down = single script,\n\
          A = all scripts, C = toggle centre origin, F = fast-forward x8, V = toggle field divider,\n\
-         R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (1 shot / 2 skill / 3 EX / 4 boss; free meter), B = debug EX, Shift = focus, PgUp/PgDn = stage,\n\
+         R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (1 shot / 2 skill / 3 EX / 4 boss; free meter), B = debug EX, G = godmode, Shift = focus, PgUp/PgDn = stage,\n\
          . = step frame, 0-9 = send interrupt, Esc = quit"
     );
 

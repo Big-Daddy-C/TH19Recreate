@@ -436,6 +436,15 @@ impl Side {
         if let Some(p) = &mut self.player {
             p.update(keys, &mut self.enemies, world, lib, self.st.field);
             self.st.player_pos = p.pos;
+            // Losing a heart raises this side's EX and boss levels by one while below 3
+            // (FUN_00549830, status +0x38/+0x3c).
+            if std::mem::take(&mut p.just_died) {
+                for level in [&mut self.st.extra_level, &mut self.st.boss_level] {
+                    if *level < 3 {
+                        *level += 1;
+                    }
+                }
+            }
             if let Some(level) = p.charge_event {
                 use crate::charge::Level;
                 let sub = match level { Level::Attack => None, Level::Skill => Some("Ecl_EtBreakLv2"),
@@ -483,17 +492,22 @@ pub fn dispatch_charges(sides: &mut [Side]) {
     for (sender,event) in events.into_iter().enumerate() {
         use crate::charge::Level;
         match event {
+            // The release controller (FUN_004e79e0) dispatches the attack, then raises the
+            // sender's level by one (capped at 7: EX inline, boss via FUN_0040b3a0). The
+            // attack's script reads the sender's level later (ECL 1034/1035 via
+            // FUN_0040b620/FUN_0040b660 on the opponent status), so it plays at the raised
+            // level: stored 0 is shown as "Lv.1" (HUD prints level+1) and plays rank 1.
             Some(Level::Extra) => {
-                let rank=sides[sender].st.extra_level;
+                let rank=(sides[sender].st.extra_level+1).min(7);
+                sides[sender].st.extra_level=rank;
                 sides[1-sender].st.incoming_extra_level=rank;
                 sides[1-sender].st.request(script_request("ExtraAttack",[0.0,0.0]));
-                sides[sender].st.extra_level=(rank+1).min(7);
             }
             Some(Level::Boss) => {
-                let rank=sides[sender].st.boss_level;
+                let rank=(sides[sender].st.boss_level+1).min(7);
+                sides[sender].st.boss_level=rank;
                 sides[1-sender].st.incoming_boss_level=rank;
                 sides[1-sender].st.request(script_request("BossAttack",[0.0,0.0]));
-                sides[sender].st.boss_level=(rank+1).min(7);
             }
             _ => {}
         }

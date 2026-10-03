@@ -98,6 +98,10 @@ pub struct PlayerBullet {
 }
 
 pub struct Player {
+    /// Development toggle: the player can't be hit.
+    pub godmode: bool,
+    /// Set when a heart is lost; the side consumes it (EX/boss level catch-up).
+    pub just_died: bool,
     pub sht: ShtFile,
     pub anm_file: usize,
     /// Position in 1/128 units.
@@ -196,6 +200,8 @@ impl Player {
             max_lives: DEFAULT_LIVES,
             cancel_radius: None,
             death_vm: None,
+            godmode: false,
+            just_died: false,
             effect_anm: None,
             barrier: Barrier::Up,
             barrier_vm: None,
@@ -213,7 +219,8 @@ impl Player {
     /// 100 frames of invulnerability and a knockback away from the bullet. Otherwise
     /// (`FUN_00545e10`): hit effect, then an 8-frame window before death.
     pub fn hit(&mut self, from: [f32; 2], world: &mut World, lib: &AnmLibrary, field: [f32; 4]) -> bool {
-        if self.state != State::Normal || self.invuln > 0 {
+        // Godmode (a development toggle, not a game feature): hits are ignored.
+        if self.godmode || self.state != State::Normal || self.invuln > 0 {
             return false;
         }
         if self.barrier == Barrier::Up {
@@ -241,6 +248,7 @@ impl Player {
     fn die(&mut self, world: &mut World, lib: &AnmLibrary, field: [f32; 4]) {
         self.death_vm = Some(world.spawn_clipped(lib, self.anm_file, 21, field_to_canvas(field, self.pos), field));
         self.lives -= 1;
+        self.just_died = true;
         self.state = State::Dead;
         self.state_time = 0;
         self.invuln = 180;
