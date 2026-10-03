@@ -138,6 +138,8 @@ pub struct Player {
     pub free_charge: bool,
     pub opponent_boss_active: bool,
     pub charge_event: Option<crate::charge::Level>,
+    /// Sound requests `(id, pan)`; `None` pans to this player's side. Drained by the side.
+    pub sounds: Vec<(u32, Option<i32>)>,
     pub last_charge: Option<crate::charge::Level>,
     pub skills: Vec<crate::skill::Skill>,
     /// The running bomb (`BombInf`), at most one.
@@ -222,7 +224,7 @@ impl Player {
             charge_settings,
             charge: crate::charge::Gauge::default(),
             meter: charge_settings.attack,
-            free_charge: false, opponent_boss_active: false, charge_event: None, last_charge: None,
+            free_charge: false, opponent_boss_active: false, charge_event: None, sounds: Vec::new(), last_charge: None,
             skills: Vec::new(), bomb: None, bomb_prev: false, cancel_circles: Vec::new(), cancel_columns: Vec::new(), damage_circles: Vec::new(), snake_explosions: Vec::new(), skill_rng: 0x1cafe777,
             charge_timer: None,
             wide_charge: false, charge_origin: [0.0;2], skill_volley: false, boost_frames: 0, cancel_rects: Vec::new(),
@@ -616,6 +618,8 @@ impl Player {
             }
             if level == Level::Skill && self.character == Character::Ran && self.boost_frames == 0 {
                 // EXRanInf00419ae0: power400 for600 ticks, then restore200.
+                // FUN_00419ae0: sound 0xd, panned to the player's side.
+                self.sounds.push((0xd, None));
                 self.power = 400; self.boost_frames = 600;
                 self.update_options(world,lib,field);
             }

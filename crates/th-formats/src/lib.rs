@@ -24,6 +24,7 @@ pub mod exe;
 pub mod msg;
 pub mod sht;
 pub mod stage;
+pub mod wav;
 
 /// Bounds-checked little-endian reader over a byte slice, positioned at a base offset.
 #[derive(Clone, Copy)]

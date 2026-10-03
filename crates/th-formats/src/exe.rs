@@ -105,3 +105,21 @@ pub fn bullet_types(exe: &Exe) -> Vec<BulletType> {
     }
     out
 }
+
+/// Sound-effect file names in load order (`FUN_004bc050` loop over the 0x48 pointers at
+/// 0x596210) and the sound-id table at 0x5c4e00 (0x14 bytes per id, first dword = file index).
+/// `table[id]` is the file name for sound `id`, or `None` when the index is out of range.
+pub fn sound_table(exe: &Exe) -> Vec<Option<String>> {
+    const FILES: u32 = 0x596210;
+    const IDS: u32 = 0x5c4e00;
+    let names: Vec<Option<String>> = (0..0x48u32)
+        .map(|i| {
+            let ptr = exe.i32_at(FILES + i * 4)? as u32;
+            let raw = exe.bytes(ptr, 32)?;
+            Some(String::from_utf8_lossy(raw.split(|&b| b == 0).next()?).into_owned())
+        })
+        .collect();
+    (0..0x4au32)
+        .map(|id| names.get(exe.i32_at(IDS + id * 0x14)? as usize)?.clone())
+        .collect()
+}

@@ -989,6 +989,10 @@
     "ran_ex_special_update": {
       "address": "00419c00",
       "decompile_sha256": "5d3f050278557e3ebdfdabc827dfb648915cef383d54881f9335e0bfeedc1c7b"
+    },
+    "sound_request": {
+      "address": "004bb8d0",
+      "decompile_sha256": "acf890ab9a78d81f7a93a2d4bca67cc1568519781476637ce1dff814f3bd4cd9"
     }
   },
   "features": {
@@ -2399,7 +2403,8 @@
         "graze_line_strip",
         "bullet_contact_tick",
         "segment_closest_point",
-        "ran_ex_special_update"
+        "ran_ex_special_update",
+        "sound_request"
       ],
       "code": [
         "crates/th-game/src/character.rs",
@@ -2580,6 +2585,13 @@
         {
           "text": "ECL1041 (case 0xc2 at 00505213) sets bit 0x20000000 of the script-side flags +0x5170; the enemy-side copy is +0x63a0 (offset differs by 0x1230, so grep for 0x5170 misses consumers). FUN_0050c1f0 skips one block under that flag: kill credit FUN_0051d4e0 (types 0/1/3/4) AND the chain update FUN_00549780 (chain count +1, chain timer). Death effect, explosion and orb throwing stay. Only Ran pl03 ExAttack uses 1041. The Rust chain update now honours the flag too.",
           "sources": [],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Sound effects: FUN_004bb8d0(id, pan) queues a request (up to 12 distinct ids per frame, up to 60 pans each); pan is DirectSound hundredths of dB, callers use x*1000/192. The id table is 0x14 bytes per id at 0x5c4e00 (first dword = index into the 0x48 file names at 0x596210, loaded from th19.dat wavs by FUN_004bc050); ids >= 0x4a have no file (e.g. 0x50/0x51 in the player update). Ported calls: graze award 0x2a (x pan), Ran boost start 0xd (side pan +-100*1000/192). Rust: SideState::play_sound / Player.sounds -> viewer audio.rs (rodio). Volume (0.5) and the per-sound fields after the first dword are unverified; BGM (thbgm.fmt/thbgm.dat raw PCM, th_formats::bgm) is not hooked up yet. Every future ported function should add its FUN_004bb8d0 calls.",
+          "sources": [
+            "sound_request"
+          ],
           "evidence": "code_checked"
         }
       ],

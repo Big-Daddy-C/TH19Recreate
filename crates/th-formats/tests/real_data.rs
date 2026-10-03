@@ -63,3 +63,22 @@ fn every_file_parses() {
     assert_eq!(counts.get("sht"), Some(&19));
     assert_eq!(counts.get("msg"), Some(&58));
 }
+
+/// Every sound id up to 0x49 with a file maps to a wav that parses (ids with no file are
+/// allowed), and the ids ported so far point where the code says.
+#[test]
+fn sound_table_files_parse() {
+    let Some(path) = dat_path() else { return };
+    let exe = th_formats::exe::Exe::parse(std::fs::read(path.with_file_name("th19.exe")).unwrap()).unwrap();
+    let table = th_formats::exe::sound_table(&exe);
+    assert_eq!(table[0x2a].as_deref(), Some("se_ch00.wav"));
+    assert_eq!(table[0xd].as_deref(), Some("se_extend.wav"));
+    let mut dat = Archive::open(path).unwrap();
+    let mut playable = 0;
+    for name in table.iter().flatten() {
+        let pcm = th_formats::wav::parse(&dat.read(name).expect(name)).expect(name);
+        assert!(!pcm.samples.is_empty(), "{name}");
+        playable += 1;
+    }
+    assert!(playable > 60, "only {playable} sounds resolved");
+}

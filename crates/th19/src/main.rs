@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use th_anm::{AnmLibrary, World};
 use th_stage::Stage;
 use th_formats::dat::Archive;
+mod audio;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -61,6 +62,7 @@ struct Game {
 }
 
 struct Viewer {
+    audio: Option<audio::Audio>,
     mode: Mode,
     /// Overlay the playfield divider on the stage background.
     show_fields: bool,
@@ -110,6 +112,7 @@ impl Viewer {
             dat.entries().iter().map(|e| e.name.clone()).filter(|n| n.ends_with(".std")).collect();
         stage_files.sort();
         let mut v = Self {
+            audio: None,
             mode: Mode::Anm,
             show_fields: true,
             stage: None,
@@ -296,6 +299,8 @@ impl Viewer {
                         p.free_charge = self.full_charge;
                     }
                     s.tick(&g.progs, k, &mut self.world, &self.lib);
+                    if let Some(a) = &mut self.audio { a.play_all(&s.st.sounds); }
+                    s.st.sounds.clear();
                 }
                 th_game::side::dispatch_charges(&mut g.sides);
                 let defeated = std::array::from_fn(|i| g.sides[i].player.as_ref()
@@ -823,7 +828,12 @@ fn main() {
     // Bullet sprite types live in th19.exe, next to th19.dat.
     let exe_path = dat_path.with_file_name("th19.exe");
     match std::fs::read(&exe_path).map_err(|e| e.to_string()).and_then(|b| th_formats::exe::Exe::parse(b).map_err(|e| e.to_string())) {
-        Ok(exe) => viewer.bullet_types = std::rc::Rc::new(th_formats::exe::bullet_types(&exe)),
+        Ok(exe) => {
+            viewer.bullet_types = std::rc::Rc::new(th_formats::exe::bullet_types(&exe));
+            if !std::env::args().any(|a| a == "--no-audio") {
+                viewer.audio = audio::Audio::new(&exe, &mut viewer.dat);
+            }
+        }
         Err(e) => log::warn!("{}: {e} (enemy bullets disabled)", exe_path.display()),
     }
     // `--stage N` starts in the stage viewer on worldNN.std; `--game N` also runs the waves.

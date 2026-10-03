@@ -122,6 +122,9 @@ pub struct SideState {
     /// Meter orbs and the other items (`ItemInf`), and the graze count (status +0x80).
     pub items: crate::item::Items,
     pub graze: i32,
+    /// Sound requests this tick as `(sound id, DirectSound pan)`, like `FUN_004bb8d0`; the viewer
+    /// drains and plays them. Use [`SideState::play_sound`].
+    pub sounds: Vec<(u32, i32)>,
     /// Graze sparks in flight (bullet-manager pool type 4).
     pub sparks: Vec<crate::graze::Spark>,
     /// Kill explosions in progress.
@@ -291,6 +294,12 @@ impl SideState {
         x
     }
     /// Uniform in [0, 1).
+    /// `FUN_004bb8d0(id, x * 1000 / 192)`: queue a sound effect panned by the field x of its
+    /// source (`id` indexes the exe's sound table).
+    pub fn play_sound(&mut self, id: u32, x: f32) {
+        self.sounds.push((id, (x * 1000.0 / 192.0) as i32));
+    }
+
     pub fn randf(&mut self) -> f32 {
         (self.rand() >> 8) as f32 / (1u32 << 24) as f32
     }
@@ -424,6 +433,7 @@ impl Side {
                 items: crate::item::Items::new(),
                 graze: 0,
                 sparks: Vec::new(),
+                sounds: Vec::new(),
                 explosions: Vec::new(),
                 scope_circle: None,
                 scope_column: false, scope_character: Default::default(),
@@ -565,6 +575,7 @@ impl Side {
         for (at, rgb) in grazes {
             st.graze += 1;
             let delay = (st.rand() & 7) as i32;
+            st.play_sound(0x2a, at[0]);
             st.sparks.push(crate::graze::Spark::new(at, rgb, delay));
             let mut seed = st.rand() | 1;
             st.items.drop_orbs(at, || {
@@ -769,6 +780,11 @@ impl Side {
         if let Some(p) = &mut self.player {
             p.update(keys, &mut self.enemies, world, lib, self.st.field);
             self.st.player_pos = p.pos;
+            // The player has no side index; a sound without its own pan is panned to its side.
+            let side_pan = if self.st.field[0] < 320.0 { -100 } else { 100 } * 1000 / 192;
+            for (id, pan) in p.sounds.drain(..) {
+                self.st.sounds.push((id, pan.unwrap_or(side_pan)));
+            }
             // Losing a heart raises this side's EX and boss levels by one while below 3
             // (FUN_00549830, status +0x38/+0x3c).
             if std::mem::take(&mut p.just_died) {
@@ -888,6 +904,7 @@ impl Side {
         if let Some(at) = grazed {
             self.st.graze += 1;
             let delay = (self.st.rand() & 7) as i32;
+            self.st.play_sound(0x2a, at[0]);
             self.st.sparks.push(crate::graze::Spark::new(spark_at.unwrap_or(at), crate::graze::DEFAULT_RGB, delay));
             let mut seed = self.st.rand() | 1;
             self.st.items.drop_orbs(at, || {

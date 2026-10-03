@@ -18,3 +18,4 @@ bytemuck = { version = "1", features = ["derive"] }
 log = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
 env_logger = "0.11"
+rodio = { version = "0.22.2", default-features = false, features = ["playback"] }
