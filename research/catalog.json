@@ -585,6 +585,18 @@
     "bot_ray_test": {
       "address": "004d3720",
       "decompile_sha256": "24570792a04b1af41fb4428a1e6f8a6fe1b8c4ea88ccf9b05aa4600c62b99474"
+    },
+    "combo_display": {
+      "address": "00546080",
+      "decompile_sha256": "8f0d36a29f40cf8ad187e286ca68f2b5c5cf4019c6e20b66e52bc967d9e0a19d"
+    },
+    "ascii_text_draw": {
+      "address": "004e5850",
+      "decompile_sha256": "0035e396e033270290a8b69fbb0f90abb3038442aef389ea57edf937fee8a466"
+    },
+    "ascii_text_queue": {
+      "address": "004e7610",
+      "decompile_sha256": "97eb28a73c3aeafbd727c49c42dd46d8e3216b648f0fdb0a2b87bb539e8412a0"
     }
   },
   "features": {
@@ -1028,7 +1040,8 @@
         "crates/th-game/src/enemy.rs",
         "crates/th-game/src/bullet.rs",
         "crates/th-game/src/reflect.rs",
-        "crates/th-game/src/reflect.rs"
+        "crates/th-game/src/reflect.rs",
+        "crates/th-game/src/text.rs"
       ],
       "tests": [
         "crates/th-game/tests/higher_charge.rs"
@@ -1103,16 +1116,27 @@
             "focus_marker_spawn"
           ],
           "evidence": "code_checked"
+        },
+        {
+          "text": "Combo counter (FUN_00546080): player +0x22b4 is the chain, +0x227c the chain timer, +0x22b8 the number shown. When the chain is >= 2, beats the shown number and the timer is running, the shown number becomes the chain and a display timer (+0x2290) restarts at 120. The number is never cleared during the round. It is queued as text (FUN_004e7610) at x = 48 (left player) / 360 (right), y = 32: '%d' right-aligned to x and the string 'hits' left-aligned from x at 0.6 scale, font style 6, colour 0xffffff00 (yellow), turning 0xff808080 (gray) in 3 of every 6 frames of the display timer once the chain timer has run out. Style 6 draws glyph sprite (char + 0x120) of ascii.anm's ascii_big entry (22x37 '0', proportional; drawn at half size), advancing by the glyph width times the scale, from the glyph's top-left, vertical alignment 2 (box top = 16 x scale above the baseline). Ported with an AsciiInf-style glyph VM drawn at priority 0x1f. Only style 6 of the text object is ported; the other styles (sprite offsets 0xef, 0x10d, 0x1e4, 0x182, 0x246, 0x2a8 ...) and shadow/outline are not.",
+          "sources": [
+            "combo_display",
+            "ascii_text_draw",
+            "ascii_text_queue"
+          ],
+          "evidence": "code_checked"
         }
       ],
       "checks": {
         "original_game_parity": "not_run",
         "boss_scope_audit": "2026-10-02: original-asset Reimu health all8levels and rank-specific first attack-cycle counts passed; final cargo test --release --workspace passed41tests; cargo build --release -p th19 passed.",
         "automated_cancel": "2026-10-03: workspace 58 tests: explosion cancel eligibility (type<4, invulnerable included, type 5 immune), chain hits, conversion arrives on the other field; script vs player cancel invulnerability.",
-        "automated_focus_marker": "2026-10-03: focus_shows_the_effect_anm_hit_marker_and_releases_it"
+        "automated_focus_marker": "2026-10-03: focus_shows_the_effect_anm_hit_marker_and_releases_it",
+        "automated_combo": "2026-10-03: combo_counter_shows_the_best_chain_and_blinks_after_it_ends"
       },
       "next": [
-        "Trace reward recipients and pending item/graze systems before enabling meter gain."
+        "Trace reward recipients and pending item/graze systems before enabling meter gain.",
+        "Port the remaining AsciiInf styles (HUD score/meter text) and the display timer's per-frame increment (assumed +1)."
       ]
     },
     "ecl": {

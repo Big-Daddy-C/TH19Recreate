@@ -211,8 +211,13 @@ impl Viewer {
             Some(id) => Some(id),
             None => self.dat.read("aura.anm").ok().and_then(|b| self.lib.load("aura.anm", &b).ok()),
         };
+        let ascii = match self.lib.file_id("ascii.anm") {
+            Some(id) => Some(id),
+            None => self.dat.read("ascii.anm").ok().and_then(|b| self.lib.load("ascii.anm", &b).ok()),
+        };
         for s in &mut sides {
             s.st.bullet_types = self.bullet_types.clone();
+            s.st.ascii_anm = ascii;
             s.st.ghost_anm = ghost;
             s.start(&prog);
             if let (Some(sht), Some(anm)) = (&sht, pl_anm) {
@@ -244,6 +249,12 @@ impl Viewer {
                     g.sides[1].st.special_counter = 360;
                     g.sides[1].st.last_credit_pos = [0.0, 120.0];
                     g.sides[1].st.last_special_pos = [0.0, 120.0];
+                }
+            }
+            // Development: `TH19_DEBUG_CHAIN=frame` gives both sides a 14-chain.
+            if std::env::var("TH19_DEBUG_CHAIN").ok().and_then(|v| v.parse::<u64>().ok()) == Some(self.frames) {
+                if let Some(g) = &mut self.game {
+                    for s in &mut g.sides { s.st.chain = 14; s.st.chain_timer = 30; }
                 }
             }
             if std::env::var_os("TH19_DEBUG_FOCUS").is_some() { self.held.insert(KeyCode::ShiftLeft); }

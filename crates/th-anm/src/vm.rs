@@ -603,6 +603,21 @@ impl World {
         self.spawn_inner(lib, file, script, None, [pos[0], pos[1], 0.0], false)
     }
 
+    /// Create a script-less root VM that just shows `sprite` of `file` (how the game's text
+    /// object draws a glyph: it sets the sprite on one VM and draws it). `color` is 0..255 RGB.
+    pub fn spawn_sprite(&mut self, file: usize, sprite: i32, pos: [f32; 2], scale: [f32; 2], color: [f32; 3], priority: i32) -> VmId {
+        let mut vm = Vm::new(file, usize::MAX, self.next_order);
+        self.next_order += 1;
+        vm.origin = [pos[0], pos[1], 0.0];
+        vm.sprite = sprite;
+        vm.scale = scale;
+        vm.color = color;
+        // The text object draws glyphs from their top-left corner.
+        vm.anchor = [1, 1];
+        vm.draw_priority = Some(priority);
+        self.insert(vm)
+    }
+
     /// Create a root 2D VM whose drawing (and its children's) is scissored to `clip`.
     pub fn spawn_clipped(&mut self, lib: &AnmLibrary, file: usize, script: usize, pos: [f32; 2], clip: [f32; 4]) -> VmId {
         let mut vm = Vm::new(file, script, self.next_order);

@@ -121,6 +121,7 @@ fn setup() -> Option<Game> {
     let aura = lib
         .load("aura.anm", &dat.read("aura.anm").unwrap())
         .unwrap();
+    let ascii = lib.load("ascii.anm", &dat.read("ascii.anm").unwrap()).unwrap();
     let sht = ShtFile::parse(&dat.read("pl00.sht").unwrap()).unwrap();
     let mut sides: Vec<_> = FIELDS
         .into_iter()
@@ -128,6 +129,7 @@ fn setup() -> Option<Game> {
         .collect();
     for side in &mut sides {
         side.st.bullet_types = types.clone();
+        side.st.ascii_anm = Some(ascii);
         let mut p = Player::new(sht.clone(), player);
         p.state = State::Normal;
         p.free_charge = true;
@@ -1060,3 +1062,31 @@ fn bot_bombs_when_every_move_is_hit() {
     assert_eq!(bot.think(&mut g.sides[1]), input::BOMB);
 }
 
+
+/// A chain of two or more shows the combo counter ("N hits", yellow) with the original's
+/// text object; it stays after the chain ends, blinking gray, and only a larger chain raises it.
+#[test]
+fn combo_counter_shows_the_best_chain_and_blinks_after_it_ends() {
+    let Some(mut g) = setup() else { return };
+    assert!(g.sides[0].st.ascii_anm.is_some());
+    for _ in 0..5 { g.tick([0; 2]); }
+    assert_eq!(g.sides[0].st.combo_shown, 0);
+    let base = g.sides[0].st.combo_vms.len();
+    g.sides[0].st.chain = 14;
+    g.sides[0].st.chain_timer = 20;
+    g.tick([0; 2]);
+    assert_eq!(g.sides[0].st.combo_shown, 14);
+    assert_eq!(g.sides[0].st.combo_vms.len(), base + 2 + 4, "two digits and 'hits'");
+    // While the chain timer runs the colour stays yellow; afterwards it blinks.
+    let color = |g: &Game| g.world.get(g.sides[0].st.combo_vms[0]).unwrap().color;
+    assert_eq!(color(&g), [255.0, 255.0, 0.0]);
+    for _ in 0..30 { g.tick([0; 2]); }
+    assert_eq!(g.sides[0].st.chain, 0);
+    assert_eq!(g.sides[0].st.combo_shown, 14, "stays up");
+    let seen: std::collections::HashSet<i32> = (0..12).map(|_| { g.tick([0; 2]); color(&g)[0] as i32 }).collect();
+    assert!(seen.contains(&128) && seen.contains(&255), "{seen:?}");
+    g.sides[0].st.chain = 20;
+    g.sides[0].st.chain_timer = 10;
+    g.tick([0; 2]);
+    assert_eq!(g.sides[0].st.combo_shown, 20);
+}

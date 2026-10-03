@@ -103,6 +103,13 @@ pub struct SideState {
     pub clear_enemies: bool,
     /// `ghost.anm` (kill explosions).
     pub ghost_anm: Option<usize>,
+    /// `ascii.anm`, for the combo counter.
+    pub ascii_anm: Option<usize>,
+    /// Best chain shown by the combo counter (player +0x22b8), frames since it last rose
+    /// (+0x2290, starts at 120) and its glyph VMs.
+    pub combo_shown: i32,
+    pub combo_age: i32,
+    pub combo_vms: Vec<th_anm::VmId>,
     /// Kill explosions in progress.
     pub explosions: Vec<Explosion>,
     pub scope_circle: Option<([f32; 2], f32)>,
@@ -351,6 +358,10 @@ impl Side {
                 spell_background: None, spell_start_effect: None,
                 clear_enemies: false,
                 ghost_anm: None,
+                ascii_anm: None,
+                combo_shown: 0,
+                combo_age: 0,
+                combo_vms: Vec::new(),
                 explosions: Vec::new(),
                 scope_circle: None,
                 spirit_credit: 0, spirit_origin: [0.0;2], spirit_pressure: 0, spirit_frames: 0,
@@ -660,6 +671,7 @@ impl Side {
             }
         }
         crate::spirit::send_earned(&mut self.st);
+        self.update_combo(world, lib);
         let mut k = 0;
         while k < self.enemies.len() {
             if self.enemies[k].data.delete {
@@ -671,6 +683,33 @@ impl Side {
                 k += 1;
             }
         }
+    }
+}
+
+impl Side {
+    /// `FUN_00546080`: the combo counter. A chain of two or more that beats the best shown while
+    /// the chain timer runs becomes the number; it stays up for the round, blinking gray once
+    /// the chain has ended. The number ends at x = 48 (left field) / 360 (right) with "hits" in
+    /// small type after it, both on y = 32.
+    fn update_combo(&mut self, world: &mut World, lib: &AnmLibrary) {
+        use crate::text::{big_text, Align};
+        let st = &mut self.st;
+        for id in st.combo_vms.drain(..) {
+            world.delete(id);
+        }
+        if st.chain > 1 && st.combo_shown < st.chain && st.chain_timer > 0 {
+            st.combo_shown = st.chain;
+            st.combo_age = 120;
+        } else if st.combo_shown != 0 {
+            st.combo_age += 1;
+        }
+        let (Some(file), true) = (st.ascii_anm, st.combo_shown != 0) else { return };
+        let yellow = [255.0, 255.0, 0.0];
+        let color = if st.chain_timer < 1 && st.combo_age % 6 >= 3 { [128.0; 3] } else { yellow };
+        let x = if st.field[0] < 320.0 { 48.0 } else { 360.0 };
+        let pos = [x, 32.0];
+        st.combo_vms = big_text(world, lib, file, &st.combo_shown.to_string(), pos, 1.0, Align::Right, color);
+        st.combo_vms.extend(big_text(world, lib, file, "hits", pos, 0.6, Align::Left, color));
     }
 }
 
