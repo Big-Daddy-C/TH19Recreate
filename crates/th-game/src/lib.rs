@@ -4,6 +4,7 @@ pub mod bullet;
 pub mod boss_mesh;
 pub mod charge;
 pub mod graze;
+pub mod sfx;
 pub mod round;
 pub mod enemy;
 pub mod motion;

@@ -354,7 +354,7 @@ impl SideState {
         // FUN_004f1340 ends by queueing the ET's bullet sound (flag +0x474 & 0x20, set by ins_600),
         // panned by the origin x.
         if et.laser.sound[0] >= 0 {
-            self.play_sound(et.laser.sound[0] as u32, origin[0]);
+            if crate::sfx::on(crate::sfx::Cat::EnemyFire) { self.play_sound(et.laser.sound[0] as u32, origin[0]); }
         }
     }
 
@@ -581,7 +581,7 @@ impl Side {
         for (at, rgb) in grazes {
             st.graze += 1;
             let delay = (st.rand() & 7) as i32;
-            st.play_sound(0x2a, at[0]);
+            if crate::sfx::on(crate::sfx::Cat::Graze) { st.play_sound(0x2a, at[0]); }
             st.sparks.push(crate::graze::Spark::new(at, rgb, delay));
             let mut seed = st.rand() | 1;
             st.items.drop_orbs(at, || {
@@ -636,7 +636,7 @@ impl Side {
         // FUN_0051d4e0 case0 earns spirit credit at chains>9; case1 dispatches an
         // animal selected by distance, and earns5 further credit (default modifiers).
         // FUN_0050c1f0 opens with the death sound (enemy +0x6328 = (id & 1) + 3 from creation).
-        st.play_sound(3 + (e.id & 1) as u32, e.pos[0]);
+        if crate::sfx::on(crate::sfx::Cat::EnemyDeath) { st.play_sound(3 + (e.id & 1) as u32, e.pos[0]); }
         st.spirit_origin = e.pos;
         if !e.suppress_kill_rewards {
         if (1..=4).contains(&e.spirit_kind) {
@@ -913,7 +913,7 @@ impl Side {
         if let Some(at) = grazed {
             self.st.graze += 1;
             let delay = (self.st.rand() & 7) as i32;
-            self.st.play_sound(0x2a, at[0]);
+            if crate::sfx::on(crate::sfx::Cat::Graze) { self.st.play_sound(0x2a, at[0]); }
             self.st.sparks.push(crate::graze::Spark::new(spark_at.unwrap_or(at), crate::graze::DEFAULT_RGB, delay));
             let mut seed = self.st.rand() | 1;
             self.st.items.drop_orbs(at, || {

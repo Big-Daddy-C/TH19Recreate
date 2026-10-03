@@ -220,7 +220,7 @@ impl Enemy {
         // boss variant 0x23 (flags 0x4080 at low health) and the per-enemy override +0x510c are
         // not ported.
         if e.damaged {
-            st.play_sound(0x22, e.pos[0]);
+            if crate::sfx::on(crate::sfx::Cat::EnemyHit) { st.play_sound(0x22, e.pos[0]); }
         }
         // Hit flash (FUN_00509980's tail): a damaged enemy's main sprite is drawn in
         // colour 2 = 0xff0000ff for one frame, then normally for at least 4 frames.
@@ -677,7 +677,7 @@ impl EnemyHost<'_> {
                     // FUN_0052b8e0 (the infinite laser's init) plays the ET's first sound id (+0x8c8,
                     // copied from ET +0x478) at centre pan; no other laser class plays one.
                     if kind == crate::laser::Kind::Infinite && sound >= 0 {
-                        self.st.sounds.push((sound as u32, 0));
+                        if crate::sfx::on(crate::sfx::Cat::Laser) { self.st.sounds.push((sound as u32, 0)); }
                     }
                 }
             }

@@ -468,7 +468,7 @@ impl Bullet {
                 }
                 ex::DELETE => self.delete = true,
                 // FUN_004f1460 case 0x800: play sound `a`, panned by the bullet's x.
-                ex::SOUND => self.sounds.push((e.a.max(0) as u32, (self.pos[0] * 1000.0 / 192.0) as i32)),
+                ex::SOUND => if crate::sfx::on(crate::sfx::Cat::BulletEvent) { self.sounds.push((e.a.max(0) as u32, (self.pos[0] * 1000.0 / 192.0) as i32)) },
                 // Not implemented yet: other kinds are skipped.
                 _ => {}
             }
@@ -692,7 +692,7 @@ impl Bullet {
         st.step_count += 1;
         // FUN_004f08a0 plays the bullet's second sound at each step boundary.
         if self.sound2 >= 0 {
-            self.sounds.push((self.sound2 as u32, 0));
+            if crate::sfx::on(crate::sfx::Cat::BulletEvent) { self.sounds.push((self.sound2 as u32, 0)); }
         }
         // Redirect (jump table at 0x4f0ad8): 0/5 add, 1/6 aim + angle, 2/3/4 set.
         match st.step_mode {
@@ -755,7 +755,7 @@ impl Bullet {
             self.st.bounce_count += 1;
             // FUN_004efb70: the bullet's second sound on each bounce.
             if self.sound2 >= 0 {
-                self.sounds.push((self.sound2 as u32, 0));
+                if crate::sfx::on(crate::sfx::Cat::BulletEvent) { self.sounds.push((self.sound2 as u32, 0)); }
             }
         }
         if self.st.bounce_count < self.st.bounce_max {

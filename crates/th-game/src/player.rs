@@ -272,7 +272,7 @@ impl Player {
         if self.barrier == Barrier::Up {
             self.barrier = Barrier::Broken;
             // FUN_00544c90: sound 0x1b, panned to this player's side.
-            self.sounds.push((0x1b, None));
+            if crate::sfx::on(crate::sfx::Cat::Barrier) { self.sounds.push((0x1b, None)); }
             if let Some(id) = self.barrier_vm.take() {
                 world.interrupt(id, 1);
             }
@@ -285,7 +285,7 @@ impl Player {
         }
         self.hits += 1;
         // FUN_00545e10: sound 2 (centre pan) unless player flag 0x8 is set (not traced).
-        self.sounds.push((2, Some(0)));
+        if crate::sfx::on(crate::sfx::Cat::PlayerHit) { self.sounds.push((2, Some(0))); }
         world.spawn_clipped(lib, self.anm_file, 22, field_to_canvas(field, self.pos), field);
         self.state = State::Hit;
         self.state_time = 0;
@@ -438,7 +438,7 @@ impl Player {
             if let Some(file) = self.effect_anm {
                 self.barrier_vm = Some(world.spawn_clipped(lib, file, 1, field_to_canvas(field, self.pos), field));
                 // FUN_00544dd0 creates the barrier with sound 0x3b, panned to this side.
-                self.sounds.push((0x3b, None));
+                if crate::sfx::on(crate::sfx::Cat::Barrier) { self.sounds.push((0x3b, None)); }
             }
         }
         if let Some(vm) = self.barrier_vm.and_then(|id| world.get_mut(id)) {
@@ -458,7 +458,7 @@ impl Player {
         self.skills.retain_mut(|s| {
             let alive = s.tick(world, field, &mut self.cancel_circles, &mut self.damage_circles);
             if std::mem::take(&mut s.ended) {
-                self.sounds.push((0x2c, None));
+                if crate::sfx::on(crate::sfx::Cat::Skill) { self.sounds.push((0x2c, None)); }
             }
             alive
         });
@@ -482,13 +482,13 @@ impl Player {
                 crate::bomb::Bomb::new(self.pos, meter, self.anm_file, world, lib, field)
             });
             // The bomb starts with sound 0x31 (all four characters' start functions).
-            self.sounds.push((0x31, Some(0)));
+            if crate::sfx::on(crate::sfx::Cat::Bomb) { self.sounds.push((0x31, Some(0))); }
         }
         if let Some(b) = &mut self.bomb {
             let protecting = b.protecting();
             if !b.tick_character(self.pos, world, field, &mut self.cancel_circles, &mut self.cancel_columns, &mut self.cancel_rects, &mut self.damage_circles) {
                 // The update functions end by stopping 0x31 and playing 0x2c (centre pan).
-                self.sounds.push((0x2c, Some(0)));
+                if crate::sfx::on(crate::sfx::Cat::Bomb) { self.sounds.push((0x2c, Some(0))); }
                 self.bomb = None;
             }
             if protecting {
@@ -621,7 +621,7 @@ impl Player {
             if !self.free_charge { self.meter = (self.meter-threshold+self.charge_settings.attack).clamp(0,2500); }
             if level == Level::Skill && self.character == Character::Marisa {
                 // FUN_00417b90: sound 0x33, panned to the player's side.
-                self.sounds.push((0x33, None));
+                if crate::sfx::on(crate::sfx::Cat::Skill) { self.sounds.push((0x33, None)); }
                 self.wide_charge = true;
             }
             if level == Level::Skill && self.character == Character::Reimu {
@@ -629,7 +629,7 @@ impl Player {
                 self.skill_rng ^= self.skill_rng << 13; self.skill_rng ^= self.skill_rng >> 17; self.skill_rng ^= self.skill_rng << 5;
                 let phase = (self.skill_rng as f64/u32::MAX as f64) as f32*std::f32::consts::TAU-std::f32::consts::PI;
                 // FUN_0053b920 (skill init) plays 0x31 at centre pan.
-                self.sounds.push((0x31, Some(0)));
+                if crate::sfx::on(crate::sfx::Cat::Skill) { self.sounds.push((0x31, Some(0))); }
                 self.skills.push(crate::skill::Skill::new(self.pos,phase,self.anm_file,world,lib,field));
                 self.invuln = self.invuln.max(40);
             }
@@ -639,7 +639,7 @@ impl Player {
             if level == Level::Skill && self.character == Character::Ran && self.boost_frames == 0 {
                 // EXRanInf00419ae0: power400 for600 ticks, then restore200.
                 // FUN_00419ae0: sound 0xd, panned to the player's side.
-                self.sounds.push((0xd, None));
+                if crate::sfx::on(crate::sfx::Cat::Skill) { self.sounds.push((0xd, None)); }
                 self.power = 400; self.boost_frames = 600;
                 self.update_options(world,lib,field);
             }
@@ -793,11 +793,11 @@ impl Player {
         let Some(origin) = self.origin_of(r.origin) else { return };
         // FUN_0054e960: the record's sound (SHT +0x2c) panned by the shot's x.
         if r.sound >= 0 {
-            self.sounds.push((r.sound as u32, Some(((origin[0] + r.offset[0]) * 1000.0 / 192.0) as i32)));
+            if crate::sfx::on(crate::sfx::Cat::PlayerShot) { self.sounds.push((r.sound as u32, Some(((origin[0] + r.offset[0]) * 1000.0 / 192.0) as i32))); }
         }
         if r.kind == 2 || r.funcs[0] == 12 {
             // The beam init callbacks (0054ccf0, 0054d960, 0054d9e0) play 0x14 panned by the player's x.
-            self.sounds.push((0x14, Some((self.pos[0] * 1000.0 / 192.0) as i32)));
+            if crate::sfx::on(crate::sfx::Cat::BeamStart) { self.sounds.push((0x14, Some((self.pos[0] * 1000.0 / 192.0) as i32))); }
             let pos = [origin[0] + r.offset[0], origin[1] + r.offset[1]];
             self.beams.push(crate::beam::Beam::new(r, self.anm_file, world, lib, field, pos));
             if r.kind == 2 {
@@ -908,7 +908,7 @@ impl Player {
                             // Hit callbacks 3, 4 and 9 (0054c5f0, 0054c2f0, 0054a7b0) end with sound 0x41,
                             // panned by the shot's x.
                             if matches!(b.hit_callback, 3 | 4 | 9) {
-                                self.sounds.push((0x41, Some((b.pos[0] * 1000.0 / 192.0) as i32)));
+                                if crate::sfx::on(crate::sfx::Cat::ChargeHit) { self.sounds.push((0x41, Some((b.pos[0] * 1000.0 / 192.0) as i32))); }
                             }
                             // Callback 1 adds effect 142 before the shared impact transition.
                             if b.hit_callback == 1 || b.hit_callback == 5 {
