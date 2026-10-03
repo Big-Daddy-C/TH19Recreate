@@ -94,6 +94,8 @@ pub struct SideState {
     pub bullet_types: Rc<Vec<BulletType>>,
     /// `ins_613`: cancel every bullet this frame.
     pub cancel_bullets: bool,
+    /// Spell card background VM (ECL 522 / 523).
+    pub spell_background: Option<th_anm::VmId>,
     /// ECL 525 requested destroying this field's enemies.
     pub clear_enemies: bool,
     /// `ghost.anm` (kill explosions).
@@ -242,6 +244,7 @@ impl Side {
                 bullets: Vec::new(),
                 bullet_types: Rc::new(Vec::new()),
                 cancel_bullets: false,
+                spell_background: None,
                 clear_enemies: false,
                 ghost_anm: None,
                 explosions: Vec::new(),
@@ -541,6 +544,9 @@ impl Side {
         }
         self.st.spawn.clear();
         self.st.alive.clear();
+        if let Some(id) = self.st.spell_background.take() {
+            world.delete(id);
+        }
         self.st.boss_ids.clear();
         for b in self.st.bullets.drain(..) {
             if let Some(id) = b.vm {

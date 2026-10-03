@@ -209,6 +209,14 @@
     "anm_int_var_ptr": {
       "address": "004c1400",
       "decompile_sha256": "3b03568b4d82dbaba57dd226adc369bf850768b0e311c3eee53d152912a1a571"
+    },
+    "spell_end": {
+      "address": "004f6730",
+      "decompile_sha256": "98e43178334af67d291d1e957e4b2c3e4908a1698568d161313682908aace83b"
+    },
+    "ecl_anm_files_load": {
+      "address": "0050b940",
+      "decompile_sha256": "1afff3b0e9f03aa848d0fe0705c90f43f1c786bf2d0865043796f7cb40d6a406"
     }
   },
   "features": {
@@ -424,13 +432,34 @@
             "anm_int_var_ptr"
           ],
           "evidence": "code_checked"
+        },
+        {
+          "text": "Spell cards: ECL 522 (case 0x43) declares via FUN_004f67c0 and sets +0x5020|=1, +0x5014 = HP*7; FUN_00509980 then subtracts damage from +0x5014 and sets HP = +0x5014/7 (+0x5018 base is never set), so cards take 1/7 damage (Reimu's 1500 HP cards absorb 10500). 511 also resets the x7 counter (FUN_0040f840). The declaration spawns the boss file's script 0 (enemy manager +0x4adc = ECL ANM slot 3, pl00b.anm; slots load from +0x4ad8 in FUN_0050b940): eff04 scaled to cover the field fading in over 60 frames plus rotating eff04b at alpha 192, layer 4. 523 (FUN_004f6730) ends the card. Not ported from the declaration: name banner (text file script 0, [0x62c484] script side+2), effect.anm scripts 6 and 13, interrupt 2/3 to FrontInf per-field VMs (+0x54/+0x58 of 0x6c blocks; creator not found), card bonus.",
+          "sources": [
+            "spell_declare",
+            "spell_end",
+            "enemy_damage",
+            "ecl_anm_files_load",
+            "ecl_host"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Dev keys: Shift+1-4 make player 2 release that tier (EX/boss land on player 1); --boss-level N sets player 1's starting boss level for screenshots. Development aids.",
+          "sources": [],
+          "evidence": "assumption"
         }
       ],
       "checks": {
-        "automated": "2026-10-02 working tree based on 1ba478e: cargo test --release --workspace : 31 passed with original assets present (level mapping Lv N = rank N-1, boss HP/phases per level, entrance particles spawn and expire). Original-game parity not assessed.",
-        "visual": "Inspected th19 --screenshot frames 330-440 with a tier-4 preview: dark subtractive particles converge from below/lower-left/lower-right on (0,128) before the boss appears. No original boss footage available for comparison.",
+        "automated": "2026-10-02 working tree based on 9625e46: cargo test --release --workspace : 32 passed with original assets present (adds spell 1/7 damage, spell background lifetime). Original-game parity not assessed.",
+        "visual": "Inspected th19 --boss-level 3 --preview-charge 4 frames 440/520/600: spell background (eff04/eff04b) fades in over the field during the Lv3 card. No original footage for comparison.",
         "original_game_parity": "not_run",
         "history": [
+          {
+            "revision": "9625e46",
+            "automated": "2026-10-02 working tree based on 1ba478e: cargo test --release --workspace : 31 passed with original assets present (level mapping Lv N = rank N-1, boss HP/phases per level, entrance particles spawn and expire). Original-game parity not assessed.",
+            "visual": "Inspected th19 --screenshot frames 330-440 with a tier-4 preview: dark subtractive particles converge from below/lower-left/lower-right on (0,128) before the boss appears. No original boss footage available for comparison."
+          },
           {
             "revision": "1ba478e",
             "automated": "2026-10-02 working tree based on ab7d935: cargo test --release --workspace : 30 passed with original assets present (adds boss HP/phase per rank 5000/1500/1500/6500/6500 with the 1500 HP transition, instant-charge tiers incl. boss->EX fallback, dev clear). Original-game parity not assessed.",
@@ -454,7 +483,7 @@
         ]
       },
       "next": [
-        "Port ECL 621 (RenderMeshInf boss distortion) and 522/523 spell-card presentation; compare the entrance against original footage.",
+        "Port spell-card name banner, effect.anm 6/13 at declaration, FrontInf interrupts 2/3, ECL 621 distortion; compare against original footage.",
         "Compare boss phases and kill times per level against original footage (needs an opponent that dodges; the test bot sits under the boss).",
         "Port spell declare/end presentation (522/523), screen shake 517, sounds 516; find the status+0x40 cap for -9888.",
         "Audit remaining boss opcodes 521,524,527,534,621,624,1020 and exact movement 412.",
@@ -467,7 +496,8 @@
         "2026-10-02: user requests higher charge attacks with unrestricted charging; defer meter gain.",
         "2026-10-02: EX/boss attacks start at level 1 and each use raises that attack's level by one (two boss attacks -> boss level 3, next boss attack plays level 3); attack patterns/effects differ by level.",
         "2026-10-02: user believes boss level 3 unlocks a new phase, that bosses gain HP with level, and that the boss dies quickly; asked to verify against the game. Decompile shows the spell card from rank 2 (HUD Lv2) and the two-phase 6500 HP boss from rank 4.",
-        "2026-10-02: user corrected the boss level mapping (wiki): Lv1-2 non-spell, Lv3-4 spell card, Lv5-8 non-spell + spell; requested missing boss entrance effects. No boss appears in the available recordings."
+        "2026-10-02: user corrected the boss level mapping (wiki): Lv1-2 non-spell, Lv3-4 spell card, Lv5-8 non-spell + spell; requested missing boss entrance effects. No boss appears in the available recordings.",
+        "2026-10-02: user expects Lv3-4 boss HP >= 5000 and suspected a spell-card screen change; both explained by the x7 spell HP counter and the pl00b.anm spell background."
       ]
     },
     "barrier": {

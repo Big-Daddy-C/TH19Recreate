@@ -80,6 +80,9 @@ pub struct EnemyData {
     pub phase_time: i32,
     pub phase_interrupt: Option<(i32,i32,String)>,
     pub invuln_time: i32,
+    /// After a spell card is declared (ECL 522) damage is taken from HP x 7 and HP is
+    /// that / 7 (FUN_004fecc0 case 0x43, FUN_00509980 +0x5014/+0x5020): cards take 1/7.
+    pub spell_hp7: Option<i32>,
     pub movement_limits: Option<[f32;4]>,
     pub score: i32,
     pub item: i32,
@@ -242,7 +245,13 @@ impl EnemyData {
         if self.flags & flag::INVINCIBLE != 0 || self.invuln_time>0 {
             return;
         }
-        self.hp -= amount;
+        match &mut self.spell_hp7 {
+            Some(h7) => {
+                *h7 -= amount;
+                self.hp = *h7 / 7;
+            }
+            None => self.hp -= amount,
+        }
         self.damaged = amount > 0;
         self.last_hit = Some(from);
         if self.hp < 1 && self.flags & flag::NO_DEATH == 0 {
@@ -759,7 +768,24 @@ impl EnemyHost<'_> {
             }
             504 => self.e.movement_limits=Some([f!(0),f!(1),f!(2),f!(3)]),
             505 => self.e.movement_limits=None,
-            511 => { self.e.hp=i!(0); self.e.max_hp=self.e.hp; }
+            // setLife: HP, max HP and the x7 spell counter (FUN_0040f870/0040f860/0040f840).
+            511 => {
+                self.e.hp=i!(0); self.e.max_hp=self.e.hp;
+                if self.e.spell_hp7.is_some() { self.e.spell_hp7=Some(self.e.hp*7); }
+            }
+            // Spell card declaration (FUN_004f67c0): damage now goes through HP x 7, and the
+            // boss file's script 0 (ANM slot 3, enemy manager +0x4adc) draws the spell
+            // background over the field.
+            522 => {
+                self.e.spell_hp7=Some(self.e.hp*7);
+                if let Some(file)=self.st.anm_files.get(3).copied().flatten() {
+                    if let Some(old)=self.st.spell_background.take() { self.world.delete(old); }
+                    let at=field_to_canvas(self.st.field,[0.0,0.0]);
+                    self.st.spell_background=Some(self.world.spawn_clipped(self.lib,file,0,at,self.st.field));
+                }
+            }
+            // Spell card end (FUN_004f6730): the background goes away.
+            523 => if let Some(id)=self.st.spell_background.take() { self.world.delete(id); },
             512 => {
                 let slot=i!(0); self.st.boss_ids.retain(|&id| id!=self.e.id);
                 self.e.boss_slot=(slot>=0).then_some(slot);

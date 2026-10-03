@@ -437,3 +437,26 @@ fn boss_entrance_spawns_converging_particles() {
     }
     assert!(g.world.len() < peak / 2, "particles must expire");
 }
+
+/// ECL 522 declares the spell card: damage then comes off HP x 7 (cards take 1/7) and the
+/// boss file's script 0 draws the spell background until 523 ends the card.
+#[test]
+fn spell_cards_take_a_seventh_of_damage_and_show_their_background() {
+    let Some(mut g) = setup() else { return };
+    g.sides[1].player.as_mut().unwrap().godmode = true;
+    g.sides[0].st.boss_level = 2; // Lv3: spell card
+    g.sides[0].player.as_mut().unwrap().instant_charge(Level::Boss);
+    for _ in 0..200 {
+        g.tick([0; 2]);
+    }
+    assert!(g.sides[1].st.spell_background.is_some(), "spell background");
+    let boss = g.sides[1].enemies.iter_mut().find(|e| e.data.boss_slot.is_some()).unwrap();
+    let hp = boss.data.hp;
+    boss.data.damage(700, [0.0, 400.0]);
+    assert_eq!(boss.data.hp, hp - 100);
+    boss.data.damage(100_000, [0.0, 400.0]);
+    for _ in 0..90 {
+        g.tick([0; 2]);
+    }
+    assert!(g.sides[1].st.spell_background.is_none(), "BossDead ends the card");
+}

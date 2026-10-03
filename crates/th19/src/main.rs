@@ -82,6 +82,8 @@ struct Viewer {
     held: std::collections::HashSet<KeyCode>,
     /// Development godmode (G): neither player can be hit.
     godmode: bool,
+    /// Development: player 1's starting boss level (`--boss-level N`, 1-8 as on the HUD).
+    start_boss_level: u8,
     /// Bullet sprite table read from th19.exe.
     bullet_types: std::rc::Rc<Vec<th_formats::exe::BulletType>>,
     /// Frames simulated since start (debug triggers).
@@ -116,6 +118,7 @@ impl Viewer {
             game: None,
             held: Default::default(),
             godmode: false,
+            start_boss_level: 0,
             bullet_types: Default::default(),
             frames: 0,
         };
@@ -214,6 +217,7 @@ impl Viewer {
                 s.player = Some(p);
             }
         }
+        sides[0].st.boss_level = self.start_boss_level;
         Some(Game { prog, sides, round: Default::default() })
     }
 
@@ -481,7 +485,10 @@ impl Viewer {
                 use th_game::charge::Level;
                 let level = [Level::Attack, Level::Skill, Level::Extra, Level::Boss]
                     [code as usize - KeyCode::Digit1 as usize];
-                if let Some(p) = self.game.as_mut().and_then(|g| g.sides[0].player.as_mut()) {
+                // With Shift, the opponent (player 2) releases it instead, so EX and boss
+                // attacks land on player 1's field.
+                let side = (self.held.contains(&KeyCode::ShiftLeft) || self.held.contains(&KeyCode::ShiftRight)) as usize;
+                if let Some(p) = self.game.as_mut().and_then(|g| g.sides[side].player.as_mut()) {
                     p.instant_charge(level);
                 }
             }
@@ -662,7 +669,7 @@ fn main() {
     println!(
         "Controls: Tab = switch ANM viewer / stage viewer / game, Left/Right = file or stage, Up/Down = single script,\n\
          A = all scripts, C = toggle centre origin, F = fast-forward x8, V = toggle field divider,\n\
-         R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (1 shot / 2 skill / 3 EX / 4 boss; free meter), B = debug EX, G = godmode, 1-4 = instant charge tier (4 = boss), C = clear fields, Shift = focus, PgUp/PgDn = stage,\n\
+         R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (1 shot / 2 skill / 3 EX / 4 boss; free meter), B = debug EX, G = godmode, 1-4 = instant charge tier (4 = boss; Shift+1-4 = opponent's), C = clear fields, Shift = focus, PgUp/PgDn = stage,\n\
          . = step frame, 0-9 = send interrupt, Esc = quit"
     );
 
@@ -677,6 +684,9 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let start = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)?.parse::<usize>().ok());
     if let Some((n, mode)) = start("--game").map(|n| (n, Mode::Game)).or(start("--stage").map(|n| (n, Mode::Stage))) {
+        if let Some(n) = args.iter().position(|a| a == "--boss-level").and_then(|i| args.get(i + 1)?.parse::<u8>().ok()) {
+            viewer.start_boss_level = n.clamp(1, 8) - 1;
+        }
         viewer.mode = mode;
         viewer.stage_idx = n.saturating_sub(1).min(viewer.stage_files.len().saturating_sub(1));
         viewer.restart();
