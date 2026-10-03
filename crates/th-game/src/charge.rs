@@ -32,6 +32,11 @@ pub struct Gauge {
     recovery: u8,
 }
 impl Gauge {
+    /// Development aid: set the gauge as if it had been held up to `value`.
+    pub fn fill(&mut self, value: i32) {
+        self.value = value.clamp(0, 2500);
+        self.recovery = 0;
+    }
     /// Hold to fill; release to select a level. Invalid player states cancel silently.
     /// `meter` is status +0x24 (0..2500). Boss-active falls back to EX, as in the original.
     /// Skill blocked represents the character callback returning nonzero.

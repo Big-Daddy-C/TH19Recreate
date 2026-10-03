@@ -185,13 +185,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if want_op.is_some_and(|o| o != i.opcode) {
                         continue;
                     }
-                    let a: Vec<String> = (0..i.args.len() / 4)
-                        .map(|n| {
-                            let (iv, fv) = (i.arg_i32(n), i.arg_f32(n));
-                            let v = if iv.unsigned_abs() < 1_000_000 { format!("{iv}") } else { format!("{fv}f") };
-                            if i.is_var(n) { format!("${v}") } else { v }
-                        })
-                        .collect();
+                    let word = |n: usize, var: bool| {
+                        let (iv, fv) = (i.arg_i32(n), i.arg_f32(n));
+                        let v = if iv.unsigned_abs() < 1_000_000 { format!("{iv}") } else { format!("{fv}f") };
+                        if var { format!("${v}") } else { v }
+                    };
+                    let str_op = matches!(i.opcode, 11 | 15 | 16 | 300..=321);
+                    let a: Vec<String> = match i.arg_str(0).filter(|_| str_op) {
+                        // Calls/spawns: the sub name, then (for calls) 8-byte typed arguments.
+                        Some((name, used)) => {
+                            let mut out = vec![format!("\"{name}\"")];
+                            let first = used / 4;
+                            if matches!(i.opcode, 11 | 15 | 16) {
+                                let mut at = used;
+                                let mut param = 1;
+                                while at + 8 <= i.args.len() {
+                                    let (src, dst) = (i.args[at] as char, i.args[at + 1] as char);
+                                    let raw = i32::from_le_bytes(i.args[at + 4..at + 8].try_into().unwrap());
+                                    let v = if src == 'f' || src == 'g' { format!("{}f", f32::from_bits(raw as u32)) } else { raw.to_string() };
+                                    let var = if i.param_mask & (1 << param) != 0 { "$" } else { "" };
+                                    out.push(format!("{dst}:{var}{v}"));
+                                    at += 8;
+                                    param += 1;
+                                }
+                            } else {
+                                for (k, n) in (first..i.args.len() / 4).enumerate() {
+                                    out.push(word(n, i.param_mask & (1 << (k + 1)) != 0));
+                                }
+                            }
+                            out
+                        }
+                        None => (0..i.args.len() / 4).map(|n| word(n, i.is_var(n))).collect(),
+                    };
+                    let a = match (i.opcode, i.arg_str(12)) {
+                        // setInterrupt(slot, hp, time, sub)
+                        (514, Some((name, _))) => {
+                            let mut v = a[..3].to_vec();
+                            v.push(format!("\"{name}\""));
+                            v
+                        }
+                        _ => a,
+                    };
                     let tag = if want_op.is_some() { format!("{}: ", s.name) } else { String::new() };
                     println!("  {tag}@{:<5} t={:<5} op={:<4} mask={:#x} rank={:#04x} pop={} [{}]", i.offset, i.time, i.opcode, i.param_mask, i.rank_mask, i.stack_refs & 0xff, a.join(", "));
                 }

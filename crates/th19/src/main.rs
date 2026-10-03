@@ -455,6 +455,15 @@ impl Viewer {
                 self.show_all = !self.show_all;
                 self.restart();
             }
+            // Development: clear both fields (bullets, enemies, bosses, EX attacks).
+            KeyCode::KeyC if self.mode == Mode::Game => {
+                if let Some(g) = &mut self.game {
+                    for s in &mut g.sides {
+                        s.dev_clear(&mut self.world);
+                    }
+                    log::info!("cleared both fields");
+                }
+            }
             KeyCode::KeyC => {
                 self.centered = !self.centered;
                 self.restart();
@@ -465,6 +474,16 @@ impl Viewer {
                 let fast = std::mem::replace(&mut self.fast, false);
                 self.tick();
                 self.fast = fast;
+            }
+            // Development: release player 1's charge at a tier instantly
+            // (1 charge shot, 2 skill, 3 EX attack, 4 boss attack).
+            KeyCode::Digit1 | KeyCode::Digit2 | KeyCode::Digit3 | KeyCode::Digit4 if self.mode == Mode::Game => {
+                use th_game::charge::Level;
+                let level = [Level::Attack, Level::Skill, Level::Extra, Level::Boss]
+                    [code as usize - KeyCode::Digit1 as usize];
+                if let Some(p) = self.game.as_mut().and_then(|g| g.sides[0].player.as_mut()) {
+                    p.instant_charge(level);
+                }
             }
             KeyCode::Digit0 | KeyCode::Digit1 | KeyCode::Digit2 | KeyCode::Digit3 | KeyCode::Digit4
             | KeyCode::Digit5 | KeyCode::Digit6 | KeyCode::Digit7 | KeyCode::Digit8 | KeyCode::Digit9 => {
@@ -643,7 +662,7 @@ fn main() {
     println!(
         "Controls: Tab = switch ANM viewer / stage viewer / game, Left/Right = file or stage, Up/Down = single script,\n\
          A = all scripts, C = toggle centre origin, F = fast-forward x8, V = toggle field divider,\n\
-         R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (1 shot / 2 skill / 3 EX / 4 boss; free meter), B = debug EX, G = godmode, Shift = focus, PgUp/PgDn = stage,\n\
+         R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (1 shot / 2 skill / 3 EX / 4 boss; free meter), B = debug EX, G = godmode, 1-4 = instant charge tier (4 = boss), C = clear fields, Shift = focus, PgUp/PgDn = stage,\n\
          . = step frame, 0-9 = send interrupt, Esc = quit"
     );
 

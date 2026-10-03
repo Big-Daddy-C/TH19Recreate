@@ -98,6 +98,9 @@ pub enum Flow {
     Yield,
     /// The thread has finished (or its owner was deleted).
     End,
+    /// Stop for this frame and run the same instruction again next frame (a host
+    /// handler returning -1 in th19.exe, e.g. ins_520 while a boss is alive).
+    Retry,
 }
 
 const STACK_BYTES: usize = 0x1000;
@@ -449,6 +452,7 @@ impl Context {
                     self.finish_instr(ins, ip_before);
                     break;
                 }
+                Flow::Retry => break,
                 Flow::Next => self.finish_instr(ins, ip_before),
             }
         }

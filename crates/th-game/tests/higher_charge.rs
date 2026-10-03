@@ -352,3 +352,68 @@ fn extra_attack_pattern_depends_on_level() {
     }
     assert!(counts.windows(2).any(|w| w[0] != w[1]), "levels should change the pattern: {counts:?}");
 }
+
+/// Boss00Boss / BossStartInit (pl00.ecl, default.ecl): rank 0-1 one non-spell (5000 HP),
+/// rank 2-3 a spell card (1500 HP), rank 4-7 a non-spell (6500 HP) that becomes a spell at
+/// 1500 HP. Every phase ends in BossDead.
+#[test]
+fn boss_hp_and_phases_follow_the_rank() {
+    for (stored, hp, first) in [(0, 5000, "BossDead"), (1, 1500, "BossDead"), (2, 1500, "BossDead"),
+        (3, 6500, "Boss00BossCard1H"), (6, 6500, "Boss00BossCard1H")] {
+        let Some(mut g) = setup() else { return };
+        g.sides[1].player.as_mut().unwrap().godmode = true;
+        g.sides[0].st.boss_level = stored;
+        g.sides[0].player.as_mut().unwrap().instant_charge(Level::Boss);
+        g.tick([0; 2]);
+        assert_eq!(g.sides[1].st.incoming_boss_level, stored + 1);
+        for _ in 0..119 {
+            g.tick([0; 2]);
+        }
+        let boss = || g.sides[1].enemies.iter().find(|e| e.data.boss_slot.is_some()).map(|e| &e.data);
+        let b = boss().expect("boss present");
+        assert_eq!((b.hp, b.max_hp), (hp, hp), "rank {}", stored + 1);
+        assert_eq!(b.phase_interrupt.as_ref().map(|p| p.2.as_str()), Some(first));
+        if first != "BossDead" {
+            for e in &mut g.sides[1].enemies {
+                if e.data.boss_slot.is_some() {
+                    e.data.hp = 1500;
+                }
+            }
+            g.tick([0; 2]);
+            let b = g.sides[1].enemies.iter().find(|e| e.data.boss_slot.is_some()).unwrap();
+            assert_eq!(b.data.phase_interrupt.as_ref().map(|p| p.2.as_str()), Some("BossDead"));
+        }
+    }
+}
+
+#[test]
+fn instant_charge_keys_release_each_tier_and_clear_empties_fields() {
+    let Some(mut g) = setup() else { return };
+    for (level, expect) in [(Level::Attack, Level::Attack), (Level::Skill, Level::Skill),
+        (Level::Extra, Level::Extra), (Level::Boss, Level::Boss)] {
+        g.sides[0].player.as_mut().unwrap().instant_charge(level);
+        g.tick([0; 2]);
+        assert_eq!(g.sides[0].player.as_ref().unwrap().last_charge, Some(expect));
+        for _ in 0..12 {
+            g.tick([0; 2]);
+        }
+    }
+    assert!(g.sides[1].has_boss());
+    // With the opponent's boss up, tier 4 falls back to EX like a held charge.
+    g.sides[0].player.as_mut().unwrap().instant_charge(Level::Boss);
+    g.tick([0; 2]);
+    assert_eq!(g.sides[0].player.as_ref().unwrap().last_charge, Some(Level::Extra));
+    for _ in 0..60 {
+        g.tick([0; 2]);
+    }
+    assert!(!g.sides[1].st.bullets.is_empty() || !g.sides[1].enemies.is_empty());
+    for s in &mut g.sides {
+        s.dev_clear(&mut g.world);
+    }
+    assert!(g.sides.iter().all(|s| s.enemies.is_empty() && s.st.bullets.is_empty() && !s.has_boss()));
+    g.tick([0; 2]);
+    // A new boss can be sent after clearing.
+    g.sides[0].player.as_mut().unwrap().instant_charge(Level::Boss);
+    g.tick([0; 2]);
+    assert_eq!(g.sides[0].player.as_ref().unwrap().last_charge, Some(Level::Boss));
+}

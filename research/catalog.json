@@ -141,6 +141,42 @@
     "charge_hud_labels": {
       "address": "004e8a20",
       "decompile_sha256": "7c3e2be5e1a904c1991307cc63155a7338a8d6770fb64afab070d6283a4000dd"
+    },
+    "enemy_damage": {
+      "address": "00509980",
+      "decompile_sha256": "109f74133fe7e3e0fc7a1926c73dd511b844c815be1c28d1e38024fea216d511"
+    },
+    "shot_collider_hits": {
+      "address": "00520450",
+      "decompile_sha256": "76913e7f97d07ed2e9232457045ac6c4c4f1d9b282cf76d4da4249fda6ab686f"
+    },
+    "collider_shape_test": {
+      "address": "0051e670",
+      "decompile_sha256": "0a0ebe62fd33300402aa1d5d229fcf29865751d6859d26ddf205aabbff844927"
+    },
+    "rect_circle_test": {
+      "address": "004d44e0",
+      "decompile_sha256": "851f24b92f89c4bc9d09efe33694ef6dabc1d7b346a52e59a27d021ef707f199"
+    },
+    "shot_collider_create": {
+      "address": "0051f320",
+      "decompile_sha256": "bea45f7a74ad6fb648d5c22431722bc4ad5a2cd48481a9d1426d28c0df1e1ba6"
+    },
+    "enemy_clear_all": {
+      "address": "0050ca70",
+      "decompile_sha256": "db4d1b2d9234ee7670773b48a3bc01bd3a6678d2a48db33a1f9d4d8e302918d4"
+    },
+    "boss_dispatch_forced": {
+      "address": "0050d740",
+      "decompile_sha256": "9d008ed89e2e0dc6c6ea80010196b2c8a1705aff8fa0852d66bf498bdc26e7d4"
+    },
+    "scripted_send_flag": {
+      "address": "0050e740",
+      "decompile_sha256": "8c92355ee2e8c84a053d051df15515c52ef3fc85f80aa286e9102254db851c73"
+    },
+    "spell_declare": {
+      "address": "004f67c0",
+      "decompile_sha256": "a553dac45fba119072fb33f9350ef72e62a8be2b8ed7e9865b7efd8cdd66b504"
     }
   },
   "features": {
@@ -171,7 +207,11 @@
         "boss_level_read",
         "boss_level_raise",
         "charge_hud_labels",
-        "player_death"
+        "player_death",
+        "enemy_clear_all",
+        "boss_dispatch_forced",
+        "scripted_send_flag",
+        "spell_declare"
       ],
       "code": [
         "crates/th-game/src/charge.rs",
@@ -276,7 +316,7 @@
           "evidence": "code_checked"
         },
         {
-          "text": "Skill phase uses a local xorshift RNG; boss move opcode412 uses an approximate bounded random target. Global -9886 uses provisional VS value1. Global -9888 remains unknown/default0; its original getter reads an opponent status value divided by200. Do not claim exact attack trajectories until resolved.",
+          "text": "Skill phase uses a local xorshift RNG; boss move opcode412 uses an approximate bounded random target. Global -9888 = clamp(opponent status+0x44, 0, status+0x40)/200 (getter 004fc530 case 0xffffd960); FUN_00549830 adds 1 to +0x44 per death, but the setter of the cap +0x40 was not found, so -9888 stays 0. Do not claim exact attack trajectories until resolved.",
           "sources": [
             "ecl_int_globals",
             "ecl_float_globals"
@@ -284,9 +324,10 @@
           "evidence": "assumption"
         },
         {
-          "text": "Current boss run still counts unsupported opcodes 516,520,521,524,525,527,534,621,1036, plus global -9888. These include audio, cleanup, presentation and match context; their absence is not proven cosmetic. ANM transforms319/329/330 are now implemented from FUN004fe350.",
+          "text": "Byte dispatch table 0x505434+opcode (FUN_004fecc0). Implemented: 520 = wait while a boss slot of this field is occupied (FUN_0040b4b0 x3, handler returns -1 -> Flow::Retry); 525 = FUN_0050ca70 destroy enemies without flags 0x20/0x80/0x400 (0x100 overrides) through the death path with drops cleared. Identified but not ported: 516 sound, 517 screen shake (FUN_004b9f00), 522 spell declare (XOR-obfuscated name; FUN_004f67c0; HP tracked x7), 523 spell end (FUN_004f6730), 559 damage multiplier +0x5164 (unused by Reimu scripts), 1036 player death via FUN_00549830 (Boss00 only calls it when -9886 is set). Still unsupported: 521,524,527,534,621,624,1020. ANM transforms319/329/330 are implemented from FUN004fe350.",
           "sources": [
-            "ecl_host"
+            "ecl_host",
+            "enemy_clear_all"
           ],
           "evidence": "code_checked"
         },
@@ -306,13 +347,41 @@
           "text": "Godmode (viewer key G) is a development toggle, not an original-game feature: Player::hit ignores hits for both sides while enabled.",
           "sources": [],
           "evidence": "assumption"
+        },
+        {
+          "text": "-9887 = EnemyManager+0x40 and -9886 = +0x44 (004fc530/004fd720 read *(ctx+0x68e0)->+8). Only FUN_0050d740 writes +0x40 (forced boss phase) and only FUN_0050e740/FUN_0050d6f0 write +0x44=1 (scripted senders called from 004f77a0/004f7b90/004f7e80); the plain VS boss send FUN_0050d800 writes neither, so both read 0 in VS.",
+          "sources": [
+            "boss_dispatch",
+            "boss_dispatch_forced",
+            "scripted_send_flag"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Reimu boss by rank (pl00.ecl Boss00Boss with -9887=0; HP from BossStartInit args 5000,1500,5000+1500): ranks 0-1 Boss00Boss1 non-spell, 5000 HP, 1800-frame limit; ranks 2-3 Boss00BossCard1 spell card, 1500 HP, limit -9923*60 = 1800; ranks 4-7 Boss00Boss1_H non-spell, 6500 HP, at 1500 HP or 1800 frames -> Boss00BossCard1H spell (1800 frames). Every phase ends in BossDead. Rank-masked op 570 values make later ranks denser. Since the HUD label Lv N plays rank N, the spell card first appears with the Lv2 boss and the two-phase boss at Lv4.",
+          "sources": [
+            "boss_dispatch",
+            "boss_level_read",
+            "charge_hud_labels"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Dev keys (viewer, game mode): 1-4 fill player 1's gauge to that tier's threshold so the normal release fires next frame (state checks and boss->EX fallback kept); C removes all bullets, enemies, bosses and attack scripts on both fields without death effects. Development aids, not game features.",
+          "sources": [],
+          "evidence": "assumption"
         }
       ],
       "checks": {
-        "automated": "2026-10-02 working tree based on fa92723: cargo test --release -p th-game -p th19 : 21 passed with original assets present (adds EX level progression/rank, boss level cap, godmode + death level catch-up, level-dependent EX pattern: peak bullets 8/18/32 at ranks 1/4/7). Original-game parity not assessed.",
-        "visual": "No new visual capture for level changes; original-footage comparison of per-level patterns not run.",
+        "automated": "2026-10-02 working tree based on ab7d935: cargo test --release --workspace : 30 passed with original assets present (adds boss HP/phase per rank 5000/1500/1500/6500/6500 with the 1500 HP transition, instant-charge tiers incl. boss->EX fallback, dev clear). Original-game parity not assessed.",
+        "visual": "No visual capture for boss phases this change; original-footage comparison not run.",
         "original_game_parity": "not_run",
         "history": [
+          {
+            "revision": "ab7d935",
+            "automated": "2026-10-02 working tree based on fa92723: cargo test --release -p th-game -p th19 : 21 passed with original assets present (adds EX level progression/rank, boss level cap, godmode + death level catch-up, level-dependent EX pattern: peak bullets 8/18/32 at ranks 1/4/7). Original-game parity not assessed.",
+            "visual": "No new visual capture for level changes; original-footage comparison of per-level patterns not run."
+          },
           {
             "revision": "fa92723",
             "automated": "2026-10-02 higher-charge working tree based on efc4d14: cargo test --release -p th-game -p th19 : 17 passed with original assets present. Includes skill damage/invulnerability, simultaneous bosses and timeout. Original-game parity not assessed.",
@@ -326,9 +395,9 @@
         ]
       },
       "next": [
-        "Compare EX/boss attack patterns per level against original footage; port the gauge HUD level labels (FUN_004e8a20) from front.anm.",
-        "Compare fixed-frame skill, EX and boss captures to original gameplay.",
-        "Resolve global -9888 and provisional -9886; audit remaining boss opcodes and exact movement412.",
+        "Compare boss phases and kill times per level against original footage (needs an opponent that dodges; the test bot sits under the boss).",
+        "Port spell declare/end presentation (522/523), screen shake 517, sounds 516; find the status+0x40 cap for -9888.",
+        "Audit remaining boss opcodes 521,524,527,534,621,624,1020 and exact movement 412.",
         "Implement ghost cancellation and ability/aura interactions.",
         "Natural meter gain/spending deferred at user request; keep free charging available."
       ],
@@ -336,7 +405,8 @@
         "Two hearts by default; start with barrier; broken barrier grants invulnerability; unshielded hit loses heart and restores barrier.",
         "User describes charge -> skill -> EX -> boss tiers, EX restoring shield and attacking opponent. Consult these existing notes before asking them to repeat.",
         "2026-10-02: user requests higher charge attacks with unrestricted charging; defer meter gain.",
-        "2026-10-02: EX/boss attacks start at level 1 and each use raises that attack's level by one (two boss attacks -> boss level 3, next boss attack plays level 3); attack patterns/effects differ by level."
+        "2026-10-02: EX/boss attacks start at level 1 and each use raises that attack's level by one (two boss attacks -> boss level 3, next boss attack plays level 3); attack patterns/effects differ by level.",
+        "2026-10-02: user believes boss level 3 unlocks a new phase, that bosses gain HP with level, and that the boss dies quickly; asked to verify against the game. Decompile shows the spell card from rank 2 (HUD Lv2) and the two-phase 6500 HP boss from rank 4."
       ]
     },
     "barrier": {
@@ -376,7 +446,9 @@
       "symbols": [
         "enemy_death",
         "death_chain",
-        "chain_timer"
+        "chain_timer",
+        "enemy_damage",
+        "shot_collider_hits"
       ],
       "code": [
         "crates/th-game/src/side.rs",
@@ -393,6 +465,17 @@
             "chain_timer"
           ],
           "evidence": "prior_session"
+        },
+        {
+          "text": "Player shots register colliders (FUN_0051f320: size record+0xc along the shot angle, record+0x10 across, damage, hit interval 1, group 0). FUN_00509980 tests them against the enemy hurtbox from op 500 as a circle of radius w/2 (rectangle when flag 0x1000) via FUN_0051e670/FUN_004d44e0, skips the collider's last enemy, caps a frame's total at player+0x2274 = SHT+0x28 (Reimu 90), multiplies by player+0x2270 (1.0 in VS) and divides by 5 while the shooter's state is 0 or 2. Not ported: the 1.5x bonus within 48 px when status+0xb4>0, the /5 rule, the per-frame cap, and the /30 rule for spell flags 0x21 (not set by 522).",
+          "sources": [
+            "enemy_damage",
+            "shot_collider_hits",
+            "collider_shape_test",
+            "rect_circle_test",
+            "shot_collider_create"
+          ],
+          "evidence": "code_checked"
         }
       ],
       "checks": {

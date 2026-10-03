@@ -94,6 +94,8 @@ pub struct SideState {
     pub bullet_types: Rc<Vec<BulletType>>,
     /// `ins_613`: cancel every bullet this frame.
     pub cancel_bullets: bool,
+    /// ECL 525 requested destroying this field's enemies.
+    pub clear_enemies: bool,
     /// `ghost.anm` (kill explosions).
     pub ghost_anm: Option<usize>,
     /// Kill explosions in progress.
@@ -240,6 +242,7 @@ impl Side {
                 bullets: Vec::new(),
                 bullet_types: Rc::new(Vec::new()),
                 cancel_bullets: false,
+                clear_enemies: false,
                 ghost_anm: None,
                 explosions: Vec::new(),
             },
@@ -426,6 +429,9 @@ impl Side {
         let mut i = 0;
         while i < self.enemies.len() {
             self.enemies[i].update(prog, &mut self.st, world, lib);
+            if std::mem::take(&mut self.st.clear_enemies) {
+                self.clear_enemies();
+            }
             let (id, member) = (self.enemies[i].data.id, self.enemies[i].data.wave_member);
             if let Some(a) = self.st.alive.iter_mut().find(|a| a.0 == id) {
                 a.1 = member;
@@ -514,6 +520,38 @@ pub fn dispatch_charges(sides: &mut [Side]) {
     }
 }
 impl Side {
+    /// ECL 525 (FUN_0050ca70): every enemy without flags 0x20/0x80/0x400 (or with 0x100)
+    /// is destroyed through the normal death path; its item drops are cleared.
+    fn clear_enemies(&mut self) {
+        for e in &mut self.enemies {
+            let f = e.data.flags;
+            if !e.data.delete && (f & 0xa0 == 0 && f & 0x400 == 0 || f & 0x100 != 0) {
+                e.data.item = -1;
+                e.data.killed = true;
+            }
+        }
+    }
+    /// Development aid (not a game mechanic): remove every bullet, enemy, boss and
+    /// EX/boss attack script on this field at once, without death effects or rewards.
+    /// The stage script keeps running.
+    pub fn dev_clear(&mut self, world: &mut World) {
+        for mut e in self.enemies.drain(..) {
+            e.remove_sprites(world);
+        }
+        self.st.spawn.clear();
+        self.st.alive.clear();
+        self.st.boss_ids.clear();
+        for b in self.st.bullets.drain(..) {
+            if let Some(id) = b.vm {
+                world.delete(id);
+            }
+        }
+        for x in self.st.explosions.drain(..) {
+            if let Some(id) = x.vm {
+                world.delete(id);
+            }
+        }
+    }
     pub fn has_boss(&self) -> bool {
         !self.st.boss_ids.is_empty() || self.st.spawn.iter().any(|s| s.sub=="BossAttack" || s.sub=="Boss00")
             || self.enemies.iter().any(|e| !e.data.delete && (e.data.sub=="BossAttack" || e.data.sub=="Boss00"))

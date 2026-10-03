@@ -425,6 +425,23 @@ impl Player {
         }
     }
 
+    /// Development aid: fill the gauge to `level`'s threshold so the next frame without
+    /// the charge button releases it through the normal dispatch (same state checks and
+    /// boss-to-EX fallback as a held charge).
+    pub fn instant_charge(&mut self, level: crate::charge::Level) {
+        use crate::charge::Level;
+        if self.state != State::Normal {
+            return;
+        }
+        let s = self.charge_settings;
+        self.charge.fill(match level {
+            Level::Attack => s.attack,
+            Level::Skill => s.skill,
+            Level::Extra => s.extra,
+            Level::Boss => s.boss,
+        });
+    }
+
     /// AuraCtrl release dispatch. Free-charge practice bypasses only the resource economy.
     fn update_charge(&mut self, keys: u32, world: &mut World, lib: &AnmLibrary, field: [f32; 4]) {
         let previous = self.charge.value;
@@ -632,8 +649,7 @@ impl Player {
                     if d.flags & flag::NO_HURTBOX != 0 || d.hurtbox[0] <= 0.0 || d.delete {
                         continue;
                     }
-                    let overlap = (b.pos[0] - d.pos[0]).abs() * 2.0 < b.hitbox[0] + d.hurtbox[0]
-                        && (b.pos[1] - d.pos[1]).abs() * 2.0 < b.hitbox[1] + d.hurtbox[1];
+                    let overlap = shot_hits(b.pos, b.hitbox, b.angle, d);
                     if overlap {
                         // The collider skips its most recently hit enemy (+0xa8,
                         // FUN_00520450). Callback 7 preserves piercing shots (0054fba0).
@@ -660,6 +676,25 @@ impl Player {
             i += 1;
         }
     }
+}
+
+/// Shot collider against an enemy (FUN_00509980 -> FUN_00520450 -> FUN_0051e670). The
+/// shot is a rectangle rotated to its angle, `size[0]` along its direction (collider
+/// +0x2c/+0x30 from record +0xc/+0x10). Enemies are a circle of radius `hurtbox[0] / 2`
+/// unless flag 0x1000 selects their rectangle (FUN_004d44e0 / FUN_004d2c30).
+fn shot_hits(pos: [f32; 2], size: [f32; 2], angle: f32, d: &crate::enemy::EnemyData) -> bool {
+    if d.flags & 0x1000 != 0 {
+        // APPROX: the rectangle-rectangle test ignores the shot's rotation.
+        return (pos[0] - d.pos[0]).abs() * 2.0 < size[0] + d.hurtbox[0]
+            && (pos[1] - d.pos[1]).abs() * 2.0 < size[1] + d.hurtbox[1];
+    }
+    let r = d.hurtbox[0] / 2.0;
+    let (s, c) = angle.sin_cos();
+    let (dx, dy) = (d.pos[0] - pos[0], d.pos[1] - pos[1]);
+    // The enemy centre in the shot's frame, then its distance to the rectangle.
+    let (u, v) = (dx * c + dy * s, -dx * s + dy * c);
+    let (eu, ev) = ((u.abs() - size[0] / 2.0).max(0.0), (v.abs() - size[1] / 2.0).max(0.0));
+    eu * eu + ev * ev < r * r || (eu == 0.0 && ev <= r) || (ev == 0.0 && eu <= r)
 }
 
 fn dist2(a: [f32; 2], b: [f32; 2]) -> f32 {

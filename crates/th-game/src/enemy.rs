@@ -375,8 +375,9 @@ impl EnemyHost<'_> {
             LAST_ENEMY_ID => self.st.last_enemy_id as f32,
             -9986 => ((e.flags >> 8)&1) as f32,
             -9949..=-9947 | -9923 | -9887 => *self.st.boss_globals.get(&id).unwrap_or(&0.0),
-            // APPROX: VS context flag; full story/match status is not yet modeled.
-            -9886 => 1.0,
+            // EnemyManager +0x44. Only the scripted senders FUN_0050e740/FUN_0050d6f0 set it
+            // to 1 (Boss00 then calls ins_1036, a player death); a plain VS send leaves it 0.
+            -9886 => 0.0,
             WAVE_REMAINING => self.st.wave_members_alive() as f32,
             LEVEL => self.st.level as f32,
             _ => {
@@ -766,6 +767,12 @@ impl EnemyHost<'_> {
                 else { self.e.flags&=!flag::NO_DEATH; }
             }
             513 => self.e.phase_time=0,
+            // Wait while one of this field's boss slots is occupied (FUN_0040b4b0 per slot;
+            // the handler returns -1 so the instruction runs again next frame).
+            520 => if !self.st.boss_ids.is_empty() { return Flow::Retry; },
+            // Destroy every enemy on this field except those flagged 0x20/0x80/0x400 (0x100
+            // overrides), with their item drops cleared (FUN_0050ca70).
+            525 => self.st.clear_enemies=true,
             514 => {
                 let mut args=Args::new(ins); let _slot=args.int(ctx,self);
                 let hp=args.int(ctx,self); let time=args.int(ctx,self); let sub=args.string();
