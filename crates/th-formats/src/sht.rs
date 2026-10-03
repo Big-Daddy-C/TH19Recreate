@@ -33,8 +33,11 @@ pub struct ShotRecord {
     pub hitbox: [f32; 2],
     /// Direction in radians (−π/2 = straight up).
     pub angle: f32,
-    pub unk_18: f32,
+    /// Per-frame angular increment, applied after the update callback.
+    pub angular_velocity: f32,
     pub speed: f32,
+    /// Per-frame speed increment, applied after the update callback.
+    pub acceleration: f32,
     /// Low nibble: 0 = player, 1..=15 = option index, 6 (on some types) = field origin.
     pub origin: u8,
     /// Shot behaviour class (2: one live at a time per `group`; 4–6: offset not velocity-corrected).
@@ -99,8 +102,9 @@ impl ShtFile {
                     offset: [rec.peek_f32(4)?, rec.peek_f32(8)?],
                     hitbox: [rec.peek_f32(12)?, rec.peek_f32(16)?],
                     angle: rec.peek_f32(20)?,
-                    unk_18: rec.peek_f32(24)?,
+                    angular_velocity: rec.peek_f32(24)?,
                     speed: rec.peek_f32(28)?,
+                    acceleration: rec.peek_f32(32)?,
                     origin: b[0x28],
                     kind: b[0x29],
                     anm_script: rec.peek_u16(0x2a)? as i16,

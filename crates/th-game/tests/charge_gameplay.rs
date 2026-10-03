@@ -24,6 +24,23 @@ fn tick(p: &mut Player, keys: u32, enemies: &mut [Enemy], world: &mut World, lib
 }
 
 #[test]
+fn original_reimu_amulets_use_slow_no_target_acceleration() {
+    let Some((mut p, mut world, lib)) = setup() else { return };
+    let record = p.sht.slots.iter().flatten().flatten().find(|r| r.funcs[0] == 1).unwrap().clone();
+    assert_eq!(record.funcs[1],1,"original homing update callback");
+    assert_eq!(record.angular_velocity,0.0);
+    assert_eq!(record.acceleration,0.0);
+    tick(&mut p, input::SHOT, &mut [], &mut world, &lib);
+    let b = p.bullets.iter().find(|b| b.homing).expect("unfocused Reimu fires homing amulets");
+    let speed = b.speed;
+    assert!((speed-record.speed-0.1).abs() < 0.001);
+    for _ in 0..9 { tick(&mut p,0,&mut [],&mut world,&lib); }
+    let b = p.bullets.iter().find(|b| b.homing && b.time==10).unwrap();
+    assert!((b.speed-speed-0.9).abs() < 0.001);
+    assert_eq!(b.homing_target,None);
+}
+
+#[test]
 fn hold_release_original_reimu_shots_and_repeat_without_meter_cost() {
     let Some((mut p, mut world, lib)) = setup() else { return };
     assert_eq!(p.meter, 500);

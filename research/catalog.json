@@ -293,6 +293,26 @@
     "scene_mesh_spawn": {
       "address": "00534860",
       "decompile_sha256": "4c9cb5e9ce918a5ca16aeebd02a8cec8915ad76da9f7433a2ad8361230474cde"
+    },
+    "homing_update": {
+      "address": "0054dc40",
+      "decompile_sha256": "01aa5bb9d50e65723c56ed6da3ab64e509f95f0e5a949e55d59632d1e4d3d041"
+    },
+    "homing_target_query": {
+      "address": "00508530",
+      "decompile_sha256": "95d7bb69ef24bfcedcdf65299c771f7182e4c6221b92446d77d7a378d8ebee73"
+    },
+    "homing_target_valid": {
+      "address": "0042fc50",
+      "decompile_sha256": "b7b7b6142f24f099928f1abdc047d59736d4d872340eef19e742930ed84f1522"
+    },
+    "homing_angle_difference": {
+      "address": "00403b70",
+      "decompile_sha256": "7ef1e611ed8ea869ed177e51d636c38f506e42e2ca0edb7c19075deeed1ac408"
+    },
+    "homing_init": {
+      "address": "0054def0",
+      "decompile_sha256": null
     }
   },
   "features": {
@@ -919,6 +939,76 @@
       },
       "next": [
         "Compare identical original/runtime stage and boss times; audit gameplay camera projection and mesh scene capture ordering."
+      ]
+    },
+    "player_shots": {
+      "implementation": "partial",
+      "summary": "Reimu homing uses original acceleration, target lock, acquisition radius and steering lifetime; shared SHT angular/speed increments are applied.",
+      "symbols": [
+        "homing_update",
+        "homing_target_query",
+        "homing_target_valid",
+        "homing_angle_difference",
+        "homing_init",
+        "shot_spawn",
+        "shot_update"
+      ],
+      "code": [
+        "crates/th-game/src/player.rs",
+        "crates/th-formats/src/sht.rs"
+      ],
+      "tests": [
+        "crates/th-game/tests/charge_gameplay.rs"
+      ],
+      "findings": [
+        {
+          "text": "User reports Reimu homing shots should be slower than current approximation.",
+          "sources": [],
+          "evidence": "user_observation"
+        },
+        {
+          "text": "Shot initializer table005a0444 selects0054def0 (assembly clears target+a0); update table005a0404 selects0054dc40. It acquires nearest eligible target strictly within256 pixels (XMM3 constant005aa3f8) only when no target exists, then retains ID regardless of a nearer enemy. Loss/invalid target clears ID and uses fallback for that tick; next tick may reacquire.",
+          "sources": [
+            "homing_init",
+            "homing_update",
+            "homing_target_query",
+            "homing_target_valid"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "For age<60, wrapped angular error>=pi/4 reduces speed by0.2 to floor4; error<pi/12 increases0.2 to cap16; intermediate error keeps speed. Steering adds0.08*wrapped error, confirmed0054de43 and constant005aa1e8. Age>=60 stops steering and adds0.2 without cap while target exists. No target adds0.1 capped16. Replaces former +0.5 capped10 and fixed +/-0.2 turn.",
+          "sources": [
+            "homing_update",
+            "homing_angle_difference"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "0054df10 executes callback before record+18 angular increment, record+20 speed increment, polar velocity refresh and position update. Parser now names angular_velocity atSHT record24 and acceleration at32; runtime applies them after callback and before movement. Actual Reimu homing records use init/update1 and zero angular_velocity/acceleration.",
+          "sources": [
+            "shot_spawn",
+            "shot_update"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Homing query checks ECL flags0x21 and internal status0xc00. Runtime excludes NO_HURTBOX/HIDDEN and deleted/killed enemies; full internal0xc00 states are not represented. Do not claim complete target eligibility parity. Other character callbacks, original shot animation direction modes and full sprite-based off-field culling remain incomplete.",
+          "sources": [
+            "homing_target_query",
+            "homing_target_valid"
+          ],
+          "evidence": "assumption"
+        }
+      ],
+      "checks": {
+        "automated": "2026-10-03 working tree based onf1c4e64: cargo test --workspace:48 tests passed with original assets; cargo build --release -p th19 passed. Regression cases: no-target acceleration using original SHT/input path, turn-dependent speeds, proportional steering, retained target/target loss/reacquisition, strict radius, tick60 cutoff and late acceleration.",
+        "visual": "Inspected data/reference/reimu-homing-fixed.png atframe350: right-side automatic normal shots render and bend toward enemies. Static capture does not establish speed/timing parity; no matched original footage comparison.",
+        "original_game_parity": "not_run"
+      },
+      "next": [
+        "Connect scope to original spirit contact/conversion while keeping meter gain deferred.",
+        "Map remaining internal target states and compare normal shots against matched original frames."
       ]
     }
   }

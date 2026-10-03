@@ -90,6 +90,10 @@ pub struct PlayerBullet {
     pub hitbox: [f32; 2],
     pub damage: i32,
     pub homing: bool,
+    /// Callback 1 retains the selected enemy until it disappears or becomes invalid.
+    pub homing_target: Option<i32>,
+    angular_velocity: f32,
+    acceleration: f32,
     pub vm: Option<VmId>,
     pub time: i32,
     /// Reimu slot 10: init callback 11 sets piercing, update callback 8 controls speed.
@@ -622,6 +626,9 @@ impl Player {
             hitbox: r.hitbox,
             damage: r.damage as i32,
             homing: r.funcs[0] == 1,
+            homing_target: None,
+            angular_velocity: r.angular_velocity,
+            acceleration: r.acceleration,
             vm,
             time: 0,
             charge_shot: r.funcs == [11, 8, 0, 7],
@@ -638,22 +645,13 @@ impl Player {
             if b.charge_shot {
                 b.speed = if b.time < 120 { (b.speed - 0.95).max(0.2) } else { b.speed + 0.2 };
             }
-            b.time += 1;
             if b.homing {
-                // APPROX: steer toward the nearest damageable enemy and speed up; the real
-                // amulet behaviour is callback 1 of the game's shot function table.
-                let target = enemies
-                    .iter()
-                    .filter(|e| e.data.flags & flag::NO_HURTBOX == 0 && e.data.hurtbox[0] > 0.0 && e.data.entered)
-                    .map(|e| e.data.pos)
-                    .min_by(|a, c| dist2(*a, b.pos).total_cmp(&dist2(*c, b.pos)));
-                if let Some(t) = target {
-                    let want = (t[1] - b.pos[1]).atan2(t[0] - b.pos[0]);
-                    let diff = crate::motion::wrap_angle(want - b.angle);
-                    b.angle += diff.clamp(-0.2, 0.2);
-                }
-                b.speed = (b.speed + 0.5).min(10.0);
+                update_homing(b, enemies);
             }
+            // FUN_0054df10: callback, then SHT angular/speed increments, then movement.
+            b.angle = crate::motion::wrap_angle(b.angle + b.angular_velocity);
+            b.speed += b.acceleration;
+            b.time += 1;
             let (s, c) = b.angle.sin_cos();
             b.pos = [b.pos[0] + c * b.speed, b.pos[1] + s * b.speed];
 
@@ -694,6 +692,43 @@ impl Player {
     }
 }
 
+/// Shot callback 1 (0054dc40), nearest-target query00508530, initializer0054def0.
+fn update_homing(b: &mut PlayerBullet, enemies: &[Enemy]) {
+    // Original additionally tests internal status bits 0xc00, which are not modeled
+    // individually yet. Deleted/killed enemies cannot be retained by this runtime.
+    let valid = |e: &&Enemy| e.data.flags & (flag::NO_HURTBOX | flag::HIDDEN) == 0
+        && !e.data.delete && !e.data.killed;
+    if b.homing_target.is_none() {
+        let mut distance = 256.0 * 256.0;
+        for e in enemies.iter().filter(valid) {
+            let d = dist2(e.data.pos, b.pos);
+            if d < distance {
+                distance = d;
+                b.homing_target = Some(e.data.id);
+            }
+        }
+    }
+    let target = b.homing_target.and_then(|id| enemies.iter().find(|e| e.data.id == id).filter(valid));
+    if let Some(target) = target {
+        if b.time < 60 {
+            let want = (target.data.pos[1] - b.pos[1]).atan2(target.data.pos[0] - b.pos[0]);
+            let diff = crate::motion::wrap_angle(want - b.angle);
+            if diff.abs() >= std::f32::consts::FRAC_PI_4 {
+                b.speed = (b.speed - 0.2).max(4.0);
+            } else if diff.abs() < std::f32::consts::PI / 12.0 {
+                b.speed = (b.speed + 0.2).min(16.0);
+            }
+            b.angle = crate::motion::wrap_angle(b.angle + diff * 0.08);
+        } else {
+            // After 60 ticks, the locked shot travels straight and accelerates uncapped.
+            b.speed += 0.2;
+        }
+    } else {
+        b.homing_target = None;
+        b.speed = (b.speed + 0.1).min(16.0);
+    }
+}
+
 /// Shot collider against an enemy (FUN_00509980 -> FUN_00520450 -> FUN_0051e670). The
 /// shot is a rectangle rotated to its angle, `size[0]` along its direction (collider
 /// +0x2c/+0x30 from record +0xc/+0x10). Enemies are a circle of radius `hurtbox[0] / 2`
@@ -720,6 +755,74 @@ fn dist2(a: [f32; 2], b: [f32; 2]) -> f32 {
 #[cfg(test)]
 mod tests {
 use super::*;
+
+    fn amulet(angle: f32, speed: f32, time: i32) -> PlayerBullet {
+        PlayerBullet { pos: [0.0, 300.0], angle, speed, hitbox: [4.0; 2], damage: 1,
+            homing: true, homing_target: None, angular_velocity: 0.0, acceleration: 0.0,
+            vm: None, time, charge_shot: false, last_enemy: None }
+    }
+
+    fn homing_enemy(id: i32, pos: [f32; 2]) -> Enemy {
+        Enemy { threads: th_ecl::Threads::new(th_ecl::Context::new(th_ecl::SubRef { file: 0, sub: 0 })),
+            data: crate::EnemyData { id, pos, hurtbox: [10.0; 2], hp: 100, ..Default::default() } }
+    }
+
+    #[test]
+    fn amulet_slows_on_sharp_turn_and_accelerates_only_when_aligned() {
+        let enemy = [homing_enemy(7, [100.0,300.0])];
+        let mut b = amulet(-std::f32::consts::FRAC_PI_2, 8.0, 0);
+        update_homing(&mut b, &enemy);
+        assert!((b.speed - 7.8).abs() < 0.001);
+        assert!((b.angle - (-std::f32::consts::FRAC_PI_2 * 0.92)).abs() < 0.001);
+        b.angle = -0.4; b.speed = 8.0;
+        update_homing(&mut b, &enemy);
+        assert_eq!(b.speed, 8.0, "15-45 degree errors preserve speed");
+        b.angle = -0.1;
+        update_homing(&mut b, &enemy);
+        assert!((b.speed - 8.2).abs() < 0.001);
+        b.angle = -std::f32::consts::FRAC_PI_2; b.speed = 4.0;
+        update_homing(&mut b, &enemy);
+        assert_eq!(b.speed, 4.0);
+    }
+
+    #[test]
+    fn amulet_keeps_lock_and_reacquires_after_loss_within_256_pixels() {
+        let mut enemies = [homing_enemy(1,[0.0,200.0]),homing_enemy(2,[100.0,300.0])];
+        enemies[1].data.flags = flag::HIDDEN;
+        let mut b = amulet(-std::f32::consts::FRAC_PI_2,8.0,0);
+        update_homing(&mut b, &enemies);
+        assert_eq!(b.homing_target,Some(1));
+        enemies[1].data.flags = 0;
+        enemies[1].data.pos = [20.0,300.0];
+        enemies[0].data.pos = [0.0,0.0];
+        update_homing(&mut b, &enemies);
+        assert_eq!(b.homing_target,Some(1),"retained target may leave acquisition radius");
+        enemies[0].data.delete = true;
+        let speed = b.speed;
+        update_homing(&mut b, &enemies);
+        assert_eq!(b.homing_target,None,"target loss waits until next tick to reacquire");
+        assert!((b.speed-speed-0.1).abs() < 0.001);
+        update_homing(&mut b, &enemies);
+        assert_eq!(b.homing_target,Some(2));
+        enemies[1].data.pos = [0.0,44.0]; b.homing_target = None;
+        update_homing(&mut b, &enemies);
+        assert_eq!(b.homing_target,None,"exactly 256 pixels is excluded");
+    }
+
+    #[test]
+    fn amulet_stops_steering_at_tick_60_and_unlocked_acceleration_is_gradual() {
+        let mut b = amulet(-1.0,2.0,0);
+        for _ in 0..10 { update_homing(&mut b, &[]); }
+        assert!((b.speed-3.0).abs() < 0.001);
+        assert_eq!(b.angle,-1.0);
+        b.speed = 16.0;
+        update_homing(&mut b, &[]);
+        assert_eq!(b.speed,16.0);
+        b.time = 60;
+        update_homing(&mut b, &[homing_enemy(1,[100.0,300.0])]);
+        assert_eq!(b.angle,-1.0);
+        assert!((b.speed-16.2).abs() < 0.001,"locked late acceleration has no 16 cap");
+    }
 #[test]
 fn combined_player_colliders_obey_original_damage_cap() {
     let path=std::path::PathBuf::from(std::env::var_os("TH19_DAT").unwrap_or_else(||

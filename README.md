@@ -79,7 +79,7 @@ deterministic (needed for replays and netplay).
 | STD playback (camera/fog script, 3D quads, perspective + fog) | 🟡 all 17 stages run; camera shake, skybox sprites, distortion not yet |
 | ECL VM core (opcodes 0–97) | ✅ checked against the decompiled interpreter |
 | Enemies + TH19 wave system (movement, directional sprites, wave pool/sequence, level tables) | 🟡 waves, enemy bullets and death chains run on both fields; Reimu EX/boss dispatch works; full boss opcode coverage remains |
-| Player: movement (fixed point, decoded clamps/speeds), options, shot timers + SHT records, shots vs enemies | 🟡 Reimu on both sides; hearts, barrier and all four charge tiers work in free-charge practice; homing and boss movement remain approximate |
+| Player: movement (fixed point, decoded clamps/speeds), options, shot timers + SHT records, shots vs enemies | 🟡 Reimu on both sides; hearts, barrier and all four charge tiers work in free-charge practice; homing speed/steering follow the recovered callback; boss movement remains approximate |
 | Bullet manager, lasers, items, collision | ⬜ |
 | MSG dialogue, menus, story/VS flow, CPU opponent | ⬜ |
 | Audio: `thbgm.dat` looping BGM (via `thbgm.fmt`), SFX `.wav` | ⬜ |
