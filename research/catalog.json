@@ -777,6 +777,218 @@
     "laser_infinite_clear": {
       "address": "00529160",
       "decompile_sha256": "8b8f96955e62177abec2ce3304dde5e129e9a5962b4a74a29e0a42968160db47"
+    },
+    "primitive_rect_draw": {
+      "address": "004c4d20",
+      "decompile_sha256": "a4d5307fe28323148ded63281e89f6b7ee333850f25c17452a17b2a27e07e034"
+    },
+    "marisa_bomb_start": {
+      "address": "0053dc50",
+      "decompile_sha256": "a47030015748c3cbe5d0943f051d91e147043a9ae916e2cd7a97326475be563b"
+    },
+    "sanae_scope_start": {
+      "address": "004184a0",
+      "decompile_sha256": "a600212819a8a5c36b89550177cc078db8a040ec0cb1fd49f4b18697ece6f80b"
+    },
+    "sanae_scope_tick": {
+      "address": "00418600",
+      "decompile_sha256": "fcdf95228c48b1030b43d1244a9d7901bf3d9ffe34178c91dfd821731801bcc8"
+    },
+    "sanae_scope_bullet": {
+      "address": "00418690",
+      "decompile_sha256": "21c22ffc4446c72b51e5025c8ced4bbc5a281e952ee55b92768e6b585b3d4af9"
+    },
+    "ran_scope_start": {
+      "address": "00419360",
+      "decompile_sha256": "92fa6514e3f94a2073a5aa1681a7625cb97ee5d5a583d2a1059ac26a9ec403fb"
+    },
+    "ran_scope_tick": {
+      "address": "004194d0",
+      "decompile_sha256": "6d4a9421170044b8a7bceea8dc8aa13d77601d0ea901255c1dbd40e5e6e5aa73"
+    },
+    "ran_scope_bullet": {
+      "address": "00419550",
+      "decompile_sha256": "caed7d125e62a70a0153fb25ba828e1a342345feaf12fda509411d4c9a50694b"
+    },
+    "ran_scope_body": {
+      "address": "00419620",
+      "decompile_sha256": "3a9fba31b962fd5be855492d872d788aba641bec5de9d9bea18997e36d77dd4b"
+    },
+    "sanae_snake_update": {
+      "address": "0054c080",
+      "decompile_sha256": "db20bf5994a8d98203320b85de46c7f7dc991344643f5ce43514eda56343ebf7"
+    },
+    "sanae_snake_hit": {
+      "address": "0054bf50",
+      "decompile_sha256": "87af140c18eee36f7f4fb2c673d2a1362fcc53e63b533b4ac4a231efccb15bc1"
+    },
+    "sanae_skill_hit": {
+      "address": "0054c2f0",
+      "decompile_sha256": "fe1f1d784c422957f3b64f0a307eef4ca4471823018dcff20968315f66961237"
+    },
+    "sanae_skill_start": {
+      "address": "00418d20",
+      "decompile_sha256": "3cdadbd306120bd340d5ac3a36fe52a1ce67886e4445f927bb07468594546184"
+    },
+    "ran_skill_start": {
+      "address": "00419ae0",
+      "decompile_sha256": "b5e5692ab0a0909674bd35d28fb08c6ceb0a758fe88c4525dc7dd665ec7f172f"
+    },
+    "ran_ex_tick": {
+      "address": "00419c00",
+      "decompile_sha256": "5d3f050278557e3ebdfdabc827dfb648915cef383d54881f9335e0bfeedc1c7b"
+    },
+    "sanae_bomb_start": {
+      "address": "00417f10",
+      "decompile_sha256": "5f542294e925f26a9e009bd9973276b35125fa257031c5028258a1be91238ae2"
+    },
+    "sanae_bomb_tick": {
+      "address": "00418190",
+      "decompile_sha256": "86a52e2321a92cb9966abe32c362272f292e40d9f1b64a19b6bbdba93cc36a61"
+    },
+    "ran_bomb_start": {
+      "address": "00418e60",
+      "decompile_sha256": "af3f509046ec7b1df768b3cf5de6933f432f293d0f547b2f7e688736300b4464"
+    },
+    "ran_bomb_tick": {
+      "address": "00419000",
+      "decompile_sha256": "a262c188bf7cff674fe23be70d8207496e49e3170e16dabce940d9ab18c2865c"
+    },
+    "sanae_special_start": {
+      "address": "004186e0",
+      "decompile_sha256": "f02b5a62bf400f5d37c666ee2a3ad11706c3487c3f2e8d24a4c6c81602d56946"
+    },
+    "ran_special_start": {
+      "address": "00419720",
+      "decompile_sha256": "5b36e5ebe69bae7493880ad19412fcefb1b304c5a2b7304f2e958b8e27a95cb6"
+    },
+    "special_arrival_tick": {
+      "address": "00418a80",
+      "decompile_sha256": "1d0f07386ab9299c0dc0ae1d7724a157712c8f36807f8223923f0300573f717b"
+    },
+    "sanae_ex_tick": {
+      "address": "0053df80",
+      "decompile_sha256": "ea2854b51d3d7eb56ce9a97aa9a98766aeae17ce4d22e14d92fb1cb3021f3f65"
+    },
+    "curve_init": {
+      "address": "005286c0",
+      "decompile_sha256": "1830edc40516144f55dba13aff36d8a1bd1530a858db789c7be2a20641f41b6d"
+    },
+    "curve_ex": {
+      "address": "00525d50",
+      "decompile_sha256": "7545a8acbbdfa49ac9068d33338916a60e9626cb2bfed54a950af000c3c9a1c4"
+    },
+    "curve_append_path": {
+      "address": "00415c60",
+      "decompile_sha256": "01ffd9f640ea2293c138beca8304a7a86da6f04343348087a89783d74f6e4040"
+    },
+    "curve_sample": {
+      "address": "005274f0",
+      "decompile_sha256": "32c86d2395c56364a9113e8c626e88270fcd36bb34c2bad269f427cf77bf2cfe"
+    },
+    "curve_tick": {
+      "address": "00527ef0",
+      "decompile_sha256": "6c04822bf2738cae54cf48888696139844b65738141d70562e5d538264682bf0"
+    },
+    "curve_mesh": {
+      "address": "00526990",
+      "decompile_sha256": "639999a673d1b042a70716241d38f0ebe86ac94e728670aa29636600086ddf9e"
+    },
+    "curve_hit_rects": {
+      "address": "005279d0",
+      "decompile_sha256": "613560b86130bda27607a574701efeb96acdba7cbea22bda5ee35ae15d5f347e"
+    },
+    "curve_split": {
+      "address": "00525270",
+      "decompile_sha256": "fabf8296bcb1756c6a6ae826ca6ba30fdd6feea6ef32bce28377306af06121dd"
+    },
+    "curve_cancel_circle": {
+      "address": "00524ba0",
+      "decompile_sha256": "2d38712cf6c95d151142949127aa72390dc4614f34fe9256ca64d2d79a0accfd"
+    },
+    "curve_sprite": {
+      "address": "00530f00",
+      "decompile_sha256": "cae72b6fbd0f8100983f40c14690114c004ea0eed24c1597af78ae3567766a0b"
+    },
+    "cpu_character_select": {
+      "address": "004fb6f0",
+      "decompile_sha256": "29d1536634451defc5195962b7ae9194f0b4e294a84f322f363897248c09e277"
+    },
+    "enemy_animation_commands": {
+      "address": "004fe350",
+      "decompile_sha256": "2ff3266e1a2ec2a4518881f7bb9b65a34e833a13b96ee14637efc49c7f555b07"
+    },
+    "shot_fire_origin": {
+      "address": "0054f990",
+      "decompile_sha256": "6fe3d91e0d76f7c42068903dd464130c0ccd4704305bc4f0136e6922971a332e"
+    },
+    "shot_spawn_origin": {
+      "address": "0054e960",
+      "decompile_sha256": "555ae865c2f42c4b106a9fc22480f54e5da704713ab59303ab54f5c41537d056"
+    },
+    "anm_child_start": {
+      "address": "004d0770",
+      "decompile_sha256": "a7ab767a2eb0def834b7edcecd97abf60271878709b26a22a9f804a3fd1b5b2f"
+    },
+    "anm_primitive_rect": {
+      "address": "004c4d20",
+      "decompile_sha256": "a4d5307fe28323148ded63281e89f6b7ee333850f25c17452a17b2a27e07e034"
+    },
+    "anm_position_transform": {
+      "address": "00404050",
+      "decompile_sha256": "13cbf071026d4c4b5a13a62ba5ca3a7128907c550a8f857d5f222a8bce5399ef"
+    },
+    "option_update": {
+      "address": "00546d10",
+      "decompile_sha256": "d761523d000a75aca6542f260b0cf16263e7db44e4a2741259526151fb02e1ae"
+    },
+    "ran_option_latch": {
+      "address": "0054a120",
+      "decompile_sha256": "9fcb98395c31a64f009aa5ecafc6318478070fe499f4e03d68eafcd32db97c50"
+    },
+    "option_setup": {
+      "address": "005483d0",
+      "decompile_sha256": "1a7df5c562e3b83eaef003547d2c562eac4c5f70c53fcce3e553d50cc7042e97"
+    },
+    "graze_award": {
+      "address": "00549fb0",
+      "decompile_sha256": "c3824c3eebf88bc26c44283a8f1ecf3ee9fca3d420fc59b832266993dfa8e2b6"
+    },
+    "graze_effect_spawn": {
+      "address": "00506940",
+      "decompile_sha256": "754897069cea4f99f58bdd5403fff1325156b916ee69ec732f05aded0c3fe226"
+    },
+    "graze_pool_tick": {
+      "address": "00505cf0",
+      "decompile_sha256": "1b806111d100eaa0e5e6ce235b0e5c5ed73a6ece7d735cf3dc648ca85b144705"
+    },
+    "graze_trail_init": {
+      "address": "004dc010",
+      "decompile_sha256": "f6307305c175ee8d0e6093faf58ec48600005476103ce74d0d367a55e0014b3b"
+    },
+    "graze_trail_tick": {
+      "address": "004dc250",
+      "decompile_sha256": "4da0401f7f3d98dbee6af902d09a0bb30d343d54fc9d1e01cf632e982f57d68a"
+    },
+    "graze_trail_draw": {
+      "address": "004dc440",
+      "decompile_sha256": "ec6a664b0a4eb50523ef51068fd119f54e453b1ba699619a5eba5a5dda197967"
+    },
+    "graze_line_strip": {
+      "address": "004c3f40",
+      "decompile_sha256": "815b9fe403a98dceddf781806f9398b1085033e5c50e80dd84190a4ed5b7eb5b"
+    },
+    "bullet_contact_tick": {
+      "address": "004f5130",
+      "decompile_sha256": "d55e4eec8c3e4009696c811852135557341b2a6bac3b3f7bf8178c743b17ea1b"
+    },
+    "segment_closest_point": {
+      "address": "004d3580",
+      "decompile_sha256": "bea3d37c10d7844411ac01fab2cd38cc1ad6051fdc8f43b517b4ed07d2e2ea8c"
+    },
+    "ran_ex_special_update": {
+      "address": "00419c00",
+      "decompile_sha256": "5d3f050278557e3ebdfdabc827dfb648915cef383d54881f9335e0bfeedc1c7b"
     }
   },
   "features": {
@@ -1298,7 +1510,7 @@
           "evidence": "code_checked"
         },
         {
-          "text": "Combo counter (FUN_00546080): player +0x22b4 is the chain, +0x227c the chain timer, +0x22b8 the number shown. When the chain is >= 2, beats the shown number and the timer is running, the shown number becomes the chain and a display timer (+0x2290) restarts at 120. The number is never cleared during the round. It is queued as text (FUN_004e7610) at x = 48 (left player) / 360 (right), y = 32: '%d' right-aligned to x and the string 'hits' left-aligned from x at 0.6 scale, font style 6, colour 0xffffff00 (yellow), turning 0xff808080 (gray) in 3 of every 6 frames of the display timer once the chain timer has run out. Style 6 draws glyph sprite (char + 0x120) of ascii.anm's ascii_big entry (22x37 '0', proportional; drawn at half size), advancing by the glyph width times the scale, from the glyph's top-left, vertical alignment 2 (box top = 16 x scale above the baseline). Ported with an AsciiInf-style glyph VM drawn at priority 0x1f. Only style 6 of the text object is ported; the other styles (sprite offsets 0xef, 0x10d, 0x1e4, 0x182, 0x246, 0x2a8 ...) and shadow/outline are not.",
+          "text": "Combo counter (FUN_00546080): player +0x22b4 is the chain, +0x227c the chain timer, +0x22b8 the number shown. When the chain is >= 2, beats the shown number and the timer is running, the shown number becomes the chain and a display timer (+0x2290) restarts at 120. Correction (2026-10-03): FUN_005450e0 decrements the display timer at combo+0x18 and clears combo+0x40 when it reaches zero (assembly 00545120-005451a6). It also decrements combo+4 and clears the reward chain at combo+0x44 on expiry. The previous never-cleared conclusion was incorrect because it inspected drawing without the timer update. The port now counts display time down and retains the native blinking tail: reward-chain expiry clears gameplay hits, while the latched HUD count flashes yellow/gray in three-frame phases until display time expires. This supersedes the immediate-hide interpretation after the user clarified that flashing must match the original. Zero-time cancellation hits are also cleared at frame end so expired hits cannot accumulate rewards across frames. Lifetime best remains statistical; earned attack credit is preserved. It is queued as text (FUN_004e7610) at x = 48 (left player) / 360 (right), y = 32: '%d' right-aligned to x and the string 'hits' left-aligned from x at 0.6 scale, font style 6, colour 0xffffff00 (yellow), turning 0xff808080 (gray) in 3 of every 6 frames of the display timer once the chain timer has run out. Style 6 draws glyph sprite (char + 0x120) of ascii.anm's ascii_big entry (22x37 '0', proportional; drawn at half size), advancing by the glyph width times the scale, from the glyph's top-left, vertical alignment 2 (box top = 16 x scale above the baseline). Ported with an AsciiInf-style glyph VM drawn at priority 0x1f. Only style 6 of the text object is ported; the other styles (sprite offsets 0xef, 0x10d, 0x1e4, 0x182, 0x246, 0x2a8 ...) and shadow/outline are not.",
           "sources": [
             "combo_display",
             "ascii_text_draw",
@@ -1312,11 +1524,11 @@
         "boss_scope_audit": "2026-10-02: original-asset Reimu health all8levels and rank-specific first attack-cycle counts passed; final cargo test --release --workspace passed41tests; cargo build --release -p th19 passed.",
         "automated_cancel": "2026-10-03: workspace 58 tests: explosion cancel eligibility (type<4, invulnerable included, type 5 immune), chain hits, conversion arrives on the other field; script vs player cancel invulnerability.",
         "automated_focus_marker": "2026-10-03: focus_shows_the_effect_anm_hit_marker_and_releases_it",
-        "automated_combo": "2026-10-03: combo_counter_shows_the_best_chain_and_blinks_after_it_ends"
+        "automated_combo": "2026-10-03: superseded indefinite-display test with combo_counter_flashes_after_chain_expiry_then_clears_at_display_expiry and expired_chain_does_not_boost_next_kill_rewards; both passed with original assets. Tests cover independent timer expiry, exact three-frame flash phases, active-chain yellow, record refresh, smaller subsequent chains, glyph removal, and fresh reward amounts; original-game visual comparison not run."
       },
       "next": [
         "Trace reward recipients and pending item/graze systems before enabling meter gain.",
-        "Port the remaining AsciiInf styles (HUD score/meter text) and the display timer's per-frame increment (assumed +1)."
+        "Port the remaining AsciiInf styles (HUD score/meter text). Display countdown and chain expiry are now located in FUN_005450e0; native HUD blinking continues until its independent display timer expires; gameplay hits reset earlier."
       ]
     },
     "ecl": {
@@ -1396,7 +1608,7 @@
     },
     "scope": {
       "implementation": "partial",
-      "summary": "Reimu scope presentation plus half-speed ordinary enemy movement and live bullet time; typed spirits switch to their registered disable sub.",
+      "summary": "Reimu circle and Marisa full-height scope presentation; shared native progressive bullet contact tint and entry/exit interrupts, half-speed movement, and original typed-spirit disable scripts.",
       "symbols": [
         "reimu_scope_start",
         "reimu_scope_update",
@@ -1443,13 +1655,25 @@
             "scope_bullet_contact"
           ],
           "evidence": "code_checked"
+        },
+        {
+          "text": "2026-10-03: AuraMarisaInf00417840/00417980 explicitly sets position y=0; sprite script15 owns two primitive ANM606 halves with anchors right/top and left/top (ANM421). Renderer previously centered all primitive rectangles and Scope drew at player y, causing the half-height column. Primitive rectangles now honor native anchor extents per004c4d20. Scope visual tracks x and field y=0; collision position remains the player for circle characters. Shared bullet contact004f5130/assembly004f54a7 increments consecutive contact timer at+fec, sends interrupt2 on first contact, writes color2 ARGB ff/ff/clamp(2*(104-age),96,255)/80 and color mode1. Exit004f532b sends interrupt3 and resets contact timer; frame-start004f5130 resets color mode. Port now applies the exact tint and interrupts for every character via shared Side bullet handling, restores original primary color on exit, and preserves next-tick half-speed movement. No arbitrary enemy/spirit tint is inferred; typed spirits retain their original disable scripts.",
+          "sources": [
+            "marisa_scope_start",
+            "marisa_scope_update",
+            "primitive_rect_draw",
+            "scope_bullet_contact",
+            "scope_spirit_contact"
+          ],
+          "evidence": "code_checked"
         }
       ],
       "checks": {
         "original_game_parity": "not_run",
         "automated": "2026-10-02: scope growth10/20frames, charge/focus gating, player tracking, side isolation, release/recharge/invalid-state cleanup and circle/rectangle boundaries passed using original pl00.anm.",
         "visual": "data/reference/reimu-scope.png frame90 inspected: blue64-radius circle around charging left Reimu; original-game footage comparison unrun.",
-        "automated_2026_10_03": "cargo test --workspace passed53 tests: scope bullet movement+acceleration/release, all four Ghost scripts with source disabled HP and movement; existing scope/charge/boss tests retained."
+        "automated_2026_10_03": "cargo test --workspace passed53 tests: scope bullet movement+acceleration/release, all four Ghost scripts with source disabled HP and movement; existing scope/charge/boss tests retained.",
+        "column_and_tint_2026_10_03": "marisa_scope_and_bomb_draw_full_height_at_any_player_y and scoped_bullets_tint_progressively_and_restore_when_scope_ends PASS with original assets; both fields, player y64/420, original448-height geometry, symmetric14-width scope,65 tint ticks down to96 clamp, Reimu/Marisa, release restoration. cargo test --workspace PASS (95 tests); release build PASS. Rendered and inspected data/reference/marisa-scope-height-fixed.png frame100: centered symmetric column extends from field top to bottom while player is near bottom. No matched original footage comparison."
       },
       "next": [
         "Port remaining bullet scope contact visuals and laser paths.",
@@ -1806,10 +2030,16 @@
           "text": "Not ported: laser hazards (no lasers yet), rectangular enemy hit boxes, the item-chasing branch (no items yet), story-mode CPU helpers (CPUStageNStoryInf, which also release charge), the other characters' targeting rules (CPUHitMarisaInf etc.), and difficulty (Normal assumed; Easy starts at 40%, Hard and Lunatic at 0%, ramp every 240 / 600 / 1200 / never). Hazard speed for enemy bodies is the per-frame displacement (assumed); the bullet's own speed is used for bullets.",
           "sources": [],
           "evidence": "assumption"
+        },
+        {
+          "text": "2026-10-03 development control: Shift+K toggles player1 between keyboard and the existing character-aware CPU controller, using a distinct Bot instance so targeting and charge state are independent of player2. K retains opponent AI/dummy behavior. Either Shift key works, disabling AI immediately restores held keyboard input, enabling resets only that controller; match restart resets both AI instances but preserves control toggles. Title shows P1 AI. No characters added.",
+          "sources": [],
+          "evidence": "code_checked"
         }
       ],
       "checks": {
-        "automated_bot": "2026-10-03: bot unit tests (danger mask, target choice, approach, steering, home) and integration tests (bot plays 900 frames; bombs when every move is hit)."
+        "automated_bot": "2026-10-03: bot unit tests (danger mask, target choice, approach, steering, home) and integration tests (bot plays 900 frames; bombs when every move is hit).",
+        "player_ai_toggle_2026_10_03": "cargo test -p th19 shift_k PASS with original assets: AI ignores held right and steers home, both Shift keys toggle player1, plain K only changes opponent, disabling AI immediately restores manual steering."
       },
       "next": [
         "Port the other characters' bot rules with their characters; add difficulty; add laser hazards and item chasing when those exist; compare against recorded bot footage."
@@ -2042,13 +2272,35 @@
             "laser_infinite_clear"
           ],
           "evidence": "code_checked"
+        },
+        {
+          "text": "2026-10-03 player beam correction: ANM interpreter FUN_004bd660 cases 3/4 (lines177-187) keeps VM+0x2c on the stop instruction; interrupt entry saves it to +0x14 (lines220-226), and case7 restores it (lines313-316). The port incorrectly advanced past stop, so contact interrupts2/3 returned into the following handlers and eventually ending interrupt1, deleting Marisa beam graphics after 11 ticks while colliders persisted. Stops now retain their instruction pointer. Actual pl01.anm scripts7/8 remain alive through repeated contact and return to stopped loop; ending interrupt1 still fades/deletes. FUN_0054c830 retains charge beam launch position at +0x54, unlike option beam0054d370 which follows its origin; fixed port following of charge beams. Original growth remains18/frame while <=512 (unobstructed522, regrowth after cuts may overshoot to a different value above512); no guessed full-screen length substituted.",
+          "sources": [
+            "anm_interpreter",
+            "marisa_beam_update",
+            "marisa_charge_beam_update",
+            "marisa_beam_hit",
+            "marisa_charge_beam_hit"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "2026-10-03: Scope and bomb column placement fixed with native primitive anchor handling (004c4d20). BombMarisaInf0053dc50 stores launch x and explicitly sets y=0 at+34. Update0053d9b0 writes that stored position to its column VM; does not follow later player motion. Port now uses field-top launch position for flash/column and matching cancellation/damage x, while scope continues following player x. Width growth, native448 height and existing cancellation/damage rules preserved.",
+          "sources": [
+            "marisa_bomb_start",
+            "marisa_bomb_update",
+            "marisa_scope_update",
+            "primitive_rect_draw"
+          ],
+          "evidence": "code_checked"
         }
       ],
       "checks": {
         "automated_marisa": "2026-10-03: marisa_beams_grow_cut_at_enemies_damage_and_end_with_the_shot_button, marisa_charge_releases_fire_charge_beams, ray_enters_a_circle_ahead",
         "automated_marisa_more": "2026-10-03: marisa_extra_attack_fires_lasers_from_her_own_program, lasers_hit_and_graze_the_player, marisa_skill_and_special_bullets_send_laser_orbs_that_become_extra_attack_00, marisa_bomb_is_a_full_height_column, laser unit tests",
         "continuation_2026_10_03": "Working tree based on 7090364: cargo test --workspace PASS (91 tests); cargo build --release -p th19 PASS. Replaced cumulative diagnostic Marisa probe with independent checks of original first laser pattern at all eight ranks; added segment/immunity and bomb-column remainder tests. Captured and inspected data/reference/marisa-boss-continuation.png at frame 570 (--p1 2 --p2 1 --full-charge --boss-level 3 --preview-charge 4 --no-bot --godmode). No matched original footage comparison.",
-        "continuation_line_capture_2026_10_03": "data/reference/marisa-line-continuation.png captured/inspected at frame 560, rank 1, same flags as spell capture except --boss-level 1. Original screenshots/footage have not been aligned for comparison."
+        "continuation_line_capture_2026_10_03": "data/reference/marisa-line-continuation.png captured/inspected at frame 560, rank 1, same flags as spell capture except --boss-level 1. Original screenshots/footage have not been aligned for comparison.",
+        "player_beam_contact_2026_10_03": "cargo test --workspace PASS (93 tests). original_marisa_beams_survive_contact_repeat_damage_and_reach_field_top reproduced sprite deletion at frame11 before fix, then passed for original option and charge records. Checks four-frame/every-frame damage cadence, contact animation survival, rendered vertices above field top after obstruction removal, fixed charge origin, native lifetime and fade deletion. Rendered and inspected data/reference/marisa-beam-charge-fixed.png at frame180 (Marisa charge beam reaches the top while intersecting enemies). Release build passed. Matched original footage comparison not run."
       },
       "next": [
         "Port laser Ex programs, curve/beam types and endpoint/scope presentation; copy full extended state when splitting supported Ex lasers.",
@@ -2090,6 +2342,230 @@
       },
       "next": [
         "Port the line laser and the cancel functions."
+      ]
+    },
+    "sanae_ran": {
+      "implementation": "partial",
+      "summary": "Playable Sanae/Ran shots, scopes, charges, skills, bombs and original opponent scripts; extended native curved lasers for Sanae.",
+      "symbols": [
+        "shot_fire_origin",
+        "shot_spawn_origin",
+        "sanae_scope_start",
+        "sanae_scope_tick",
+        "sanae_scope_bullet",
+        "ran_scope_start",
+        "ran_scope_tick",
+        "ran_scope_bullet",
+        "ran_scope_body",
+        "sanae_snake_update",
+        "sanae_snake_hit",
+        "sanae_skill_hit",
+        "sanae_skill_start",
+        "ran_skill_start",
+        "ran_ex_tick",
+        "sanae_bomb_start",
+        "sanae_bomb_tick",
+        "ran_bomb_start",
+        "ran_bomb_tick",
+        "sanae_special_start",
+        "ran_special_start",
+        "special_arrival_tick",
+        "sanae_ex_tick",
+        "curve_init",
+        "curve_ex",
+        "curve_append_path",
+        "curve_sample",
+        "curve_tick",
+        "curve_mesh",
+        "curve_hit_rects",
+        "curve_split",
+        "curve_cancel_circle",
+        "curve_sprite",
+        "cpu_character_select",
+        "enemy_animation_commands",
+        "anm_child_start",
+        "anm_primitive_rect",
+        "anm_position_transform",
+        "anm_interpreter",
+        "option_update",
+        "ran_option_latch",
+        "option_setup",
+        "graze_award",
+        "graze_effect_spawn",
+        "graze_pool_tick",
+        "graze_trail_init",
+        "graze_trail_tick",
+        "graze_trail_draw",
+        "graze_line_strip",
+        "bullet_contact_tick",
+        "segment_closest_point",
+        "ran_ex_special_update"
+      ],
+      "code": [
+        "crates/th-game/src/character.rs",
+        "crates/th-game/src/player.rs",
+        "crates/th-game/src/scope.rs",
+        "crates/th-game/src/bomb.rs",
+        "crates/th-game/src/enemy.rs",
+        "crates/th-game/src/side.rs",
+        "crates/th-game/src/reflect.rs",
+        "crates/th-game/src/laser.rs",
+        "crates/th19/src/main.rs",
+        "crates/th-anm/src/vm.rs"
+      ],
+      "tests": [
+        "crates/th-game/tests/higher_charge.rs",
+        "crates/th-game/src/laser.rs"
+      ],
+      "findings": [
+        {
+          "text": "Sanae(pl02) and Ran(pl03) added as select numbers3/4. Runtime reads original shot records/options, normal/focused scripts and included enemy programs; no game assets added to Git. Audit inputs: original archive pl02.sht/ecl/anm/pl02b.anm and pl03 equivalents; callback tables5a0440/5a0400/5a03d0.",
+          "sources": [],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Sanae scope ANM16 follows player and scales[r,1], grows1->128 in60frames mode2. Bullet test uses squared sum of radii. Ran scope ANM11 grows1->30 in30 mode6, scales[r,r], collision is union rectangles[r,7r]/[7r,r]. Body overlap uses oriented rectangles; shared circle-body shortcuts for other characters remain an existing limitation.",
+          "sources": [
+            "sanae_scope_start",
+            "sanae_scope_tick",
+            "sanae_scope_bullet",
+            "ran_scope_start",
+            "ran_scope_tick",
+            "ran_scope_bullet",
+            "ran_scope_body"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Sanae snake callback4 samples a valid body within +/-16y outside +/-16x, interrupts2 and stops, then heads horizontally at14 when its timer reaches4. Hit5 uses effect142 and shared shot impact. Skill hit4 creates radius24 collider, grows by SHT+68, copies motion after replacing speed with2, lasts20 frames, hit interval4. Original initial-hit damage still goes through shared cap.",
+          "sources": [
+            "sanae_snake_update",
+            "sanae_snake_hit",
+            "sanae_skill_hit"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Sanae C1 slot10 fires30 frames, controller ends40; skill selects11 and fires60, ends70, C1 origin0 shots use current player position; skill origin5 captures launch point (0054f990/0054e960). Native C1 ignores release while skill active. Ran C1 fires50 and ends when timer>60. C2 sets power400 and refreshes options immediately for600 ticks, then restores200; ignores boost refresh while active; rapid fire slot11 under boost otherwise10.",
+          "sources": [
+            "sanae_skill_start",
+            "ran_skill_start",
+            "ran_ex_tick",
+            "shot_fire_origin",
+            "shot_spawn_origin"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Sanae bomb fixed launch circle: max320 ticks, radius1->352, squash1->48 mode4, damage10/frame. Ran fixed launch cross: max300 ticks, radius1->96 mode4, union[r,7r]/[7r,r], damage20 per rectangle; overlap can hit twice subject shared damage cap. Both durations at least120, protect40 and end effects10 ticks later.",
+          "sources": [
+            "sanae_bomb_start",
+            "sanae_bomb_tick",
+            "ran_bomb_start",
+            "ran_bomb_tick"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Special send defaults difficultyNormal: Sanae threshold90, Ran65. Sanae alternates upper left/right edge targets; Ran cycles11 edge positions from00419c00. Flights Sanae80..159/Ran50..89, Hermite initial tangent[random +/-100,200], final[random +/-100,-300]. Native sprites bullet.anm61 vs pl03b.anm14, scale.8 alpha192. Arrival uses sender ExAttack (not old ExtraAttack00), HP200. Shared RNG differs from replay RNG.",
+          "sources": [
+            "sanae_ex_tick",
+            "ran_ex_tick",
+            "sanae_special_start",
+            "ran_special_start",
+            "special_arrival_tick"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "ECL1037 native case0xbe at00505116 invokes receiver EX constructor from opposite player launch. SUPERSEDED reading (disassembly re-audited 2026-10-03): the stores after a push use an esp displacement one dword too high, so arg0 lands at request+0xc and arg1 at +0x10 (target x,y, the same fields Ran 00419c00 writes); pl03.ecl passes (+-150,y) for sides and (x,0/448) for top/bottom. Request+0..8 is the sender player position (+0x68c), +0x3c receiver side, +0x50=1. 336 delegates ANM draw-mode setter004d0b30. 1041 sets internal20000000 suppressing kill rewards. Ran ExtraAttack launches talisman enemies; execution tests count ExAttack bodies as threats rather than requiring ordinary bullets.",
+          "sources": [
+            "enemy_animation_commands"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "ECL711 case0x98 from opcode table505560 creates LaserCurveInf(type2). Init copies ET time1 as node count (Sanae normal32); curve Ex ANGLE_ACCEL a=duration,b=absolute start,r=speed acceleration,s=angular increment. Nodes are analytical path samples(age-i); discrete whole-tick integration then fractional remainder. Finite accel appends linear segment. Native sprite callback3 returns color+524 (not bullet sprite remap); triangle strip width/2 normals averaged across adjacent nodes; body gradient longitudinal UV. Player contact builds node rectangles after accumulating16, lengths speed*1.1, width*.5*(type2?.55:1.1); original initial heading contributes center offset. Player cancels respect INVULN300; script cancel can bypass. Runs<=3 nodes discarded when split. Endpoint effect sprites and non-angle-accel curve Ex remain unported.",
+          "sources": [
+            "curve_init",
+            "curve_ex",
+            "curve_append_path",
+            "curve_sample",
+            "curve_tick",
+            "curve_mesh",
+            "curve_hit_rects",
+            "curve_sprite",
+            "curve_split",
+            "curve_cancel_circle"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "CPU constructor004fb6f0 chooses Marisa hit controller only for character1; all others including Sanae/Ran use Reimu controller. Existing bot laser avoidance remains unported, so shared AI limitation applies here.",
+          "sources": [
+            "cpu_character_select"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Ran scope ANM11 spawns four script12 arms after setting parent variable10004 to 0,pi,-pi/2,pi/2. Native child constructor004d0770 executes the child immediately, so509 copies spawn-time variables. ANM318 maps to native case11/flag40000 and scales child position by root parent scale in00404050. Primitive603/606 dispatch to rotated gradient-rectangle renderer004c4d20 independently of sprite render_mode. Regression renders native scope extents +/-105 on both axes at scale30; same script-child behavior applies to Ran bomb13.",
+          "sources": [
+            "anm_child_start",
+            "anm_primitive_rect",
+            "anm_position_transform",
+            "anm_interpreter"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Option update 00546d10 per option: target (+0x70/+0x74) = player pos + offset table row chosen by player+0x2070 (focus) unless option flag bit2 is set, in which case the per-option callback (+0x11c) owns the target. Current eases by player+0x2114 percent (always 30) of the remaining distance each tick; a hold counter (+0x100) snaps to target while it counts down. 005483d0 rebuilds ALL options only when the option count changes, starting each at player+offset (not at the player), and installs by character id: 3 (Ran) -> 0054a120 with hold 10, 6 -> 00545b70, 0xd -> 0054a190, 0x11 -> 0054a260.",
+          "sources": [
+            "option_update",
+            "option_setup"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Ran option latch 0054a120 (character 3): while unfocused (player+0x2070==0) it stores the player position in player+0x6a0/+0x6a4 every tick; the option target is its own offset (unfocused or focused row) + that stored position. Held focus therefore leaves the orbs at absolute positions where the last unfocused tick put them, with focused offsets; releasing resumes following and the normal 30%-per-tick ease returns them. Shift before moving or while moving is the same rule. Shots read option+0x78/+0x7c (current position) via 0054f990/0054e960 (player+0x5d8+n*0x128+0x78), so origins follow the held orbs. Player init zeroes +0x6a0 only; the Rust anchor starts at the spawn position (initial +0x6a4 not proven).",
+          "sources": [
+            "ran_option_latch",
+            "option_update"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Graze award 00549fb0: graze count +0x80 (cap 99999999), queue pool type 4 on the bullet manager with delay rand&7 and the effect position/colour, throw orbs via 00521c60, sound 0x2a with pan x*1000/192 (sound not implemented: no audio). Pool tick 00505cf0 counts the delay down then 00506940 spawns effect.anm script 0 with callbacks: init 004dc010 (random heading in [-pi,pi], 20 colours with alpha 0xff for the first ten then ~(k*0x18)), per-tick 004dc250 (fade existing points by 0x10, append one point 1..9 px away along the heading, heading += random in [-pi,pi]; ends when 20 points exist) and draw 004dc440 -> 004c3f40 (D3D line strip, 1px, normal alpha blend). Colour is bullet+0x694 (type colour table [c][4] for cancel-mode-6 types, else 0xffd08080) and 0xffd08080 for lasers (+0x860).",
+          "sources": [
+            "graze_award",
+            "graze_effect_spawn",
+            "graze_pool_tick",
+            "graze_trail_init",
+            "graze_trail_tick",
+            "graze_trail_draw",
+            "graze_line_strip"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Bullet graze gate (004f5130): a bullet grazes when in the ring with allowance (+0x1018, always 1 because manager flag +0x815718 is only ever zeroed) and timer +0xfd8 on a multiple of 120 (starts at 0, so the first contact grazes immediately); in range the timer ticks and the out-of-range timer resets; after 60 out-of-range ticks the allowance and timer reset. Laser effects appear at the closest point (004d3580) of the hit segment to the player; the straight-laser segment arguments are assumed equal to its contact rect (hidden-register call), curved lasers use the player position.",
+          "sources": [
+            "bullet_contact_tick",
+            "segment_closest_point"
+          ],
+          "evidence": "code_checked"
+        }
+      ],
+      "checks": {
+        "date": "2026-10-03",
+        "automated": "Final cargo test --workspace PASS (105 tests); cargo build --release -p th19 PASS. Added native four-tick snake turn and current-vs-captured firing-origin regressions. Scope growth/shape, charge durations, boost restoration, bomb sizes/fixed origins; EX/boss original execution at all8 ranks, HP5000/1500/6500. Curve path known positions78@40,438@130,460@140 and90deg turn after8 ticks; INVULN/player vs script cancel, gradient sprite530,color6,nodecount32. Added original Ran scope cross-arm geometry regression.",
+        "visual": "Rendered and inspected data/reference/sanae-extra-next.png(frame290) and ran-boss-next.png(frame570). Both character pairs load without crashes; curve gradient and Ran talisman boss render. No aligned original footage comparison. Scope renders: sanae-scope-next.png(frame120), ran-scope-next.png(frame90). Ran scope frame90 re-rendered and inspected after child-variable, position-scale and primitive-angle corrections; all four arms visible."
+      },
+      "next": [
+        "Shared boss movement/RNG remain approximate; 516sound,524spell metadata,527spell score and534presentation not implemented. Full trajectory parity not proven by execution tests.",
+        "Native curved-laser endpoint presentation, type1/type2 ANM sources, additional curve Ex handlers and original sprite-copy details when splitting need further audit.",
+        "Shared native reward path under1041 currently suppresses credit gain; explosion/chain behavior under flag needs separate audit. Bot does not yet avoid lasers.",
+        "Compare Sanae/Ran normal shots, hit colliders, skill/focus/bombs and all attack ranks against synchronized original footage.",
+        "Graze sound 0x2a, laser graze segment arguments (hidden registers at 0052b250 etc.) and the pool-spawn tick order relative to bullet update remain unverified; ECL 1037 landing positions are tested only for edge placement, not for arrival timing against the original."
       ]
     }
   }

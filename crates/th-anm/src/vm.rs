@@ -335,6 +335,8 @@ pub struct Vm {
     pub z_write_disable: bool,
     /// ANM `rotationMode` (437): order the X/Y/Z rotations are applied in for 3D sprites.
     pub rotation_mode: u8,
+    /// ANM318: scale child position by the root parent scale (00404050).
+    inherit_position_scale: bool,
     pub render_mode: i32,
     pub layer: i32,
     pub visible: bool,
@@ -421,6 +423,7 @@ impl Vm {
             blend: BlendMode::Normal,
             z_write_disable: false,
             rotation_mode: 0,
+            inherit_position_scale: false,
             render_mode: 0,
             layer: 0,
             visible: true,
@@ -488,7 +491,7 @@ enum Flow {
 }
 
 enum Spawn {
-    Child { script: i32, offset: [f32; 2] },
+    Child { script: i32, offset: [f32; 2], vars: ([i32; 7], [f32; 9]) },
     Root { script: i32, offset: [f32; 2] },
 }
 
@@ -839,6 +842,10 @@ impl World {
     }
 
     fn run(&mut self, lib: &AnmLibrary, id: VmId) {
+        self.run_with_parent_vars(lib, id, None);
+    }
+
+    fn run_with_parent_vars(&mut self, lib: &AnmLibrary, id: VmId, snapshot: Option<([i32; 7], [f32; 9])>) {
         let mut spawns = Vec::new();
         let mut inherited = 0.0;
         let mut p = self.slots[id.index as usize].vm.as_ref().and_then(|v| v.parent);
@@ -859,6 +866,7 @@ impl World {
             .and_then(|v| v.parent)
             .and_then(|p| self.get(p))
             .map(|p| (p.ivars, p.fvars));
+        let parent_vars = snapshot.or(parent_vars);
         let delete = {
             let rng = &mut self.rng;
             let unknown = &mut self.unknown_ops;
@@ -917,9 +925,15 @@ impl World {
         };
         for s in spawns {
             match s {
-                Spawn::Child { script, offset } if script >= 0 => {
+                Spawn::Child { script, offset, vars } if script >= 0 => {
                     let o = [offset[0], offset[1], 0.0];
-                    let child = self.spawn_inner(lib, file, script as usize, Some(id), o, is_3d);
+                    // Native 004d0770 executes the child immediately; opcode 509 sees
+                    // the variables at this spawn, before the parent changes them again.
+                    let mut vm = Vm::new(file, script as usize, self.next_order);
+                    self.next_order += 1;
+                    vm.parent = Some(id); vm.origin = o; vm.space_3d = is_3d;
+                    let child = self.insert(vm);
+                    self.run_with_parent_vars(lib, child, Some(vars));
                     if let Some(c) = self.get_mut(child) {
                         c.draw_priority = draw_priority;
                         c.backdrop = backdrop;
@@ -987,6 +1001,11 @@ impl World {
     /// Build triangles for the VMs in `pass`, in the game's draw-chain order (layer
     /// priority, or a manager's own priority), then creation order.
     pub fn draw_list(&self, lib: &AnmLibrary, pass: Pass) -> DrawList {
+        self.draw_priority_range(lib,pass,i32::MIN,i32::MAX)
+    }
+
+    /// Draw a half-open range of manager priorities, for externally generated meshes.
+    pub fn draw_priority_range(&self, lib: &AnmLibrary, pass: Pass, low:i32, high:i32) -> DrawList {
         let camera = match pass {
             Pass::Stage(c) => Some(c),
             _ => None,
@@ -995,6 +1014,7 @@ impl World {
             .slots
             .iter()
             .filter_map(|s| s.vm.as_ref())
+            .filter(|v| {let priority=v.draw_priority.unwrap_or_else(||layer_priority(v.layer)); low<=priority && priority<high})
             .filter(|v| match pass {
                 Pass::Backdrop => !v.space_3d && v.backdrop,
                 Pass::Stage(_) => v.space_3d,
@@ -1081,6 +1101,16 @@ fn randf01(rng: &mut u32) -> f32 {
 
 fn world_pos(world: &World, vm: &Vm) -> [f32; 3] {
     let mut p = [vm.pos[0] + vm.origin[0], vm.pos[1] + vm.origin[1], vm.pos[2] + vm.origin[2]];
+    if vm.inherit_position_scale {
+        let mut root = vm.parent.and_then(|id| world.get(id));
+        for _ in 0..32 {
+            let Some(next) = root.and_then(|v| v.parent).and_then(|id| world.get(id)) else { break };
+            root = Some(next);
+        }
+        if let Some(root) = root {
+            p[0] *= root.scale[0]; p[1] *= root.scale[1];
+        }
+    }
     let mut parent = vm.parent;
     let mut depth = 0;
     while let (Some(pid), true) = (parent, depth < 32) {
@@ -1258,10 +1288,14 @@ fn exec(
             return Flow::Yield;
         }
         3 => {
+            // FUN_004bd660 leaves +0x2c on the stop instruction. An interrupt return
+            // must revisit that stop, not fall through into the next interrupt handler.
+            vm.ip -= 1;
             vm.state = RunState::Stopped;
             return Flow::Yield;
         }
         4 => {
+            vm.ip -= 1;
             vm.state = RunState::Stopped;
             vm.visible = false;
             return Flow::Yield;
@@ -1417,7 +1451,8 @@ fn exec(
         303 => vm.blend = BlendMode::from_id(i!(0)),
         304 => vm.layer = i!(0),
         305 => vm.z_write_disable = i!(0) != 0,
-        306 | 307 | 311 | 312 | 313 | 314 | 315 | 316 | 317 | 318 | 319 => {} // no visual effect modelled yet
+        318 => vm.inherit_position_scale = i!(0) != 0,
+        306 | 307 | 311 | 312 | 313 | 314 | 315 | 316 | 317 | 319 => {} // no visual effect modelled yet
         308 => vm.scale[0] = -vm.scale[0],
         309 => vm.scale[1] = -vm.scale[1],
         310 => vm.visible = i!(0) != 0,
@@ -1512,9 +1547,9 @@ fn exec(
         436 => vm.anchor_offset = [f!(0), f!(1)],
 
         // --- child VMs ---
-        500..=503 => spawns.push(Spawn::Child { script: i!(0), offset: [0.0; 2] }),
+        500..=503 => spawns.push(Spawn::Child { script: i!(0), offset: [0.0; 2], vars: (vm.ivars, vm.fvars) }),
         504 => spawns.push(Spawn::Root { script: i!(0), offset: [0.0; 2] }),
-        505 | 510 => spawns.push(Spawn::Child { script: i!(0), offset: [f!(1), f!(2)] }),
+        505 | 510 => spawns.push(Spawn::Child { script: i!(0), offset: [f!(1), f!(2)], vars: (vm.ivars, vm.fvars) }),
         506 => spawns.push(Spawn::Root { script: i!(0), offset: [f!(1), f!(2)] }),
         508 if i!(0) == 1 => vm.charge = Some(Box::new(ChargeIn { timer_prev: -1, ..Default::default() })),
         508 => match Ribbon::new(i!(0)) {
@@ -1531,8 +1566,8 @@ fn exec(
         507 => {}
 
         // --- special drawing ---
-        603 => vm.primitive = Some(Primitive::Rect { w: f!(0), h: f!(1), rotated: false, gradient: false }),
-        606 => vm.primitive = Some(Primitive::Rect { w: f!(0), h: f!(1), rotated: false, gradient: true }),
+        603 => vm.primitive = Some(Primitive::Rect { w: f!(0), h: f!(1), rotated: true, gradient: false }),
+        606 => vm.primitive = Some(Primitive::Rect { w: f!(0), h: f!(1), rotated: true, gradient: true }),
         607 => vm.primitive = Some(Primitive::Rect { w: f!(0), h: f!(1), rotated: true, gradient: false }),
         608 => vm.primitive = Some(Primitive::Rect { w: f!(0), h: f!(1), rotated: true, gradient: true }),
         604 => vm.primitive = Some(Primitive::Poly { radius: f!(0), segments: i!(1), border: false }),
@@ -1744,6 +1779,9 @@ fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, camera: Option<&Camera>, out: 
 
     let ps = parent_scale(world, vm);
     if let Some(prim) = vm.primitive {
+        // Primitive draw types use rotation independently of the sprite render mode.
+        // 603/606 dispatch to 004c4d20 with the angle from 00404f70.
+        let pl = Placer { rot: [0.0, 0.0, vm.rot[2] + vm.inherited_rot], ..pl };
         let sx = vm.scale[0] * vm.scale2[0] * ps[0];
         let sy = vm.scale[1] * vm.scale2[1] * ps[1];
         let rect = |out: &mut Vec<Vertex>, x0: f32, y0: f32, x1: f32, y1: f32, l: [f32; 4], r: [f32; 4]| {
@@ -1755,12 +1793,16 @@ fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, camera: Option<&Camera>, out: 
         };
         match prim {
             Primitive::Rect { w, h, rotated, gradient } => {
-                let (hw, hh) = (w * sx * 0.5, h * sy * 0.5);
+                // Native primitive rectangles honor ANM421 anchors (004c4d20).
+                // Marisa's two halves use right/top and left/top at field y=0.
+                let (w, h) = (w * sx, h * sy);
+                let anchor = |size: f32, a: i16| match a {1 => 0.0, 2 => -size, _ => -size * 0.5};
+                let (x, y) = (anchor(w, vm.anchor[0]), anchor(h, vm.anchor[1]));
                 let (l, r) = if gradient { (c1, c2) } else { (c1, c1) };
                 if rotated {
-                    rect(out, -hw, -hh, hw, hh, l, r);
+                    rect(out, x, y, x + w, y + h, l, r);
                 } else {
-                    Placer { rot: [0.0; 3], ..pl }.quad(out, [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)], [z; 4], [l, r, r, l]);
+                    Placer { rot: [0.0; 3], ..pl }.quad(out, [(x, y), (x + w, y), (x + w, y + h), (x, y + h)], [z; 4], [l, r, r, l]);
                 }
             }
             Primitive::RectBorder { w, h } => {

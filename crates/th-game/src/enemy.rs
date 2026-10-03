@@ -66,6 +66,7 @@ pub struct EnemyData {
     pub abs: Motion,
     pub rel: Motion,
     pub flags: u32,
+    pub suppress_kill_rewards: bool,
     pub mirrored: bool,
     /// Has been inside the field (only then does leaving it delete the enemy).
     pub entered: bool,
@@ -150,10 +151,10 @@ impl Enemy {
         // FUN_00509030: ordinary enemies get movement drag; spirits switch once to
         // the disable sub registered by ECL 514. Their ECL handles HP and movement.
         if self.data.spirit_kind == 0 {
-            let drag = if self.data.flags & flag::HIDDEN == 0 && st.scope_contains(self.data.pos, self.data.hitbox[0] * 0.5) { 0.5 } else { 0.0 };
+            let drag = if self.data.flags & flag::HIDDEN == 0 && st.scope_body(&self.data) { 0.5 } else { 0.0 };
             self.data.abs.pv.drag = drag;
             self.data.rel.pv.drag = drag;
-        } else if !self.data.spirit_disabled && st.scope_contains(self.data.pos, self.data.hitbox[0] * 0.5) {
+        } else if !self.data.spirit_disabled && st.scope_body(&self.data) {
             if let Some(name) = self.data.scope_disable_sub.clone() {
                 if let Some(sub) = prog.sub(&name) {
                     let mut ctx = Context::new(sub);
@@ -647,6 +648,14 @@ impl EnemyHost<'_> {
             }
             // Line laser (case 0x8f, type 0) or infinite laser (case 0x90, type 1) at the ET's
             // origin along its first angle.
+            711 => {
+                let e=&self.e.ets[slot];
+                let origin=if e.absolute {e.offset} else {[self.e.pos[0]+e.offset[0],self.e.pos[1]+e.offset[1]]};
+                if let Some(anm)=self.st.anm_files[0] {
+                    let laser=crate::laser::Laser::new_curve(origin,e,&self.st.bullet_types,anm,self.world,self.lib,self.st.field);
+                    self.st.lasers.push(laser);
+                }
+            }
             702 | 703 => {
                 let e = &self.e.ets[slot];
                 let mut origin =
@@ -731,6 +740,13 @@ impl EnemyHost<'_> {
             }
             // 316 selects a casting animation relative to anmSetMain's base, not an interrupt.
             // FUN004fecc0 at 004ff6c5: script = base + 5 + variant; negative variant = base.
+            // 313 replaces the selected VM by main base+5 (004ff5e5).
+            313 => {
+                let slot=i!(0).max(0) as usize;
+                if let Some(main)=self.e.main {if slot<self.e.vms.len() {
+                    set_vm(self.e,self.world,self.lib,self.st.field,slot,main.file,main.base_script+5);
+                }}
+            }
             316 => {
                 let slot=i!(0).max(0) as usize; let variant=i!(1);
                 if let Some(main)=self.e.main {
@@ -739,6 +755,8 @@ impl EnemyHost<'_> {
                     if slot<self.e.vms.len() {set_vm(self.e,self.world,self.lib,self.st.field,slot,file,script);}
                 }
             }
+            336 => {let slot=i!(0).max(0) as usize;let mode=i!(1);if let Some(v)=self.e.vms.get(slot).copied().flatten().and_then(|id|self.world.get_mut(id)) {v.render_mode=mode;} }
+            1041 => self.e.suppress_kill_rewards=i!(0)!=0,
             317 => { let slot=i!(0).max(0) as usize; let label=i!(1); if let Some(id)=self.e.vms.get(slot).copied().flatten() { self.world.interrupt(id,label); } }
             319 | 329 | 330 => {
                 let slot=i!(0).max(0) as usize;
@@ -976,7 +994,7 @@ impl EnemyHost<'_> {
                 let v = f!(1 + d);
                 ctx.set_float_var(ins, 0, v, self);
             }
-            600..=620 | 700 | 701 | 702 | 703 => self.et_op(ctx, ins),
+            600..=620 | 700 | 701 | 702 | 703 | 711 => self.et_op(ctx, ins),
             // Marisa's spell clears the optional per-frame enemy callback. Table 005994f8
             // entry zero is null; nonzero callback IDs remain explicitly unsupported.
             624 if i!(0) == 0 => {},
@@ -997,6 +1015,21 @@ impl EnemyHost<'_> {
                 let p = crate::laser::ray_to_field_edge([x, y], a);
                 ctx.set_float_var(ins, 0, p[0], self);
                 ctx.set_float_var(ins, 1, p[1], self);
+            }
+            // 00505116: the request is built on a stack struct; the stores after `push` sit one
+            // dword lower than their displacement suggests, so arg0 lands at request+0xc and arg1
+            // at +0x10 (the x/y of the target, as in Ran's own 00419c00 edge cycle, which writes
+            // the same two fields). pl03.ecl passes (+-150, y) for the side edges and (x, 0/448)
+            // for top/bottom.
+            1037 => {
+                let (x,y)=(f!(0),f!(1));
+                let character=crate::character::Character::Ran;
+                let req=crate::reflect::Request {kind:44,color:1,speed:0.0,origin:self.st.opponent_pos,
+                    target:Some([x,y]),special_rank:Some(self.e.script_rank.unwrap_or(self.st.incoming_extra_level) as i32),
+                    owner:self.e.owner,script:Some(14),tangents:None,aim_player:false};
+                let field=self.st.field;let source=[640.0-field[0]-field[2],field[1],field[2],field[3]];
+                let pending=crate::reflect::Pending::new_character(req,source,self.st,character);
+                self.st.pending_reflects.push(pending);
             }
             1023 => self.st.wave_param = i!(0),
             // FUN_004fecc0 case b4: set internal type, clear disabled bit 0x80000.

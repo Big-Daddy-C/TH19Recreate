@@ -832,6 +832,8 @@ fn explosions_cancel_small_bullets_and_send_them_to_the_opponent() {
     put_bullet(&mut g, 1, 1, 2, [at[0] - 6.0, at[1]], true);
     put_bullet(&mut g, 1, 5, 2, [at[0], at[1] + 6.0], false);
     put_bullet(&mut g, 1, 0, 1, [at[0] + 130.0, at[1]], false);
+    // Cancellation adds hits but no time: start an active chain for this assertion.
+    g.sides[1].st.chain_timer = 60;
     let chain_before = g.sides[1].st.chain;
     g.sides[1].enemies.iter_mut().find(|e| e.data.sub == "GhostPure").unwrap().data.killed = true;
     for _ in 0..25 { g.tick([0; 2]); }
@@ -1065,32 +1067,57 @@ fn bot_bombs_when_every_move_is_hit() {
 }
 
 
-/// A chain of two or more shows the combo counter ("N hits", yellow) with the original's
-/// text object; it stays after the chain ends, blinking gray, and only a larger chain raises it.
+/// Native HUD: latch a record, flash after reward expiry, then clear at display expiry.
 #[test]
-fn combo_counter_shows_the_best_chain_and_blinks_after_it_ends() {
+fn combo_counter_flashes_after_chain_expiry_then_clears_at_display_expiry() {
     let Some(mut g) = setup() else { return };
     assert!(g.sides[0].st.ascii_anm.is_some());
-    for _ in 0..5 { g.tick([0; 2]); }
-    assert_eq!(g.sides[0].st.combo_shown, 0);
-    let base = g.sides[0].st.combo_vms.len();
+    let color = |g: &Game| g.world.get(g.sides[0].st.combo_vms[0]).unwrap().color;
     g.sides[0].st.chain = 14;
-    g.sides[0].st.chain_timer = 20;
+    g.sides[0].st.chain_timer = 3;
     g.tick([0; 2]);
     assert_eq!(g.sides[0].st.combo_shown, 14);
-    assert_eq!(g.sides[0].st.combo_vms.len(), base + 2 + 4, "two digits and 'hits'");
-    // While the chain timer runs the colour stays yellow; afterwards it blinks.
-    let color = |g: &Game| g.world.get(g.sides[0].st.combo_vms[0]).unwrap().color;
+    assert_eq!(g.sides[0].st.combo_vms.len(), 6);
+    assert_eq!(g.sides[0].st.combo_timer, 120);
     assert_eq!(color(&g), [255.0, 255.0, 0.0]);
-    for _ in 0..30 { g.tick([0; 2]); }
-    assert_eq!(g.sides[0].st.chain, 0);
-    assert_eq!(g.sides[0].st.combo_shown, 14, "stays up");
-    let seen: std::collections::HashSet<i32> = (0..12).map(|_| { g.tick([0; 2]); color(&g)[0] as i32 }).collect();
-    assert!(seen.contains(&128) && seen.contains(&255), "{seen:?}");
-    g.sides[0].st.chain = 20;
+    g.tick([0; 2]);
+    assert_eq!(g.sides[0].st.combo_timer, 119);
+    assert_eq!(color(&g), [255.0, 255.0, 0.0], "active chains stay yellow");
+    g.tick([0; 2]);
+    assert_eq!((g.sides[0].st.chain, g.sides[0].st.chain_timer), (0, 0));
+    assert_eq!(g.sides[0].st.combo_shown, 14, "HUD tail does not retain reward hits");
+    for _ in 0..12 {
+        let timer = g.sides[0].st.combo_timer;
+        let expected = if timer % 6 < 3 { [255.0, 255.0, 0.0] } else { [128.0; 3] };
+        assert_eq!(color(&g), expected, "native three-frame color phase at {timer}");
+        assert_eq!(g.sides[0].st.chain, 0);
+        g.tick([0; 2]);
+    }
+    // A smaller fresh chain has independent rewards, but cannot replace the latched record.
+    g.sides[0].st.chain = 2;
+    g.sides[0].st.chain_timer = 2;
+    g.tick([0; 2]);
+    assert_eq!(g.sides[0].st.combo_shown, 14);
+    assert_eq!(color(&g), [255.0, 255.0, 0.0]);
+    while g.sides[0].st.combo_timer > 1 { g.tick([0; 2]); }
+    let old_glyphs = g.sides[0].st.combo_vms.clone();
+    g.tick([0; 2]);
+    assert_eq!(g.sides[0].st.combo_shown, 0);
+    assert_eq!(g.sides[0].st.combo_timer, 0);
+    assert!(g.sides[0].st.combo_vms.is_empty());
+    assert!(old_glyphs.iter().all(|&id| g.world.get(id).is_none()));
+    g.sides[0].st.chain = 2;
     g.sides[0].st.chain_timer = 10;
     g.tick([0; 2]);
-    assert_eq!(g.sides[0].st.combo_shown, 20);
+    assert_eq!(g.sides[0].st.combo_shown, 2);
+    // A larger chain refreshes the native 120-frame display timer.
+    g.sides[0].st.chain = 3;
+    g.tick([0; 2]);
+    assert_eq!(g.sides[0].st.combo_shown, 3);
+    assert_eq!(g.sides[0].st.combo_timer, 120);
+    g.sides[0].dev_clear(&mut g.world);
+    assert_eq!((g.sides[0].st.chain, g.sides[0].st.combo_shown), (0, 0));
+    assert!(g.sides[0].st.combo_vms.is_empty());
 }
 
 /// Bullets passing within the graze ring give one orb each; collecting an orb adds 15 meter.
@@ -1407,4 +1434,238 @@ fn marisa_bomb_is_a_full_height_column() {
     assert!(g.sides[0].player.as_ref().unwrap().invuln >= 30, "protected");
     for _ in 0..400 { g.tick([0, 0]); }
     assert!(g.sides[0].player.as_ref().unwrap().bomb.is_none(), "over");
+}
+
+/// Column scripts use field-top origins and opposite horizontal anchors, on either field.
+#[test]
+fn marisa_scope_and_bomb_draw_full_height_at_any_player_y() {
+    let Some(g) = setup() else { return };
+    let home = std::env::var_os("USERPROFILE").unwrap();
+    let mut dat = Archive::open(std::path::PathBuf::from(home).join("Downloads/th19/th19/th19.dat")).unwrap();
+    let mut lib = g.lib;
+    let file = lib.load("pl01.anm", &dat.read("pl01.anm").unwrap()).unwrap();
+    for field in FIELDS {
+        for y in [64.0, 420.0] {
+            let mut world = World::default();
+            let mut scope = th_game::scope::Scope::default();
+            for _ in 0..22 {
+                scope.update(true, true, [25.0, y], file, &mut world, &lib, field);
+                world.tick(&lib);
+            }
+            let bounds = |world: &World| {
+                let list = world.draw_list(&lib, th_anm::Pass::Ui);
+                let vertices: Vec<_> = list.iter().filter(|b| b.texture.is_none()).flat_map(|b| &b.vertices).collect();
+                assert!(!vertices.is_empty());
+                [vertices.iter().map(|v| v.pos[0]).fold(f32::INFINITY, f32::min),
+                 vertices.iter().map(|v| v.pos[1]).fold(f32::INFINITY, f32::min),
+                 vertices.iter().map(|v| v.pos[0]).fold(f32::NEG_INFINITY, f32::max),
+                 vertices.iter().map(|v| v.pos[1]).fold(f32::NEG_INFINITY, f32::max)]
+            };
+            let b = bounds(&world);
+            assert_eq!((b[1], b[3]), (field[1], field[1]+448.0));
+            let x = th_game::enemy::field_to_canvas(field, [25.0, 0.0])[0];
+            assert!((b[0]-(x-14.0)).abs()<0.01 && (b[2]-(x+14.0)).abs()<0.01);
+            scope.update(false, true, [25.0,y], file, &mut world, &lib, field);
+            let mut bomb = th_game::bomb::Bomb::new_marisa([25.0,y],2500,file,&mut world,&lib,field);
+            for _ in 0..30 {
+                bomb.tick([90.0, y], &mut world, field, &mut Vec::new(), &mut Vec::new(), &mut Vec::new());
+                world.tick(&lib);
+            }
+            let b = bounds(&world);
+            assert_eq!((b[1], b[3]), (field[1], field[1]+448.0));
+            assert!(((b[0]+b[2])*0.5-x).abs()<0.01, "bomb retains native launch x");
+        }
+    }
+}
+
+/// Scope presentation is shared across the two supported characters and both fields.
+#[test]
+fn scoped_bullets_tint_progressively_and_restore_when_scope_ends() {
+    for marisa in [false,true] {
+        for side in 0..2 {
+            let Some(mut g) = setup() else { return };
+            if marisa { use_marisa(&mut g, side); }
+            let mut keys = [0;2]; keys[side] = input::CHARGE;
+            for _ in 0..22 { g.tick(keys); }
+            let pos = g.sides[side].player.as_ref().unwrap().pos;
+            put_bullet(&mut g, side, 0, 1, [pos[0],pos[1]-35.0], false);
+            for frame in 1..=65 {
+                g.tick(keys);
+                let b = &g.sides[side].st.bullets[0];
+                assert_eq!(b.scope_frames,frame);
+                assert_eq!(b.scope_time_scale,0.5);
+                let vm = g.world.get(b.vm.unwrap()).unwrap();
+                assert_eq!(vm.color_mode,1);
+                assert_eq!(vm.color2,[255.0,((104-frame)*2).clamp(96,255) as f32,128.0]);
+            }
+            g.tick([0;2]);
+            let b = &g.sides[side].st.bullets[0];
+            assert_eq!(b.scope_frames,0);
+            assert_eq!(b.scope_time_scale,1.0);
+            assert_eq!(g.world.get(b.vm.unwrap()).unwrap().color_mode,0);
+        }
+    }
+}
+
+fn use_next_character(g: &mut Game, side: usize, character: th_game::character::Character) {
+    let path=std::path::PathBuf::from(std::env::var_os("USERPROFILE").unwrap()).join("Downloads/th19/th19/th19.dat");
+    let mut dat=Archive::open(path).unwrap();
+    let prefix=character.prefix();
+    let prog=th_ecl::Program::load(&format!("{prefix}.ecl"),|name|dat.read(name).ok()).unwrap();
+    let mut set=g.sides[side].st.anm_files;
+    for (i,name) in prog.files[0].1.anim.iter().enumerate() {
+        set[i+2]=Some(match g.lib.file_id(name) {Some(id)=>id,None=>g.lib.load(name,&dat.read(name).unwrap()).unwrap()});
+    }
+    for s in &mut g.sides {s.st.anm_sets[side]=set;}
+    g.prog[side]=prog;
+    let name=format!("{prefix}.anm");
+    let file=g.lib.load(&name,&dat.read(&name).unwrap()).unwrap();
+    let mut p=Player::new(ShtFile::parse(&dat.read(&format!("{prefix}.sht")).unwrap()).unwrap(),file);
+    p.character=character;p.state=State::Normal;p.free_charge=true;p.godmode=true;
+    p.effect_anm=g.sides[side].st.anm_files[1];
+    g.sides[side].player=Some(p);
+}
+
+#[test]
+fn sanae_and_ran_native_scope_growth_and_shape() {
+    use th_game::character::Character;
+    for (character,frames,size) in [(Character::Sanae,60,128.0),(Character::Ran,30,30.0)] {
+        let Some(mut g)=setup() else{return};use_next_character(&mut g,0,character);
+        for _ in 0..frames {g.tick([input::CHARGE,0]);}
+        let p=g.sides[0].player.as_ref().unwrap();
+        assert!((p.scope.radius-size).abs()<0.001,"{} radius{}",character.name(),p.scope.radius);
+        let pos=p.pos;
+        let vm=g.world.get(p.scope.vm.unwrap()).unwrap();
+        assert_eq!(vm.file,p.anm_file);
+        if character==Character::Sanae {
+            assert_eq!(vm.scale,[128.0,1.0]);
+            assert!(g.sides[0].st.scope_bullet([pos[0]+130.0,pos[1]],3.0));
+            assert!(!g.sides[0].st.scope_bullet([pos[0]+132.0,pos[1]],3.0));
+        } else {
+            assert_eq!(vm.scale,[30.0;2]);
+            assert!(g.sides[0].st.scope_bullet([pos[0]+100.0,pos[1]],1.0));
+            assert!(g.sides[0].st.scope_bullet([pos[0],pos[1]-100.0],1.0));
+            assert!(!g.sides[0].st.scope_bullet([pos[0]+25.0,pos[1]-25.0],1.0));
+        }
+    }
+}
+
+#[test]
+fn sanae_and_ran_native_charge_and_skill_durations() {
+    use th_game::character::Character;
+    for character in [Character::Sanae,Character::Ran] {
+        let Some(mut g)=setup() else{return};use_next_character(&mut g,0,character);
+        g.sides[0].player.as_mut().unwrap().instant_charge(Level::Skill);
+        let mut max_bullets=0;
+        for _ in 0..70 {
+            g.tick([0;2]);
+            let p=g.sides[0].player.as_ref().unwrap();max_bullets=max_bullets.max(p.bullets.len());
+        }
+        assert!(max_bullets>10,"{} skill fires original slot11",character.name());
+        let p=g.sides[0].player.as_ref().unwrap();
+        if character==Character::Ran {
+            assert_eq!(p.power,400);
+            for _ in 0..530 {g.tick([0;2]);}
+            assert_eq!(g.sides[0].player.as_ref().unwrap().power,400);
+            g.tick([0;2]);assert_eq!(g.sides[0].player.as_ref().unwrap().power,200);
+        }
+    }
+}
+
+#[test]
+fn sanae_and_ran_bombs_use_launch_position_and_native_shapes() {
+    use th_game::character::Character;
+    for (character,duration,size) in [(Character::Sanae,320,352.0),(Character::Ran,300,96.0)] {
+        let Some(mut g)=setup() else{return};use_next_character(&mut g,0,character);
+        g.tick([input::BOMB,0]);
+        let p=g.sides[0].player.as_ref().unwrap();
+        assert_eq!(p.bomb.as_ref().unwrap().progress().1,duration);
+        let centre=p.pos;
+        for _ in 0..duration-2 {g.tick([input::RIGHT,0]);}
+        let p=g.sides[0].player.as_ref().unwrap();
+        assert!((p.bomb.as_ref().unwrap().current_radius-size).abs()<0.02);
+        if character==Character::Sanae {assert_eq!(p.cancel_circles[0].0,centre);} else {
+            assert_eq!(p.cancel_rects.len(),2);assert_eq!(p.cancel_rects[0].0,centre);
+            assert!((p.cancel_rects[0].1[0]-size*7.0).abs()<0.1);
+        }
+    }
+}
+
+#[test]
+fn sanae_and_ran_send_original_special_extra_and_boss_programs() {
+    use th_game::character::Character;
+    for character in [Character::Sanae,Character::Ran] {
+        for rank in 0..8 {
+            for level in [Level::Extra,Level::Boss] {
+                let Some(mut g)=setup() else{return};use_next_character(&mut g,0,character);
+                g.sides[1].player.as_mut().unwrap().godmode=true;
+                g.sides[0].st.extra_level=rank;g.sides[0].st.boss_level=rank;
+                g.sides[0].player.as_mut().unwrap().instant_charge(level);
+                let mut maximum=0;let mut hp=0;
+                for _ in 0..500 {
+                    g.tick([0;2]);maximum=maximum.max(g.sides[1].st.bullets.len()+g.sides[1].st.lasers.len()+g.sides[1].enemies.iter().filter(|e|e.data.sub=="ExAttack").count());
+                    if let Some(e)=g.sides[1].enemies.iter().find(|e|e.data.sub=="Boss00Boss") {hp=hp.max(e.data.hp);}
+                }
+                assert!(maximum>0,"{} {:?} rank{} produces its attack",character.name(),level,rank);
+                assert!(g.sides[1].st.unknown_ops.keys().all(|op|matches!(*op,516|524|527|534)),
+                    "{} {:?} unknown gameplay opcodes {:?}",character.name(),level,g.sides[1].st.unknown_ops);
+                if level==Level::Boss {assert_eq!(hp,match rank {0|1=>5000,2|3=>1500,_=>6500});}
+            }
+        }
+        let Some(mut g)=setup() else{return};use_next_character(&mut g,0,character);
+        g.sides[0].st.special_counter=if character==Character::Ran {65} else {90};
+        g.sides[0].st.last_special_pos=[0.0,200.0];dispatch_charges(&mut g.sides);
+        assert_eq!(g.sides[1].st.pending_reflects.len(),1);
+        let mut spawned=false;
+        for _ in 0..200 {
+            g.tick([0;2]);
+            spawned|=g.sides[1].enemies.iter().any(|e|e.data.sub=="ExAttack" && e.data.owner==0) || !g.sides[1].st.lasers.is_empty();
+        }
+        assert!(spawned,"{} special arrivals use ExAttack",character.name());
+        assert!(g.sides[1].st.unknown_ops.is_empty());
+    }
+}
+
+/// pl03.ecl op 1037 passes (x, y) of the target (00505116 stores arg0 at request+0xc and arg1 at
+/// +0x10): every talisman Ran's EX / boss programs send lands on the opponent field's edge.
+#[test]
+fn ran_ex_talismans_target_the_opponent_field_edges() {
+    use th_game::character::Character;
+    for rank in 0..8 {
+        for level in [Level::Extra,Level::Boss] {
+            let Some(mut g)=setup() else{return};use_next_character(&mut g,0,Character::Ran);
+            g.sides[1].player.as_mut().unwrap().godmode=true;
+            g.sides[0].st.extra_level=rank;g.sides[0].st.boss_level=rank;
+            g.sides[0].player.as_mut().unwrap().instant_charge(level);
+            let mut seen=0;
+            for _ in 0..500 {
+                g.tick([0;2]);
+                for p in &g.sides[1].st.pending_reflects {
+                    let ([x,y],fresh)=p.landing();
+                    if !fresh || !p.is_special() {continue;}
+                    seen+=1;
+                    assert!(x.abs()>=130.0||y<=0.5||y>=447.5,"rank{rank} {level:?} target ({x},{y}) is not on an edge");
+                }
+            }
+            if level==Level::Extra {assert!(seen>0,"rank{rank} sends talismans");}
+        }
+    }
+}
+
+/// Original pl03 ANM11 copies four different parent angles and scales its offsets.
+#[test]
+fn ran_scope_draws_four_native_cross_arms() {
+    let Some(mut g)=setup() else{return};
+    use_next_character(&mut g,0,th_game::character::Character::Ran);
+    for _ in 0..30 {g.tick([input::CHARGE,0]);}
+    let p=g.sides[0].player.as_ref().unwrap();
+    let at=th_game::enemy::field_to_canvas(FIELDS[0],p.pos);
+    let list=g.world.draw_list(&g.lib,th_anm::Pass::Ui);
+    let vertices:Vec<_>=list.iter().filter(|b| b.texture.is_none() && b.layer==6).flat_map(|b| &b.vertices).collect();
+    assert!(!vertices.is_empty());
+    for axis in 0..2 {
+        let lo=vertices.iter().map(|v|v.pos[axis]-at[axis]).fold(f32::INFINITY,f32::min);
+        let hi=vertices.iter().map(|v|v.pos[axis]-at[axis]).fold(f32::NEG_INFINITY,f32::max);
+        assert!((lo+105.0).abs()<0.02 && (hi-105.0).abs()<0.02,"axis{axis}: {lo}..{hi}");
+    }
 }

@@ -9,7 +9,7 @@
 //!   until both ends are off the field (`FUN_0052e0c0`), at full width from the start.
 //!
 //! Circle/rectangle cancellation cuts 16-pixel sections and preserves the surviving pieces.
-//! Curve and beam lasers and laser Ex programs are not yet ported.
+//! Curved lasers execute analytical path commands (00525d50/005274f0). Beam lasers remain unported.
 use th_anm::{AnmLibrary, VmId, World};
 use th_formats::exe::BulletType;
 
@@ -39,6 +39,7 @@ pub struct LaserEt {
 pub enum Kind {
     Infinite,
     Line,
+    Curve,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -46,6 +47,7 @@ pub enum CancelArea {
     All,
     Circle { pos: [f32; 2], radius: f32 },
     Column { x: f32, half_width: f32 },
+    Rect { pos: [f32;2], size: [f32;2] },
 }
 
 pub struct CancelContext<'a> {
@@ -96,6 +98,7 @@ pub struct Laser {
     sprite_type: i32,
     color: i32,
     vm: Option<VmId>,
+    curve: Option<Curve>,
 }
 
 /// What a laser did to the player this frame.
@@ -162,12 +165,14 @@ impl Laser {
             sprite_type,
             color,
             vm,
+            curve: None,
         }
     }
 
     /// One frame. Returns false when the laser is over.
     pub fn update(&mut self, world: &mut World, field: [f32; 4]) -> bool {
         if self.invuln > 0 { self.invuln -= 1; }
+        if self.kind == Kind::Curve { return self.update_curve(world, field); }
         if self.kind == Kind::Line {
             return self.update_line(world, field);
         }
@@ -259,6 +264,7 @@ impl Laser {
     /// Returns whether the original survives, plus newly detached line lasers.
     pub fn cancel(&mut self, area: CancelArea, respect_invuln: bool, ctx: &mut CancelContext<'_>) -> (bool, Vec<Self>) {
         if respect_invuln && self.invuln != 0 { return (true, Vec::new()); }
+        if self.kind == Kind::Curve { return self.cancel_curve(area,ctx); }
         let strict_end = matches!(area, CancelArea::All)
             || (self.kind == Kind::Infinite && matches!(area, CancelArea::Circle { .. }));
         let (s, c) = self.angle.sin_cos();
@@ -272,6 +278,7 @@ impl Laser {
                 CancelArea::Circle { pos, radius } => (at[0]-pos[0]).powi(2)+(at[1]-pos[1]).powi(2) <= radius*radius,
                 // The original rectangle test uses the projected 16-pixel step as the local
                 // rectangle dimensions (0052d350/0052a970), not the displayed beam width.
+                CancelArea::Rect {pos,size} => rect_rect(at,[16.0*c,16.0*s],self.angle,pos,size),
                 CancelArea::Column { x, half_width } => rect_rect(
                     at, [16.0*c, 16.0*s], self.angle, [x, 224.0], [2.0*half_width, 448.0]),
             };
@@ -280,7 +287,7 @@ impl Laser {
                 let script = match self.sprite_type {
                     0..=17 | 34 | 38 => Some(212 + self.color*2),
                     // The line-rectangle callback uses <31 here; the other callbacks use <32.
-                    31 if self.kind == Kind::Line && matches!(area, CancelArea::Column { .. }) => Some(284 + self.color*2),
+                    31 if self.kind == Kind::Line && matches!(area, CancelArea::Column { .. } | CancelArea::Rect { .. }) => Some(284 + self.color*2),
                     18..=31 => Some(260 + self.color*2),
                     32..=33 => Some(284 + self.color*2),
                     _ => None,
@@ -370,6 +377,19 @@ impl Laser {
     /// `FUN_00549570`: against the player's hit circle (`hit` radius) with the graze ring 30
     /// pixels wider.
     pub fn contact(&mut self, player: [f32; 2], hit: f32) -> Contact {
+        if let Some(curve)=&self.curve {
+            let mut accumulated=0.0; let mut graze=false;
+            for n in curve.nodes.iter().take(curve.nodes.len().saturating_sub(1)) {
+                accumulated+=n.speed; if accumulated<16.0 {continue;}
+                // 005279d0 adds half a node velocity plus half the initial heading velocity.
+                let centre=[n.pos[0]+(n.angle.cos()+self.angle.cos())*n.speed*0.5,
+                    n.pos[1]+(n.angle.sin()+self.angle.sin())*n.speed*0.5];
+                let size=[n.speed*1.1,self.width*0.5*curve.hit_scale];
+                if rect_circle(centre,size,n.angle,player,hit) {return Contact::Hit;}
+                graze |= rect_circle(centre,size,n.angle,player,hit+30.0);
+            }
+            return if graze {Contact::Graze} else {Contact::None};
+        }
         let Some((centre, len, width, angle)) = self.hit_rect() else {
             self.graze = 0;
             return Contact::None;
@@ -389,6 +409,15 @@ impl Laser {
     /// Whether a graze this frame earns an orb: every 8th frame of the laser's life.
     pub fn graze_tick(&self) -> bool {
         self.age % 8 == 0
+    }
+
+    /// Where the graze effect appears (`FUN_004d3580`): the closest point of the hit segment to
+    /// the player. Curved lasers use the player's position (their segment test is per node).
+    pub fn graze_point(&self, player: [f32; 2]) -> [f32; 2] {
+        match (&self.curve, self.hit_rect()) {
+            (None, Some((centre, len, _, angle))) => crate::graze::closest_on_segment(centre, len, angle, player),
+            _ => player,
+        }
     }
 
     pub fn delete(&mut self, world: &mut World) {
@@ -426,7 +455,7 @@ pub fn ray_to_field_edge(from: [f32; 2], angle: f32) -> [f32; 2] {
 }
 
 /// SAT equivalent of the game's rotated rectangle overlap (004d2c30).
-fn rect_rect(a: [f32; 2], size: [f32; 2], angle: f32, b: [f32; 2], box_size: [f32; 2]) -> bool {
+pub(crate) fn rect_rect(a: [f32; 2], size: [f32; 2], angle: f32, b: [f32; 2], box_size: [f32; 2]) -> bool {
     let (s,c) = angle.sin_cos();
     let axes = [[1.0,0.0], [0.0,1.0], [c,s], [-s,c]];
     for [x,y] in axes {
@@ -533,6 +562,7 @@ mod tests {
             sprite_type: 38,
             color: 6,
             vm: None,
+            curve: None,
         }
     }
 
@@ -572,5 +602,158 @@ mod tests {
         assert_eq!(l.contact([60.0, 300.0], 3.0), Contact::None);
         // Behind its start (the beam points up from y = 400).
         assert_eq!(l.contact([0.0, 450.0], 3.0), Contact::None);
+    }
+}
+
+// LaserCurveInf path nodes: +8/+c absolute frame interval, +20 position,
+// +2c heading, +30 speed, +34/+38 speed/angular acceleration (00415c60).
+#[derive(Clone, Copy)]
+struct PathSample { pos: [f32;2], angle: f32, speed: f32 }
+#[derive(Clone)]
+struct PathSegment { start: f32, end: f32, initial: PathSample, accel: f32, turn: f32 }
+impl PathSegment {
+    fn sample(&self, time:f32)->PathSample {
+        let t=(time-self.start).max(0.0);
+        let mut n=self.initial;
+        if self.accel==0.0 && self.turn==0.0 {n.pos[0]+=n.angle.cos()*n.speed*t;n.pos[1]+=n.angle.sin()*n.speed*t;return n;}
+        // 005274f0 mode2 integrates whole ticks, then the remaining fraction.
+        for _ in 0..t.floor() as usize {
+            n.pos[0]+=n.angle.cos()*n.speed;n.pos[1]+=n.angle.sin()*n.speed;
+            n.angle=crate::motion::wrap_angle(n.angle+self.turn);n.speed+=self.accel;
+        }
+        n.pos[0]+=n.angle.cos()*n.speed*t.fract();n.pos[1]+=n.angle.sin()*n.speed*t.fract();n
+    }
+}
+#[derive(Clone)]
+struct Curve { path:Vec<PathSegment>, nodes:Vec<PathSample>, hit_scale:f32 }
+impl Curve {
+    fn sample(&self,t:f32)->PathSample {
+        if t<0.0 {return self.path[0].initial;}
+        self.path.iter().find(|p|p.start<=t && t<p.end).unwrap_or_else(||self.path.last().unwrap()).sample(t)
+    }
+}
+impl Laser {
+    /// ECL711 -> LaserCurveInf, 005286c0 initialization and 00525d50 Ex path setup.
+    pub fn new_curve(origin:[f32;2],et:&crate::bullet::Et,types:&[BulletType],anm:usize,
+        world:&mut World,lib:&AnmLibrary,field:[f32;4])->Self {
+        let origin=[origin[0]+et.angle[0].cos()*et.distance,origin[1]+et.angle[0].sin()*et.distance];
+        let mut l=Self::new(Kind::Line,origin,et.angle[0],et.speed[0],et.sprite,et.color,&et.laser,types,anm,world,lib,field);
+        l.delete(world);l.kind=Kind::Curve;l.width=et.laser.width;l.offscreen_grace=30;
+        let initial=PathSample {pos:origin,angle:et.angle[0],speed:et.speed[0]};
+        let mut path=vec![PathSegment {start:0.0,end:999999.0,initial,accel:0.0,turn:0.0}];
+        for e in &et.ex {
+            match e.kind {
+                0=>break,
+                crate::bullet::ex::INVULN=>l.invuln=e.a,
+                crate::bullet::ex::ANGLE_ACCEL=>{
+                    let start=e.b as f32;
+                    let last=path.last_mut().unwrap();
+                    let initial=last.sample(start);last.end=start;
+                    let end=if e.a<0 {999999.0} else {start+e.a as f32};
+                    let segment=PathSegment {start,end,initial,accel:e.r,turn:e.s};
+                    let finish=segment.sample(end.min(start+e.a.max(0) as f32));
+                    path.push(segment);
+                    if e.a>=0 {path.push(PathSegment {start:end,end:999999.0,initial:finish,accel:0.0,turn:0.0});}
+                }
+                other=>eprintln!("unported curved laser Ex {other:#x}"),
+            }
+        }
+        let script=match et.sprite {1=>325,2=>11,n=>n+145};
+        let remap=types.get(et.sprite.max(0) as usize).map(|t|t.colours[et.color.clamp(0,15) as usize]);
+        let id=if let Some(remap)=remap {world.spawn_remapped(lib,anm,script as usize,field_to_canvas(field,origin),field,remap)}
+            else {world.spawn_clipped(lib,anm,script as usize,field_to_canvas(field,origin),field)};
+        // Sprite callback3 (00530f00) ignores the script sprite and returns color+524.
+        if et.sprite!=1 && et.sprite!=2 {if let Some(v)=world.get_mut(id) {v.sprite=et.color+524;}}
+        world.interrupt(id,2);world.set_draw_priority(id,DRAW_PRIORITY);
+        if let Some(v)=world.get_mut(id) {v.visible=false;}
+        l.vm=Some(id);
+        l.curve=Some(Curve {path,nodes:vec![initial;et.laser.times[0].max(2) as usize],hit_scale:if et.sprite==2 {0.55} else {1.1}});
+        l
+    }
+    fn update_curve(&mut self,world:&mut World,_field:[f32;4])->bool {
+        self.age+=1;
+        let c=self.curve.as_mut().unwrap();
+        for i in 0..c.nodes.len() {c.nodes[i]=c.sample(self.age as f32-i as f32);}
+        self.pos=c.nodes[0].pos;
+        if let Some(v)=self.vm.and_then(|id|world.get_mut(id)) {v.visible=false;}
+        if self.offscreen_grace>0 {self.offscreen_grace-=1;return true;}
+        !c.nodes.iter().all(|n|n.pos[0]+self.width<=-148.0 || n.pos[0]-self.width>=148.0 || n.pos[1]+self.width<=0.0 || n.pos[1]-self.width>=448.0)
+    }
+    /// 00526990: textured triangle strip with averaged normals at interior nodes.
+    pub fn curve_batch(&self,world:&World,lib:&AnmLibrary,field:[f32;4])->Option<th_anm::DrawBatch> {
+        let curve=self.curve.as_ref()?;let vm=world.get(self.vm?)?;
+        let sp=lib.files.get(vm.file)?.sprites.get(vm.sprite.max(0) as usize)?;
+        let color=[vm.color[0]/255.0,vm.color[1]/255.0,vm.color[2]/255.0,vm.alpha/255.0];
+        let mut strip=Vec::new();let [u0,v0,u1,v1]=sp.uv;
+        for (i,n) in curve.nodes.iter().enumerate() {
+            let angle=if i==0 {n.angle} else {n.angle+crate::motion::wrap_angle(curve.nodes[i-1].angle-n.angle)*0.5};
+            let at=field_to_canvas(field,n.pos);let w=self.width*0.5;
+            let uvx=u0+(u1-u0)*i as f32/(curve.nodes.len()-1) as f32;
+            strip.push([th_anm::Vertex {pos:[at[0]-angle.sin()*w,at[1]+angle.cos()*w],uv:[uvx,v0],color,w:1.0,fog:0.0,depth:0.0},
+                th_anm::Vertex {pos:[at[0]+angle.sin()*w,at[1]-angle.cos()*w],uv:[uvx,v1],color,w:1.0,fog:0.0,depth:0.0}]);
+        }
+        let mut vertices=Vec::new();for n in strip.windows(2) {vertices.extend([n[0][0],n[0][1],n[1][0],n[1][0],n[0][1],n[1][1]]);}
+        Some(th_anm::DrawBatch {texture:Some(sp.texture),blend:vm.blend,depth:th_anm::DepthMode::Off,layer:DRAW_PRIORITY,clip:Some(field),vertices})
+    }
+    fn cancel_curve(&mut self,area:CancelArea,ctx:&mut CancelContext<'_>)->(bool,Vec<Self>) {
+        let curve=self.curve.as_ref().unwrap();
+        let mask:Vec<_>=curve.nodes.iter().map(|n|match area {
+            CancelArea::All=>true,
+            CancelArea::Circle {pos,radius}=>(n.pos[0]-pos[0]).powi(2)+(n.pos[1]-pos[1]).powi(2)<=radius*radius,
+            CancelArea::Rect {pos,size}=>crate::scope::rect_circle(pos,size,n.pos,0.0),
+            CancelArea::Column {x,half_width}=>(n.pos[0]-x).abs()<=half_width,
+        }).collect();
+        if !mask.iter().any(|&x|x) {return (true,Vec::new());}
+        let mut runs=Vec::new();let mut i=0;
+        while i<mask.len() {if mask[i] {i+=1;continue;}let first=i;while i<mask.len()&&!mask[i] {i+=1;}
+            if i-first>3 {runs.push((first,i));}}
+        // 00525270 discards surviving runs shorter than four nodes and splits at cut nodes.
+        let Some((first,end))=runs.first().copied() else {return (false,Vec::new());};
+        let original=curve.clone();let age=self.age;
+        let mut fragments=Vec::new();
+        for &(start,end) in runs.iter().skip(1) {
+            let et=crate::bullet::Et {sprite:self.sprite_type,color:self.color,angle:[self.angle,0.0],speed:[self.grow,0.0],
+                laser:LaserEt {width:self.width,times:[(end-start) as i32,0,0,0],..Default::default()},..Default::default()};
+            let mut fragment=Self::new_curve(self.pos,&et,ctx.types,ctx.anm,ctx.world,ctx.lib,ctx.field);
+            fragment.curve=Some(Curve {nodes:original.nodes[start..end].to_vec(),..original.clone()});
+            fragment.age=age-start as i32;fragment.invuln=self.invuln;fragments.push(fragment);
+        }
+        self.curve=Some(Curve {nodes:original.nodes[first..end].to_vec(),..original});self.age=age-first as i32;
+        (true,fragments)
+    }
+}
+
+#[cfg(test)]
+mod curve_tests {
+    use super::*;
+    #[test]
+    fn native_curve_path_uses_absolute_times_and_discrete_integration() {
+        let initial=PathSample {pos:[0.0;2],angle:std::f32::consts::FRAC_PI_2,speed:0.0};
+        let ramp=PathSegment {start:0.0,end:40.0,initial,accel:0.1,turn:0.0};
+        let a=ramp.sample(40.0);
+        assert!((a.pos[1]-78.0).abs()<0.001);assert!((a.speed-4.0).abs()<0.001);
+        let straight=PathSegment {start:40.0,end:130.0,initial:a,accel:0.0,turn:0.0};
+        let b=straight.sample(130.0);assert!((b.pos[1]-438.0).abs()<0.002);
+        let slow=PathSegment {start:130.0,end:140.0,initial:b,accel:-0.4,turn:0.0};
+        let c=slow.sample(140.0);assert!(c.speed.abs()<0.001);assert!((c.pos[1]-460.0).abs()<0.002);
+        let turn=PathSegment {start:140.0,end:148.0,initial:c,accel:0.0,turn:std::f32::consts::PI/16.0};
+        assert!((turn.sample(148.0).angle.abs()-std::f32::consts::PI).abs()<0.001);
+    }
+    #[test]
+    fn original_sanae_ex_uses_laser_gradient_color_and_native_tail_length() {
+        let mut w=World::default();let lib=AnmLibrary::default();
+        let et=crate::bullet::Et {color:6,speed:[0.0;2],laser:LaserEt {width:24.0,times:[32,-1,-1,-1],..Default::default()},
+            ex:std::array::from_fn(|i|if i==0 {crate::bullet::Ex {kind:0x80,a:300,..Default::default()}}
+                else if i==1 {crate::bullet::Ex {kind:8,a:40,b:0,r:0.1,asynchronous:true,..Default::default()}}
+                else {Default::default()}),..Default::default()};
+        let mut l=Laser::new_curve([0.0;2],&et,&[],0,&mut w,&lib,[0.0;4]);
+        for _ in 0..40 {l.update(&mut w,[0.0;4]);}
+        assert_eq!(l.invuln,260);assert_eq!(l.curve.as_ref().unwrap().nodes.len(),32);
+        assert!((l.pos[0]-78.0).abs()<0.001);
+        assert_eq!(w.get(l.vm.unwrap()).unwrap().sprite,530);
+        assert!(!w.get(l.vm.unwrap()).unwrap().visible);
+        let mut ctx=CancelContext {world:&mut w,lib:&lib,types:&[],anm:0,field:[0.0;4]};
+        assert!(l.cancel(CancelArea::All,true,&mut ctx).0);
+        assert!(!l.cancel(CancelArea::All,false,&mut ctx).0);
     }
 }

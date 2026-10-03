@@ -6,12 +6,14 @@ pub enum Character {
     #[default]
     Reimu,
     Marisa,
+    Sanae,
+    Ran,
 }
 
 impl Character {
-    pub const ALL: [Character; 2] = [Character::Reimu, Character::Marisa];
+    pub const ALL: [Character; 4] = [Character::Reimu, Character::Marisa, Character::Sanae, Character::Ran];
 
-    /// Character-select number (Reimu 1, Marisa 2).
+    /// Character-select number: Reimu1, Marisa2, Sanae3, Ran4.
     pub fn number(self) -> usize {
         self as usize + 1
     }
@@ -20,6 +22,8 @@ impl Character {
         match self {
             Character::Reimu => "Reimu",
             Character::Marisa => "Marisa",
+            Character::Sanae => "Sanae",
+            Character::Ran => "Ran",
         }
     }
 

@@ -99,7 +99,11 @@ impl Beam {
         field: [f32; 4],
         world: &mut World,
     ) -> bool {
-        self.pos = [origin[0] + self.offset[0], origin[1] + self.offset[1]];
+        // 0054d370 follows the option each tick; 0054c830 retains the charge beam's
+        // launch position (+0x54) for its entire lifetime.
+        if !self.charge {
+            self.pos = [origin[0] + self.offset[0], origin[1] + self.offset[1]];
+        }
         if self.ended {
             return false;
         }
@@ -198,6 +202,71 @@ pub fn ray_entry(from: [f32; 2], angle: f32, centre: [f32; 2], radius: f32) -> f
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn original_marisa_beams_survive_contact_repeat_damage_and_reach_field_top() {
+        let Some(home) = std::env::var_os("USERPROFILE") else { return };
+        let path = std::env::var_os("TH19_DAT").map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from(home).join("Downloads/th19/th19/th19.dat"));
+        if !path.is_file() { eprintln!("Original assets unavailable"); return; }
+        let mut dat = th_formats::dat::Archive::open(path).unwrap();
+        let sht = th_formats::sht::ShtFile::parse(&dat.read("pl01.sht").unwrap()).unwrap();
+        let mut lib = AnmLibrary::default();
+        let file = lib.load("pl01.anm", &dat.read("pl01.anm").unwrap()).unwrap();
+        for (slot, charge) in [(2, false), (10, true)] {
+            let r = sht.slots[slot].as_ref().unwrap().iter()
+                .find(|r| r.funcs[0] == if charge {12} else {2}).unwrap();
+            let mut world = World::default();
+            let field = crate::FIELDS[0];
+            let origin = [0.0, 440.0];
+            let mut beam = Beam::new(r, file, &mut world, &lib, field,
+                [origin[0] + r.offset[0], origin[1] + r.offset[1]]);
+            let vm = beam.vm().unwrap();
+            let enemy = Enemy {
+                threads: th_ecl::Threads::new(th_ecl::Context::new(th_ecl::SubRef {file:0, sub:0})),
+                data: crate::EnemyData {pos:[r.offset[0], 240.0], hurtbox:[20.0;2], hp:10000, ..Default::default()}
+            };
+            let mut hit_frames = Vec::new();
+            for frame in 1..=65 {
+                beam.update(origin, true, field, &mut world);
+                let mut hits = Vec::new();
+                beam.collide(std::slice::from_ref(&enemy), &mut world, &lib, field, file, &mut hits);
+                if !hits.is_empty() { hit_frames.push(frame); }
+                world.tick(&lib);
+                assert!(world.get(vm).is_some(), "beam sprite vanished after contact: charge={charge}, frame={frame}");
+                assert!(!beam.ended);
+            }
+            assert!(hit_frames.len() > 10);
+            for pair in hit_frames.windows(2) {
+                assert_eq!(pair[1]-pair[0], if charge {1} else {4});
+            }
+            // Removing the obstruction restores the original >512 px reach, including its drawing.
+            for _ in 0..30 { beam.update(origin, true, field, &mut world); world.tick(&lib); }
+            if charge { assert_eq!(beam.len, 522.0); }
+            else { assert!(beam.len > 512.0 && beam.len <= 530.0); }
+            let texture = lib.files[file].sprites[if charge {29} else {28}].texture;
+            let drawing = world.draw_list(&lib, th_anm::Pass::Ui);
+            let top = drawing.iter().filter(|b| b.texture == Some(texture)).flat_map(|b| &b.vertices)
+                .map(|v| v.pos[1]).fold(f32::INFINITY, f32::min);
+            assert!(top < field[1], "beam stops before field top: {top}");
+            if charge {
+                let launch = beam.pos;
+                beam.update([80.0, 300.0], true, field, &mut world);
+                assert_eq!(beam.pos, launch, "charge beam remains at the native launch position");
+                while beam.time < CHARGE_FRAMES {
+                    beam.update(origin, true, field, &mut world);
+                    assert!(!beam.ended);
+                }
+                beam.update(origin, true, field, &mut world);
+                assert!(beam.ended, "charge beam ends after age 0x77");
+            } else {
+                beam.update(origin, false, field, &mut world);
+                assert!(beam.ended, "normal beam ends on release");
+            }
+            for _ in 0..30 { world.tick(&lib); }
+            assert!(world.get(vm).is_none(), "native ending interrupt still fades and deletes");
+        }
+    }
 
     #[test]
     fn ray_enters_a_circle_ahead() {

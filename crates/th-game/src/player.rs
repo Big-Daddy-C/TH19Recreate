@@ -84,6 +84,8 @@ struct PlayerOption {
     /// Current position, fixed point.
     pos: [i32; 2],
     vm: Option<VmId>,
+    /// Snap-to-target ticks left (option +0x100; Ran's callback sets 10).
+    hold: i32,
 }
 
 pub struct PlayerBullet {
@@ -104,8 +106,12 @@ pub struct PlayerBullet {
     /// FUN_0054fba0 state 2: collider removed, ANM interrupt 1 plays the impact.
     pub impacting: bool,
     hit_callback: i32,
+    snake_turn: Option<(i32, f32)>,
+    snake: bool,
+    explosion_growth: f32,
 }
 
+struct SnakeExplosion {pos:[f32;2],angle:f32,radius:f32,growth:f32,damage:i32,time:i32}
 pub struct Player {
     pub character: crate::character::Character,
     /// Development toggle: the player can't be hit.
@@ -139,16 +145,23 @@ pub struct Player {
     /// Marisa's bomb: full-height bands (centre x, half width) that cancel bullets.
     pub cancel_columns: Vec<(f32, f32)>,
     damage_circles: Vec<crate::skill::DamageCircle>,
+    snake_explosions: Vec<SnakeExplosion>,
     skill_rng: u32,
     charge_timer: Option<i32>,
     /// Marisa: a skill release also fires the two side charge beams (SHT slot 11).
     wide_charge: bool,
+    charge_origin: [f32;2],
+    skill_volley: bool,
+    boost_frames: i32,
+    pub cancel_rects: Vec<([f32;2],[f32;2])>,
     pub aura_anm: Option<usize>,
     charge_vm: Option<VmId>,
     focus_vm: Option<VmId>,
     prev_vx: i32,
     body: Option<VmId>,
     options: Vec<PlayerOption>,
+    /// Player position last seen while unfocused (player +0x6a0/+0x6a4), Ran's option anchor.
+    option_anchor: [i32; 2],
     shot_timer: Timer,
     long_timer: Timer,
     pub bullets: Vec<PlayerBullet>,
@@ -208,15 +221,16 @@ impl Player {
             charge: crate::charge::Gauge::default(),
             meter: charge_settings.attack,
             free_charge: false, opponent_boss_active: false, charge_event: None, last_charge: None,
-            skills: Vec::new(), bomb: None, bomb_prev: false, cancel_circles: Vec::new(), cancel_columns: Vec::new(), damage_circles: Vec::new(), skill_rng: 0x1cafe777,
+            skills: Vec::new(), bomb: None, bomb_prev: false, cancel_circles: Vec::new(), cancel_columns: Vec::new(), damage_circles: Vec::new(), snake_explosions: Vec::new(), skill_rng: 0x1cafe777,
             charge_timer: None,
-            wide_charge: false,
+            wide_charge: false, charge_origin: [0.0;2], skill_volley: false, boost_frames: 0, cancel_rects: Vec::new(),
             aura_anm: None,
             charge_vm: None,
             focus_vm: None,
             prev_vx: 0,
             body: None,
             options: Vec::new(),
+            option_anchor: [0, 400 * 128],
             shot_timer: Timer::OFF,
             long_timer: Timer::OFF,
             bullets: Vec::new(),
@@ -313,6 +327,10 @@ impl Player {
 
     pub fn update(&mut self, keys: u32, enemies: &mut [Enemy], world: &mut World, lib: &AnmLibrary, field: [f32; 4]) {
         self.cancel_radius = None;
+        if self.boost_frames > 0 {
+            self.boost_frames -= 1;
+            if self.boost_frames == 0 { self.power = 200; }
+        }
         self.charge_event = None;
         if self.body.is_none() && matches!(self.state, State::Entering | State::Normal) {
             self.set_body_script(world, lib, field, 0);
@@ -422,10 +440,11 @@ impl Player {
         }
         self.update_charge(keys, world, lib, field);
         self.update_focus_marker(world, lib, field);
-        self.scope.update(self.charge.value > 0 && keys & input::CHARGE != 0
-            && self.state == State::Normal, self.character == Character::Marisa, self.pos, self.anm_file, world, lib, field);
+        self.scope.update_character(self.charge.value > 0 && keys & input::CHARGE != 0
+            && self.state == State::Normal, self.character, self.pos, self.anm_file, world, lib, field);
         self.cancel_circles.clear();
         self.cancel_columns.clear();
+        self.cancel_rects.clear();
         self.skills.retain_mut(|s| s.tick(world, field, &mut self.cancel_circles, &mut self.damage_circles));
         // The bomb button (FUN_00546320 states 1 and 4): pressing it starts the bomb, and during
         // the 8-frame hit window it also cancels the death (a deathbomb). Practice economy: no
@@ -441,13 +460,15 @@ impl Player {
             let meter = if self.free_charge { crate::bomb::MAX_METER } else { self.meter };
             self.bomb = Some(if self.character == Character::Marisa {
                 crate::bomb::Bomb::new_marisa(self.pos, meter, self.anm_file, world, lib, field)
+            } else if matches!(self.character, Character::Sanae | Character::Ran) {
+                crate::bomb::Bomb::new_character(self.character,self.pos,meter,self.anm_file,world,lib,field)
             } else {
                 crate::bomb::Bomb::new(self.pos, meter, self.anm_file, world, lib, field)
             });
         }
         if let Some(b) = &mut self.bomb {
             let protecting = b.protecting();
-            if !b.tick(self.pos, world, field, &mut self.cancel_circles, &mut self.cancel_columns, &mut self.damage_circles) {
+            if !b.tick_character(self.pos, world, field, &mut self.cancel_circles, &mut self.cancel_columns, &mut self.cancel_rects, &mut self.damage_circles) {
                 self.bomb = None;
             }
             if protecting {
@@ -455,6 +476,13 @@ impl Player {
             }
         }
         let mut damage = vec![(0i32, self.pos); enemies.len()];
+        // 0054c2f0 copies shot motion with speed2; collider hit interval +a4 is4.
+        for x in &mut self.snake_explosions {
+            x.time+=1;x.pos[0]+=x.angle.cos()*2.0;x.pos[1]+=x.angle.sin()*2.0;x.radius+=x.growth;
+            if x.time%4==0 {self.damage_circles.push(crate::skill::DamageCircle {pos:x.pos,radius:x.radius,
+                damage:x.damage,remaining:1,growth:0.0,rect:None});}
+        }
+        self.snake_explosions.retain(|x|x.time<20);
         for circle in &mut self.damage_circles {
             for (index, enemy) in enemies.iter_mut().enumerate() {
                 let d = &mut enemy.data;
@@ -562,7 +590,8 @@ impl Player {
             self.last_charge = Some(level);
             self.charge_event = Some(level);
             // The basic local shot accompanies every higher-tier release.
-            self.charge_timer = Some(0);
+            if !self.skill_volley { self.charge_timer = Some(0); }
+            if !self.skill_volley || level==Level::Skill {self.charge_origin = self.pos;}
             let threshold = match level {
                 Level::Attack => self.charge_settings.attack,
                 Level::Skill => self.charge_settings.skill,
@@ -580,38 +609,70 @@ impl Player {
                 self.skills.push(crate::skill::Skill::new(self.pos,phase,self.anm_file,world,lib,field));
                 self.invuln = self.invuln.max(40);
             }
+            if level == Level::Skill && self.character == Character::Sanae {
+                self.skill_volley = true; self.charge_timer = Some(0);
+            }
+            if level == Level::Skill && self.character == Character::Ran && self.boost_frames == 0 {
+                // EXRanInf00419ae0: power400 for600 ticks, then restore200.
+                self.power = 400; self.boost_frames = 600;
+                self.update_options(world,lib,field);
+            }
             if matches!(level, Level::Extra | Level::Boss) { self.barrier = Barrier::Up; }
         }
         if let Some(t) = self.charge_timer {
-            self.fire_slot(10, t, 0, world, lib, field);
-            if t == 0 && std::mem::take(&mut self.wide_charge) {
-                self.fire_slot(11, t, 0, world, lib, field);
-            }
-            self.charge_timer = (t < 20).then_some(t + 1);
+            let (slot, fire_frames, stop) = match self.character {
+                Character::Sanae => (if self.skill_volley {11} else {10}, if self.skill_volley {60} else {30}, if self.skill_volley {70} else {40}),
+                Character::Ran => (if self.boost_frames>0 {11} else {10},50,61),
+                _ => (10,21,21),
+            };
+            if t < fire_frames { self.fire_slot(slot, t, 0, world, lib, field); }
+            if t == 0 && std::mem::take(&mut self.wide_charge) { self.fire_slot(11,t,0,world,lib,field); }
+            self.charge_timer = (t+1 < stop).then_some(t+1);
+            if self.charge_timer.is_none() { self.skill_volley=false; }
         }
     }
 
+    /// Native option update (`FUN_00546d10`) with the per-character callback installed by
+    /// `FUN_005483d0`. Ran (character 3) installs `FUN_0054a120`: unfocused, the player position is
+    /// stored (+0x6a0/+0x6a4) every tick; focused, the target is the focused slot offset added to
+    /// that stored position, so the orbs stay where the last unfocused tick left them. Everyone
+    /// else's target is the player position plus the slot offset.
     fn update_options(&mut self, world: &mut World, lib: &AnmLibrary, field: [f32; 4]) {
         let offsets: Vec<[f32; 2]> = self.option_offsets().to_vec();
-        while self.options.len() > offsets.len() {
-            if let Some(id) = self.options.pop().and_then(|o| o.vm) {
-                world.delete(id);
+        let latching = self.character == Character::Ran;
+        if !self.focused {
+            self.option_anchor = self.fixed;
+        }
+        if self.options.len() != offsets.len() {
+            // `FUN_005483d0` rebuilds every option when the count changes; each starts on its
+            // slot relative to the live player position (focused offsets when focus is held).
+            for o in self.options.drain(..) {
+                if let Some(id) = o.vm {
+                    world.delete(id);
+                }
+            }
+            for off in &offsets {
+                let at = [self.fixed[0] + (off[0] * 128.0) as i32, self.fixed[1] + (off[1] * 128.0) as i32];
+                let script = self.sht.option_script;
+                let canvas = field_to_canvas(field, [at[0] as f32 / 128.0, at[1] as f32 / 128.0]);
+                let vm = (script >= 0).then(|| world.spawn_clipped(lib, self.anm_file, script as usize, canvas, field));
+                self.options.push(PlayerOption { pos: at, vm, hold: if latching { 10 } else { 0 } });
             }
         }
-        while self.options.len() < offsets.len() {
-            let at = field_to_canvas(field, self.pos);
-            let script = self.sht.option_script;
-            let vm = (script >= 0).then(|| world.spawn_clipped(lib, self.anm_file, script as usize, at, field));
-            self.options.push(PlayerOption { pos: self.fixed, vm });
-        }
+        let anchor = if latching { self.option_anchor } else { self.fixed };
         for (o, off) in self.options.iter_mut().zip(&offsets) {
-            let target = [self.fixed[0] + (off[0] * 128.0) as i32, self.fixed[1] + (off[1] * 128.0) as i32];
-            // Options close 30% of the distance to their slot every frame.
-            let d = [(target[0] - o.pos[0]) * 30 / 100, (target[1] - o.pos[1]) * 30 / 100];
-            if d == [0, 0] {
-                o.pos = target;
+            let target = [anchor[0] + (off[0] * 128.0) as i32, anchor[1] + (off[1] * 128.0) as i32];
+            if o.hold == 0 {
+                // Options close 30% of the distance to their slot every frame.
+                let d = [(target[0] - o.pos[0]) * 30 / 100, (target[1] - o.pos[1]) * 30 / 100];
+                if d == [0, 0] {
+                    o.pos = target;
+                } else {
+                    o.pos = [o.pos[0] + d[0], o.pos[1] + d[1]];
+                }
             } else {
-                o.pos = [o.pos[0] + d[0], o.pos[1] + d[1]];
+                o.hold -= 1;
+                o.pos = target;
             }
             let p = field_to_canvas(field, [o.pos[0] as f32 / 128.0, o.pos[1] as f32 / 128.0]);
             if let Some(vm) = o.vm.and_then(|id| world.get_mut(id)) {
@@ -681,7 +742,9 @@ impl Player {
     /// Where a record's origin nibble points: the player, the field origin or an option.
     fn origin_of(&self, nibble: u8) -> Option<[f32; 2]> {
         match nibble & 0xf {
+            // 0054f990 passes current player+68c for every slot; origin5 reads+c18.
             0 => Some(self.pos),
+            5 => Some(self.charge_origin),
             6 => Some([0.0, 0.0]),
             k => self.options.get(k as usize - 1).map(|o| [o.pos[0] as f32 / 128.0, o.pos[1] as f32 / 128.0]),
         }
@@ -725,7 +788,8 @@ impl Player {
             time: 0,
             charge_shot: r.funcs == [11, 8, 0, 7],
             impacting: false,
-            hit_callback: r.funcs[3],
+            hit_callback: r.funcs[3], snake_turn: None, snake: r.funcs[1]==4,
+            explosion_growth: f32::from_le_bytes(r.raw[0x68..0x6c].try_into().unwrap()),
         });
     }
 
@@ -768,6 +832,7 @@ impl Player {
             if !b.impacting && b.homing {
                 update_homing(b, enemies);
             }
+            if !b.impacting && b.snake { update_snake(b,enemies,world); }
             // FUN_0054df10: callback, then SHT angular/speed increments, then movement.
             if !b.impacting {
                 b.angle = crate::motion::wrap_angle(b.angle + b.angular_velocity);
@@ -796,7 +861,7 @@ impl Player {
                         damage[index].1 = b.pos;
                         if !b.charge_shot {
                             // Callback 1 adds effect 142 before the shared impact transition.
-                            if b.hit_callback == 1 {
+                            if b.hit_callback == 1 || b.hit_callback == 5 {
                                 if let Some(file) = self.effect_anm {
                                     let mut random = || {
                                         let x = &mut self.skill_rng;
@@ -813,8 +878,13 @@ impl Player {
                                     }
                                 }
                             }
+                            if b.hit_callback == 4 {
+                                //0054c2f0: replace the shot collider with radius24,+SHT68/frame,life20.
+                                self.snake_explosions.push(SnakeExplosion {pos:b.pos,angle:b.angle,radius:24.0,
+                                    damage:b.damage,time:0,growth:b.explosion_growth});
+                            }
                             b.impacting = true;
-                            b.speed /= 8.0;
+                            b.speed = if b.hit_callback==4 {2.0} else {b.speed/8.0};
                             if let Some(id) = b.vm { world.interrupt(id, 1); }
                             else { dead = true; }
                             break;
@@ -837,6 +907,26 @@ impl Player {
             }
             i += 1;
         }
+    }
+}
+
+/// Sanae callback4 (0054c080): detect a body within +/-16y and outside +/-16x;
+/// interrupt2, stop for four ticks, then head horizontally toward its sampled x at14.
+fn update_snake(b: &mut PlayerBullet, enemies: &[Enemy], world: &mut World) {
+    if let Some((ticks,x))=b.snake_turn {
+        let ticks=ticks+1;
+        if ticks==4 {
+            b.angle=if b.pos[0]>x {std::f32::consts::PI} else {0.0};
+            b.speed=14.0;b.snake=false;
+        }
+        b.snake_turn=Some((ticks,x));
+        return;
+    }
+    if let Some(e)=enemies.iter().find(|e| !e.data.delete && !e.data.killed
+        && e.data.flags & (flag::NO_HURTBOX|flag::HIDDEN)==0
+        && (b.pos[1]-e.data.pos[1]).abs()<=16.0 && (b.pos[0]-e.data.pos[0]).abs()>=16.0) {
+        b.speed=0.0; b.snake_turn=Some((1,e.data.pos[0]));
+        if let Some(id)=b.vm {world.interrupt(id,2);}
     }
 }
 
@@ -904,10 +994,80 @@ fn dist2(a: [f32; 2], b: [f32; 2]) -> f32 {
 mod tests {
 use super::*;
 
+    #[test]
+    fn snake_turns_on_the_fourth_native_tick_and_keeps_the_sampled_target() {
+        let mut b=amulet(-std::f32::consts::FRAC_PI_2,8.0,0);b.snake=true;b.homing=false;
+        let mut w=World::default();
+        let enemies=[homing_enemy(1,[80.0,300.0])];
+        update_snake(&mut b,&enemies,&mut w);assert_eq!(b.speed,0.0);
+        update_snake(&mut b,&[],&mut w);assert_eq!(b.speed,0.0);
+        update_snake(&mut b,&[],&mut w);assert_eq!(b.speed,0.0);
+        update_snake(&mut b,&[],&mut w);assert_eq!(b.speed,14.0);assert_eq!(b.angle,0.0);
+        assert!(!b.snake);
+    }
+
+    #[test]
+    fn new_character_charge_records_keep_current_and_captured_origins_distinct() {
+        let path=std::path::PathBuf::from(std::env::var_os("TH19_DAT").unwrap_or_else(||
+            std::path::PathBuf::from(std::env::var_os("USERPROFILE").unwrap()).join("Downloads/th19/th19/th19.dat").into_os_string()));
+        if !path.is_file() {return;}
+        let mut dat=th_formats::dat::Archive::open(path).unwrap();
+        for character in [Character::Sanae,Character::Ran] {
+            let sht=th_formats::sht::ShtFile::parse(&dat.read(&format!("{}.sht",character.prefix())).unwrap()).unwrap();
+            let mut p=Player::new(sht,0);p.character=character;
+            p.pos=[50.0,400.0];p.charge_origin=[-20.0,400.0];
+            assert_eq!(p.origin_of(0),Some([50.0,400.0]));
+            assert_eq!(p.origin_of(5),Some([-20.0,400.0]));
+        }
+    }
+
+    /// Ran's options (`FUN_0054a120`) hold the last unfocused position while Shift is down and
+    /// shots leave from them; other characters' options keep following the player.
+    #[test]
+    fn ran_options_latch_while_focused_and_shots_follow_them() {
+        let path=std::path::PathBuf::from(std::env::var_os("TH19_DAT").unwrap_or_else(||
+            std::path::PathBuf::from(std::env::var_os("USERPROFILE").unwrap()).join("Downloads/th19/th19/th19.dat").into_os_string()));
+        if !path.is_file() {return;}
+        let mut dat=th_formats::dat::Archive::open(path).unwrap();
+        let (mut world,lib,field)=(World::default(),AnmLibrary::default(),[0.0,0.0,384.0,448.0]);
+        for character in [Character::Ran,Character::Reimu] {
+            let mut sht=th_formats::sht::ShtFile::parse(&dat.read(&format!("{}.sht",character.prefix())).unwrap()).unwrap();
+            sht.option_script=-1;
+            let mut p=Player::new(sht,0);p.character=character;p.state=State::Normal;p.power=200;
+            for _ in 0..30 {p.update(0,&mut [],&mut world,&lib,field);}
+            let free=p.options.iter().map(|o|o.pos).collect::<Vec<_>>();
+            let off=p.sht.options[0][2];
+            // Unfocused: slot offsets are relative to the player.
+            assert_eq!(free[1],[p.fixed[0]+(off[0]*128.0) as i32,p.fixed[1]+(off[1]*128.0) as i32]);
+            let held_at=p.fixed;
+            // Hold Shift and move left; Ran's options stay on the latched anchor.
+            for _ in 0..40 {p.update(input::FOCUS|input::LEFT,&mut [],&mut world,&lib,field);}
+            assert!(p.fixed[0]<held_at[0]);
+            let foc=p.sht.options[1][2];
+            let want=if character==Character::Ran {
+                [held_at[0]+(foc[0]*128.0) as i32,held_at[1]+(foc[1]*128.0) as i32]
+            } else {
+                [p.fixed[0]+(foc[0]*128.0) as i32,p.fixed[1]+(foc[1]*128.0) as i32]
+            };
+            let got=p.options[1].pos;
+            if character==Character::Ran {
+                assert!((got[0]-want[0]).abs()<=1&&(got[1]-want[1]).abs()<=1,"{character:?} {got:?} {want:?}");
+            } else {
+                // Still trailing the moving player by the 30% ease, not held in place.
+                assert!(got[0]<held_at[0]+(foc[0]*128.0) as i32-1000,"{got:?}");
+            }
+            assert_eq!(p.origin_of(2),Some([got[0] as f32/128.0,got[1] as f32/128.0]));
+            // Release: the options ease back (30% a tick) to the live player slots.
+            for _ in 0..60 {p.update(0,&mut [],&mut world,&lib,field);}
+            let back=p.options[1].pos;let free_off=p.sht.options[0][2];
+            assert_eq!(back,[p.fixed[0]+(free_off[0]*128.0) as i32,p.fixed[1]+(free_off[1]*128.0) as i32]);
+        }
+    }
+
     fn amulet(angle: f32, speed: f32, time: i32) -> PlayerBullet {
         PlayerBullet { pos: [0.0, 300.0], angle, speed, hitbox: [4.0; 2], damage: 1,
             homing: true, homing_target: None, angular_velocity: 0.0, acceleration: 0.0,
-            vm: None, time, charge_shot: false, impacting: false, hit_callback: 0 }
+            vm: None, time, charge_shot: false, impacting: false, hit_callback: 0, snake_turn: None, snake: false, explosion_growth: 0.0 }
     }
 
     fn homing_enemy(id: i32, pos: [f32; 2]) -> Enemy {

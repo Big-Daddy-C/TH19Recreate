@@ -21,11 +21,12 @@ Right now the `th19` binary is an **ANM + stage viewer** used to validate the pi
 | Tab | cycle ANM viewer → stage (STD) viewer → game (stage + waves) |
 | Game mode | arrows = move, Z = shot, X = hold/release charge (all four tiers), C = bomb (current meter determines strength; full meter in full-charge mode; no stock used; a press during the 8-frame hit window cancels the death), Shift = focus, PgUp/PgDn = stage (`--game N` starts here) |
 | G (game mode) | development godmode: neither player can be hit |
-| K (game mode) | player 2 uses the bot (Normal difficulty, Reimu or Marisa) / just holds the shot button |
+| K (game mode) | player 2 uses the bot (Normal difficulty, selected character) / just holds the shot button |
 | M (game mode) | development full-charge mode: every tier available and free (off by default; otherwise the meter fills from blue orbs). `--full-charge` enables it at launch. |
-| `]` / `[` (game mode) | next / previous character for the bot (Reimu 1, Marisa 2); with Shift, for the player. Restarts the match. `--p1 N` / `--p2 N` pick them at start, `--no-bot` starts with the dummy |
+| `]` / `[` (game mode) | next / previous character for the bot (Reimu 1, Marisa 2, Sanae 3, Ran 4); with Shift, for the player. Restarts the match. `--p1 N` / `--p2 N` pick them at start, `--no-bot` starts with the dummy |
 | `--godmode`, `--boss-level N` | start with godmode on / player 1's boss level at N (development) |
 | 1–4 (game mode) | development: release player 1's charge instantly at tier 1 shot / 2 skill / 3 EX / 4 boss (falls back to EX while the opponent has a boss); Shift+1–4 makes player 2 release it, so EX/boss attacks land on player 1's field |
+| K / Shift+K (game mode) | K toggles the opponent AI/dummy; Shift+K toggles AI/manual control of your player (independent AI state) |
 | T (game mode) | development: rain bullets and spirits for 10 s on the opponent's field; Shift+T rains on your own |
 | B (game mode) | development: clear bullets, enemies, bosses and attack scripts on both fields |
 | ← / → | previous / next `.anm` file, or stage |
@@ -244,3 +245,25 @@ one-eighth speed, and stop dealing damage during the impact. Detached trails inh
 the shot's original rotation. The homing sprite and pink trail retain their asset
 colours. Remaining scope contact visuals, lasers and spirit-specific ECL318 still
 need work. Automated checks pass; matched original-game footage parity is unverified.
+
+
+### Sanae and Ran (2026-10-03)
+
+Select Sanae with `--p1 3`, Ran with `--p1 4`; `--p2` selects the opponent.
+Shift+[ / Shift+] cycles the player's character and [ / ] cycles the opponent.
+Both load their own SHT, ANM and ECL files from your game installation.
+
+Sanae has her original snake shots, a circle scope (radius128 after60frames),
+C1/C2 volleys, expanding bomb, special snakes and curved EX lasers.
+Ran has her original option shots, a cross scope (30-frame growth), C1 rapid fire,
+600-frame C2 four-option boost, cross bomb and cross-field talismans.
+The shared AI uses the native Reimu-style controller for both characters.
+
+Native callbacks and original scripts supply sizes, timings and damage. Extra/boss
+execution and HP have been checked at all eight ranks. This is a playable port,
+not a claim of full parity: shared boss movement/RNG remain approximate; sound,
+spell HUD/score commands, curved-laser endpoint effects and aligned original-footage
+comparisons remain outstanding. Details and source fingerprints are in research/catalog.json.
+
+Validation for Sanae/Ran: `cargo test --workspace` (105 tests), release build,
+archive/decompile reference integrity checks, and local scope/attack screenshot inspection.

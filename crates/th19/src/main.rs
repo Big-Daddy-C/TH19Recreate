@@ -84,6 +84,9 @@ struct Viewer {
     godmode: bool,
     /// Player 2 is run by the game's bot (K) instead of just holding the shot button.
     bot_ai: bool,
+    /// Shift+K gives player 1 an independent copy of the same AI controller.
+    player_bot_ai: bool,
+    player_bot: th_game::bot::Bot,
     /// Each side's character (`]` / `[` change the bot's, with Shift the player's).
     chars: [th_game::character::Character; 2],
     /// Development full-charge mode (M): every tier is always available and costs nothing.
@@ -126,6 +129,8 @@ impl Viewer {
             held: Default::default(),
             godmode: false,
             bot_ai: true,
+            player_bot_ai: false,
+            player_bot: th_game::bot::Bot::new(),
             chars: [th_game::character::Character::Reimu; 2],
             full_charge: false,
             bot: th_game::bot::Bot::new(),
@@ -154,6 +159,7 @@ impl Viewer {
         self.world.clear();
         self.stage = None;
         self.bot = th_game::bot::Bot::new();
+        self.player_bot = th_game::bot::Bot::new();
         let Some(name) = self.stage_files.get(self.stage_idx).cloned() else { return };
         let std = match self.dat.read(&name).map(|b| th_formats::stage::StdFile::parse(&b)) {
             Ok(Ok(s)) => s,
@@ -280,8 +286,11 @@ impl Viewer {
             if let Some(g) = &mut self.game {
                 th_game::side::prepare_charge_targets(&mut g.sides);
                 for (i, s) in g.sides.iter_mut().enumerate().filter(|_| g.round.outcome.is_none()) {
-                    // Side 2 is the game's bot, or (K) just holds the shot button.
-                    let k = if i == 0 { keys } else if self.bot_ai { self.bot.think(s) } else { th_game::player::input::SHOT };
+                    // Each AI owns its targeting/charge state; player 1 returns to held
+                    // keyboard input immediately when Shift+K disables its controller.
+                    let k = if i == 0 {
+                        if self.player_bot_ai { self.player_bot.think(s) } else { keys }
+                    } else if self.bot_ai { self.bot.think(s) } else { th_game::player::input::SHOT };
                     if let Some(p) = &mut s.player {
                         p.godmode = self.godmode;
                         p.free_charge = self.full_charge;
@@ -376,7 +385,17 @@ impl Viewer {
                 }
             }
         }
-        list.extend(self.world.draw_list(&self.lib, th_anm::Pass::Ui));
+        if let Some(g)=&self.game {
+            let priority=th_game::laser::DRAW_PRIORITY;
+            list.extend(self.world.draw_priority_range(&self.lib,th_anm::Pass::Ui,i32::MIN,priority+1));
+            for side in &g.sides { for laser in &side.st.lasers {
+                if let Some(batch)=laser.curve_batch(&self.world,&self.lib,side.st.field) {list.push(batch);}
+            }}
+            list.extend(self.world.draw_priority_range(&self.lib,th_anm::Pass::Ui,priority+1,i32::MAX));
+            for side in &g.sides { for spark in &side.st.sparks {
+                if let Some(batch)=spark.batch(side.st.field) {list.push(batch);}
+            }}
+        } else {list.extend(self.world.draw_list(&self.lib,th_anm::Pass::Ui));}
         if let Some(g) = &self.game {
             for (side, field) in g.sides.iter().zip(FIELDS) {
                 if let Some(p) = &side.player {
@@ -423,7 +442,7 @@ impl Viewer {
                     .collect();
                 return format!(
                     "th19-rs - {name}{} - {} - {} VMs{}{} - points {}:{} {:?}",
-                    format!("{}{}{}", if self.godmode { " - GODMODE" } else { "" }, if self.full_charge { " - FULLCHARGE" } else { "" }, if self.bot_ai { " - BOT" } else { " - DUMMY" }),
+                    format!("{}{}{}{}", if self.godmode { " - GODMODE" } else { "" }, if self.full_charge { " - FULLCHARGE" } else { "" }, if self.bot_ai { " - BOT" } else { " - DUMMY" }, if self.player_bot_ai { " - P1 AI" } else { "" }),
                     n.join(" | "),
                     self.world.len(),
                     if self.fast { " - x8" } else { "" },
@@ -504,11 +523,17 @@ impl Viewer {
                 self.godmode = !self.godmode;
                 log::info!("godmode {}", if self.godmode { "on" } else { "off" });
             }
-            // Toggle player 2 between the game's bot and a dummy that holds the shot button.
+            // K toggles the opponent; Shift+K toggles AI/manual control of player 1.
             KeyCode::KeyK if self.mode == Mode::Game => {
-                self.bot_ai = !self.bot_ai;
-                self.bot = th_game::bot::Bot::new();
-                log::info!("bot ai {}", if self.bot_ai { "on" } else { "off (holds shot)" });
+                if self.held.contains(&KeyCode::ShiftLeft) || self.held.contains(&KeyCode::ShiftRight) {
+                    self.player_bot_ai = !self.player_bot_ai;
+                    self.player_bot = th_game::bot::Bot::new();
+                    log::info!("player 1 control {}", if self.player_bot_ai { "AI" } else { "manual" });
+                } else {
+                    self.bot_ai = !self.bot_ai;
+                    self.bot = th_game::bot::Bot::new();
+                    log::info!("bot ai {}", if self.bot_ai { "on" } else { "off (holds shot)" });
+                }
             }
             // Development full-charge mode: all tiers always available, no meter cost.
             KeyCode::KeyM if self.mode == Mode::Game => {
@@ -790,7 +815,7 @@ fn main() {
     println!(
         "Controls: Tab = switch ANM viewer / stage viewer / game, Left/Right = file or stage, Up/Down = single script,\n\
          A = all scripts, C = toggle centre origin, F = fast-forward x8, V = toggle field divider,\n\
-         R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (1 shot / 2 skill / 3 EX / 4 boss), M = toggle full-charge practice, C = bomb, B = clear fields, T = rain on the opponent (Shift+T on you), G = godmode, 1-4 = instant charge tier (4 = boss; Shift+1-4 = opponent's), Shift = focus, [ / ] = bot character (Shift for player), K = bot/dummy, PgUp/PgDn = stage,\n\
+         R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (1 shot / 2 skill / 3 EX / 4 boss), M = toggle full-charge practice, C = bomb, B = clear fields, T = rain on the opponent (Shift+T on you), G = godmode, 1-4 = instant charge tier (4 = boss; Shift+1-4 = opponent's), Shift = focus, [ / ] = bot character (Shift for player), K = opponent bot/dummy, Shift+K = player AI/manual, PgUp/PgDn = stage,\n\
          . = step frame, 0-9 = send interrupt, Esc = quit"
     );
 
@@ -811,7 +836,7 @@ fn main() {
         viewer.godmode = args.iter().any(|a| a == "--godmode");
         viewer.full_charge = args.iter().any(|a| a == "--full-charge");
         viewer.bot_ai = !args.iter().any(|a| a == "--no-bot");
-        // `--p1 N` / `--p2 N`: character select numbers (1 Reimu, 2 Marisa).
+        // `--p1 N` / `--p2 N`: character select numbers (1 Reimu, 2 Marisa, 3 Sanae, 4 Ran).
         for (flag, side) in [("--p1", 0), ("--p2", 1)] {
             if let Some(n) = args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)?.parse::<usize>().ok()) {
                 viewer.chars[side] = th_game::character::Character::ALL[(n.max(1) - 1).min(th_game::character::Character::ALL.len() - 1)];
@@ -859,6 +884,41 @@ fn main() {
 #[cfg(test)]
 mod charge_input_tests {
     use super::*;
+    #[test]
+    fn shift_k_toggles_independent_player_ai_and_returns_to_manual_input() {
+        let Some(home) = std::env::var_os("USERPROFILE") else { return };
+        let path = std::env::var_os("TH19_DAT").map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(home).join("Downloads/th19/th19/th19.dat"));
+        if !path.is_file() { return; }
+        let mut viewer = Viewer::new(Archive::open(path).unwrap());
+        viewer.mode = Mode::Game;
+        viewer.game = viewer.load_game();
+        for side in &mut viewer.game.as_mut().unwrap().sides {
+            side.stage = None;
+            side.player.as_mut().unwrap().state = th_game::player::State::Normal;
+        }
+        viewer.game.as_mut().unwrap().sides[0].player.as_mut().unwrap().pos = [80.0,300.0];
+        viewer.held.insert(KeyCode::ArrowRight);
+        viewer.held.insert(KeyCode::ShiftLeft);
+        viewer.key(KeyCode::KeyK);
+        viewer.held.remove(&KeyCode::ShiftLeft);
+        assert!(viewer.player_bot_ai && viewer.bot_ai);
+        for _ in 0..10 { viewer.tick(); }
+        let ai_x = viewer.game.as_ref().unwrap().sides[0].player.as_ref().unwrap().pos[0];
+        assert!(ai_x < 80.0, "AI steers toward home, ignoring held right: {ai_x}");
+        assert!(viewer.title().contains("P1 AI"));
+        viewer.key(KeyCode::KeyK);
+        assert!(!viewer.bot_ai && viewer.player_bot_ai, "plain K only changes opponent");
+        viewer.held.insert(KeyCode::ShiftRight);
+        viewer.key(KeyCode::KeyK);
+        viewer.held.remove(&KeyCode::ShiftRight);
+        assert!(!viewer.player_bot_ai && !viewer.bot_ai);
+        viewer.tick();
+        assert!(viewer.game.as_ref().unwrap().sides[0].player.as_ref().unwrap().pos[0] > ai_x,
+            "manual movement resumes immediately");
+        assert!(!viewer.title().contains("P1 AI"));
+    }
+
     #[test]
     fn x_drives_player_charge_without_debug_enemy_injection() {
         let Some(home) = std::env::var_os("USERPROFILE") else { return };

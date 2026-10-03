@@ -61,6 +61,7 @@ pub struct SideState {
     /// Difficulty (`DAT_0062b250`): 0 Easy, 1 Normal, 2 Hard, 3 Lunatic.
     pub difficulty: u8,
     pub player_pos: [f32; 2],
+    pub opponent_pos: [f32;2],
     /// TH19's escalating level (0..7), selecting columns of the level tables.
     pub level: usize,
     pub extra_level: u8,
@@ -90,8 +91,8 @@ pub struct SideState {
     pub unknown_ops: HashMap<u16, u32>,
     pub unknown_vars: HashMap<i32, u32>,
     /// Kill chain (`FUN_00549780`): a timer topped up by each kill (capped at 60 frames),
-    /// the current chain length and the best chain. APPROX: the timer counting down by one
-    /// per frame and the chain ending at 0 is assumed; that code hasn't been located yet.
+    /// the current chain length and the best chain. FUN_005450e0 counts down and clears
+    /// the current chain on expiry; the lifetime best is only a statistic.
     pub chain_timer: i32,
     pub chain: i32,
     pub chain_max: i32,
@@ -112,22 +113,24 @@ pub struct SideState {
     pub ghost_anm: Option<usize>,
     /// `ascii.anm`, for the combo counter.
     pub ascii_anm: Option<usize>,
-    /// Best chain shown by the combo counter (player +0x22b8), frames since it last rose
-    /// (+0x2290, starts at 120) and its glyph VMs.
+    /// Displayed chain (player +0x22b8), remaining display frames (+0x2290), and glyph VMs.
     pub combo_shown: i32,
-    pub combo_age: i32,
+    pub combo_timer: i32,
     pub combo_vms: Vec<th_anm::VmId>,
     /// Lasers fired at this field's player.
     pub lasers: Vec<crate::laser::Laser>,
     /// Meter orbs and the other items (`ItemInf`), and the graze count (status +0x80).
     pub items: crate::item::Items,
     pub graze: i32,
+    /// Graze sparks in flight (bullet-manager pool type 4).
+    pub sparks: Vec<crate::graze::Spark>,
     /// Kill explosions in progress.
     pub explosions: Vec<Explosion>,
     /// The charging aura of this field's player: Reimu's circle (centre, radius) or Marisa's
     /// full-height column (centre x in `pos[0]`, half width).
     pub scope_circle: Option<([f32; 2], f32)>,
     pub scope_column: bool,
+    pub scope_character: crate::character::Character,
     pub spirit_credit: i32,
     pub spirit_origin: [f32;2],
     pub spirit_pressure: i32,
@@ -143,6 +146,7 @@ pub struct SideState {
     /// White dot counter (FUN_00548bc0, max 1400) and special bullet counter (FUN_00548d00).
     pub dot_counter: i32,
     pub special_counter: i32,
+    special_sequence: usize,
     /// Where the last kill or cancel happened (the origin of what they send).
     pub last_credit_pos: [f32; 2],
     pub last_special_pos: [f32; 2],
@@ -235,22 +239,29 @@ impl SideState {
     /// (`FUN_00416f10`); the column (`FUN_00417a60`) is a full-height band of half width `w`,
     /// tested here as the body's extent overlapping it.
     pub fn scope_contains(&self, pos: [f32;2], radius: f32) -> bool {
+        if matches!(self.scope_character,crate::character::Character::Sanae|crate::character::Character::Ran) {
+            return self.scope_circle.is_some_and(|(centre,r)| crate::scope::bullet_hit(self.scope_character,centre,r,pos,radius));
+        }
         self.scope_circle.is_some_and(|(centre,r)| if self.scope_column {
             (pos[0]-centre[0]).abs() < r + radius
         } else {
             (pos[0]-centre[0]).powi(2)+(pos[1]-centre[1]).powi(2) < r*r+radius*radius
         })
     }
+    /// Ran's body callback 00419620 tests the oriented body against both cross rectangles.
+    pub fn scope_body(&self,body:&crate::enemy::EnemyData)->bool {
+        if self.scope_character==crate::character::Character::Ran {
+            return self.scope_circle.is_some_and(|(c,r)| {
+                let angle=body.delta[1].atan2(body.delta[0]);
+                [[r,7.0*r],[7.0*r,r]].into_iter().any(|size|
+                    crate::laser::rect_rect(body.pos,body.hitbox,angle,c,size))
+            });
+        }
+        self.scope_contains(body.pos,body.hitbox[0]*0.5)
+    }
     /// The bullet callback: Reimu's circle again, Marisa's column by x alone (`FUN_00417a10`).
     pub fn scope_bullet(&self, pos: [f32;2], radius: f32) -> bool {
-        Self::scope_hit(self.scope_circle, self.scope_column, pos, radius)
-    }
-    fn scope_hit(scope: Option<([f32; 2], f32)>, column: bool, pos: [f32;2], radius: f32) -> bool {
-        scope.is_some_and(|(centre,r)| if column {
-            (pos[0]-centre[0]).abs() < r
-        } else {
-            (pos[0]-centre[0]).powi(2)+(pos[1]-centre[1]).powi(2) < r*r+radius*radius
-        })
+        self.scope_circle.is_some_and(|(c,r)| crate::scope::bullet_hit(self.scope_character,c,r,pos,radius))
     }
     /// `FUN_00548bc0`: feed the white dot counter (cap 1400) and remember where it happened.
     pub fn add_dots(&mut self, n: i32, pos: [f32; 2]) {
@@ -376,6 +387,7 @@ impl Side {
                 field,
                 difficulty: 1,
                 player_pos: [0.0, 400.0],
+                opponent_pos: [0.0,400.0],
                 level: 0,
                 extra_level: 0, boss_level: 0, incoming_extra_level: 0, incoming_boss_level: 0,
                 boss_ids: Vec::new(), boss_globals: HashMap::new(),
@@ -406,16 +418,17 @@ impl Side {
                 ghost_anm: None,
                 ascii_anm: None,
                 combo_shown: 0,
-                combo_age: 0,
+                combo_timer: 0,
                 combo_vms: Vec::new(),
                 lasers: Vec::new(),
                 items: crate::item::Items::new(),
                 graze: 0,
+                sparks: Vec::new(),
                 explosions: Vec::new(),
                 scope_circle: None,
-                scope_column: false,
+                scope_column: false, scope_character: Default::default(),
                 spirit_credit: 0, spirit_origin: [0.0;2], spirit_pressure: 0, spirit_frames: 0,
-                outgoing_spirits: Vec::new(), pending_spirits: Vec::new(), outgoing_reflects: Vec::new(), pending_reflects: Vec::new(), arrived_reflects: Vec::new(), rain: 0, dot_counter: 0, special_counter: 0, last_credit_pos: [0.0; 2], last_special_pos: [0.0; 2],
+                outgoing_spirits: Vec::new(), pending_spirits: Vec::new(), outgoing_reflects: Vec::new(), pending_reflects: Vec::new(), arrived_reflects: Vec::new(), rain: 0, dot_counter: 0, special_counter: 0, special_sequence: 0, last_credit_pos: [0.0; 2], last_special_pos: [0.0; 2],
                 sent_spirits_pending: 0,
             },
             enemies: Vec::new(),
@@ -502,15 +515,16 @@ impl Side {
         let mut ctx =
             bullet::Ctx { world, lib, types: &types, anm, field: st.field, player: st.player_pos, rand: &mut rand };
         let mut hit: Option<[f32; 2]> = None;
-        let mut grazes: Vec<[f32; 2]> = Vec::new();
+        let mut grazes: Vec<([f32; 2], u32)> = Vec::new();
         let player_r = self.player.as_ref().map_or(0.0, |p| p.hitbox_radius());
         let cancel = self.player.as_ref().and_then(|p| p.cancel_radius);
-        let (scope, scope_column) = (st.scope_circle, st.scope_column);
+        let (scope, scope_character) = (st.scope_circle, st.scope_character);
         for b in st.bullets.iter_mut() {
             // Original contact callback applies its factor to the following movement tick.
             let dt = b.scope_time_scale;
             b.update_scaled(&mut ctx, dt);
-            b.scope_time_scale = if b.state == 1 && b.hitbox > 0.0 && SideState::scope_hit(scope, scope_column, b.pos, b.hitbox) { 0.5 } else { 1.0 };
+            let slowed = b.state == 1 && b.hitbox > 0.0 && scope.is_some_and(|(c,r)| crate::scope::bullet_hit(scope_character,c,r,b.pos,b.hitbox));
+            b.scope_contact(slowed, ctx.world);
             let (dx, dy) = (b.pos[0] - st.player_pos[0], b.pos[1] - st.player_pos[1]);
             let d2 = dx * dx + dy * dy;
             if let Some(r) = cancel {
@@ -522,23 +536,30 @@ impl Side {
             // Marisa's bomb band (FUN_004ee0d0): a live or appearing bullet touching the column.
             if self.player.as_ref().is_some_and(|p| p.cancel_columns.iter().any(|&(x, w)|
                 b.invuln == 0 && matches!(b.state, 1 | 2) && (b.pos[0] - x).abs() <= w + b.hitbox)) { b.cancel(); continue; }
+            if self.player.as_ref().is_some_and(|p| p.cancel_rects.iter().any(|&(pos,size)|
+                b.invuln==0 && matches!(b.state,1|2) && crate::scope::rect_circle(pos,size,b.pos,b.hitbox))) { b.cancel(); continue; }
             if self.player.as_ref().is_some_and(|p| p.cancel_circles.iter().any(|(pos,r)|
                 b.intersects_cancel(*pos,*r,ctx.world,ctx.lib))) { b.cancel(); continue; }
             // FUN_00549e00: hit when d^2 < player_r^2 + bullet_r^2.
             if b.state == 1 && !b.delete && player_r > 0.0 && d2 < player_r * player_r + b.hitbox * b.hitbox {
                 hit = Some(b.pos);
-            } else if b.state == 1 && !b.delete && !b.grazed && b.hitbox > 0.0 && self.player.is_some() {
-                // Otherwise inside the graze ring (radius 3 + max(40, r / 2.5), plus r): one
-                // graze per bullet (FUN_00549fb0 throws an orb at the bullet).
+            } else if b.state == 1 && !b.delete && b.hitbox > 0.0 && self.player.is_some() {
+                // Otherwise inside the graze ring (radius 3 + max(40, r / 2.5), plus r): the
+                // bullet's gate decides whether this tick grazes (FUN_004f5130 / FUN_00549fb0).
                 let reach = 3.0 + 40.0f32.max(b.hitbox / 2.5);
-                if d2 < reach * reach + b.hitbox * b.hitbox {
-                    b.grazed = true;
-                    grazes.push(b.pos);
+                if b.graze.tick(d2 < reach * reach + b.hitbox * b.hitbox) {
+                    // Colour +0x694: the type's table colour for mode 6, else 0xffd08080.
+                    let rgb = types.get(b.kind.max(0) as usize)
+                        .filter(|t| t.cancel_mode == 6)
+                        .map_or(crate::graze::DEFAULT_RGB, |t| t.colours[b.color.clamp(0, 15) as usize][4] as u32 & 0xff_ffff);
+                    grazes.push((b.pos, rgb));
                 }
             }
         }
-        for at in grazes {
+        for (at, rgb) in grazes {
             st.graze += 1;
+            let delay = (st.rand() & 7) as i32;
+            st.sparks.push(crate::graze::Spark::new(at, rgb, delay));
             let mut seed = st.rand() | 1;
             st.items.drop_orbs(at, || {
                 seed ^= seed << 13;
@@ -547,6 +568,9 @@ impl Side {
                 (seed >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0
             });
         }
+        let mut sparks = std::mem::take(&mut st.sparks);
+        sparks.retain_mut(|sp| sp.tick(&mut || st.randf()));
+        st.sparks = sparks;
         let field = st.field;
         st.bullets.retain(|b| {
             if b.delete {
@@ -569,7 +593,7 @@ impl Side {
             if let Some(rank) = a.special {
                 // EXOnmyoInf: the flying yin-yang becomes ExtraAttack00 (FUN_0053bc50).
                 st.incoming_extra_level = rank.clamp(0, 7) as u8;
-                st.request(SpawnRequest { id: 0, difficulty: 0, sub: "ExtraAttack00".into(), pos: a.pos, hp: 200, score: 0,
+                st.request(SpawnRequest { id: 0, difficulty: 0, sub: if matches!(a.character,crate::character::Character::Sanae|crate::character::Character::Ran) {"ExAttack"} else {"ExtraAttack00"}.into(), pos: a.pos, hp: 200, score: 0,
                     item: -1, mirrored: false, ivars: [0; 4], fvars: [0.0; 8], owner: Some(a.owner) });
                 continue;
             }
@@ -589,6 +613,7 @@ impl Side {
         // FUN_0051d4e0 case0 earns spirit credit at chains>9; case1 dispatches an
         // animal selected by distance, and earns5 further credit (default modifiers).
         st.spirit_origin = e.pos;
+        if !e.suppress_kill_rewards {
         if (1..=4).contains(&e.spirit_kind) {
             let distance = (e.pos[0]-st.player_pos[0]).powi(2)+(e.pos[1]-st.player_pos[1]).powi(2);
             st.outgoing_spirits.push(crate::spirit::Request {
@@ -607,6 +632,7 @@ impl Side {
             if st.chain > 9 {
                 st.spirit_credit = (st.spirit_credit+30).min(700);
             }
+        }
         }
         // The effect is turned to face away from the shot that landed the kill.
         let angle = match e.last_hit {
@@ -696,6 +722,7 @@ impl Side {
     pub fn tick(&mut self, progs: &[Program], keys: u32, world: &mut World, lib: &AnmLibrary) {
         self.st.scope_circle = self.player.as_ref().filter(|p| p.scope.active()).map(|p| (p.scope.pos,p.scope.radius));
         self.st.scope_column = self.player.as_ref().is_some_and(|p| p.character == crate::character::Character::Marisa);
+        self.st.scope_character = self.player.as_ref().map_or(Default::default(),|p|p.character);
         let mut requests = Vec::new();
         self.st.pending_spirits.retain_mut(|p| {
             if let Some(req) = p.tick(self.st.ghost_anm,world,lib) { requests.push(req); false } else { true }
@@ -750,6 +777,7 @@ impl Side {
         }
         self.st.scope_circle = self.player.as_ref().filter(|p| p.scope.active()).map(|p| (p.scope.pos,p.scope.radius));
         self.st.scope_column = self.player.as_ref().is_some_and(|p| p.character == crate::character::Character::Marisa);
+        self.st.scope_character = self.player.as_ref().map_or(Default::default(),|p|p.character);
         self.update_bullets(world, lib);
         self.update_lasers(world, lib);
         self.update_explosions(world);
@@ -758,12 +786,7 @@ impl Side {
                 Self::kill(&mut self.st, &mut e.data, world, lib);
             }
         }
-        if self.st.chain_timer > 0 {
-            self.st.chain_timer -= 1;
-            if self.st.chain_timer == 0 {
-                self.st.chain = 0;
-            }
-        }
+        self.tick_chain();
         crate::spirit::send_earned(&mut self.st);
         self.update_combo(world, lib);
         // FUN_00509980: a body with flag 0x200 that is not touching the player but is inside
@@ -825,19 +848,24 @@ impl Side {
         let mut areas = Vec::new();
         if let Some(p) = &self.player {
             areas.extend(p.cancel_circles.iter().map(|&(pos,radius)| crate::laser::CancelArea::Circle {pos,radius}));
+            areas.extend(p.cancel_rects.iter().map(|&(pos,size)| crate::laser::CancelArea::Rect {pos,size}));
             areas.extend(p.cancel_columns.iter().map(|&(x,half_width)| crate::laser::CancelArea::Column {x,half_width}));
         }
         for area in areas { self.st.cancel_lasers(area, true, world, lib); }
         let mut lasers = std::mem::take(&mut self.st.lasers);
         let mut hit = false;
         let mut grazed = None;
+        let mut spark_at = None;
         let player = self.player.as_ref().map(|p| (p.pos, p.hitbox_radius().max(3.0), p.hitbox_radius() > 0.0));
         lasers.retain_mut(|l| {
             let alive = l.update(world, field);
             if let Some((pos, radius, vulnerable)) = player.filter(|_| alive) {
                 match l.contact(pos, radius) {
                     crate::laser::Contact::Hit if vulnerable => hit = true,
-                    crate::laser::Contact::Hit | crate::laser::Contact::Graze if l.graze_tick() => grazed = Some(pos),
+                    crate::laser::Contact::Hit | crate::laser::Contact::Graze if l.graze_tick() => {
+                        grazed = Some(pos);
+                        spark_at = Some(l.graze_point(pos));
+                    }
                     _ => {}
                 }
             }
@@ -849,6 +877,8 @@ impl Side {
         self.st.lasers = lasers;
         if let Some(at) = grazed {
             self.st.graze += 1;
+            let delay = (self.st.rand() & 7) as i32;
+            self.st.sparks.push(crate::graze::Spark::new(spark_at.unwrap_or(at), crate::graze::DEFAULT_RGB, delay));
             let mut seed = self.st.rand() | 1;
             self.st.items.drop_orbs(at, || {
                 seed ^= seed << 13;
@@ -865,25 +895,38 @@ impl Side {
         }
     }
 
-    /// `FUN_00546080`: the combo counter. A chain of two or more that beats the best shown while
-    /// the chain timer runs becomes the number; it stays up for the round, blinking gray once
-    /// the chain has ended. The number ends at x = 48 (left field) / 360 (right) with "hits" in
-    /// small type after it, both on y = 32.
+    /// Native chain expiry is in FUN_005450e0. Zero-time cancellation hits can occur
+    /// after expiry, so also clear a chain whose timer was already zero this frame.
+    fn tick_chain(&mut self) {
+        self.st.chain_timer = self.st.chain_timer.saturating_sub(1).max(0);
+        if self.st.chain_timer == 0 {
+            self.st.chain = 0;
+        }
+    }
+
+    /// FUN_00546080 draws the counter; FUN_005450e0 counts its display timer DOWN.
+    /// Once reward-chain time expires, the latched number flashes yellow/gray until
+    /// display time expires. The displayed count never contributes to gameplay rewards.
     fn update_combo(&mut self, world: &mut World, lib: &AnmLibrary) {
         use crate::text::{big_text, Align};
         let st = &mut self.st;
         for id in st.combo_vms.drain(..) {
             world.delete(id);
         }
+        if st.combo_timer > 0 {
+            st.combo_timer -= 1;
+            if st.combo_timer == 0 { st.combo_shown = 0; }
+        }
         if st.chain > 1 && st.combo_shown < st.chain && st.chain_timer > 0 {
             st.combo_shown = st.chain;
-            st.combo_age = 120;
-        } else if st.combo_shown != 0 {
-            st.combo_age += 1;
+            st.combo_timer = 120;
         }
         let (Some(file), true) = (st.ascii_anm, st.combo_shown != 0) else { return };
-        let yellow = [255.0, 255.0, 0.0];
-        let color = if st.chain_timer < 1 && st.combo_age % 6 >= 3 { [128.0; 3] } else { yellow };
+        let color = if st.chain_timer <= 0 && st.combo_timer % 6 >= 3 {
+            [128.0; 3]
+        } else {
+            [255.0, 255.0, 0.0]
+        };
         let x = if st.field[0] < 320.0 { 48.0 } else { 360.0 };
         let pos = [x, 32.0];
         st.combo_vms = big_text(world, lib, file, &st.combo_shown.to_string(), pos, 1.0, Align::Right, color);
@@ -895,6 +938,8 @@ impl Side {
 /// one attack an extra simulation tick. Higher attacks are sent to the opponent only.
 pub fn prepare_charge_targets(sides: &mut [Side]) {
     if sides.len()!=2 { return; }
+    let positions=[sides[0].player.as_ref().map_or([0.0,400.0],|p|p.pos),sides[1].player.as_ref().map_or([0.0,400.0],|p|p.pos)];
+    for i in 0..2 {sides[i].st.opponent_pos=positions[1-i];}
     let active = [sides[0].has_boss(),sides[1].has_boss()];
     for i in 0..2 { if let Some(p)=&mut sides[i].player { p.opponent_boss_active=active[1-i]; } }
 }
@@ -935,10 +980,10 @@ pub fn dispatch_charges(sides: &mut [Side]) {
     // The dot and special-bullet counters send attacks (FUN_005450e0 and Reimu's FUN_0053ac80).
     for sender in 0..2 {
         let frames = sides[sender].st.spirit_frames;
-        let mut active = sides[1 - sender].enemies.iter().filter(|e| e.data.sub == "ExtraAttack00").count()
+        let mut active = sides[1 - sender].enemies.iter().filter(|e| matches!(e.data.sub.as_str(),"ExtraAttack00"|"ExAttack")).count()
             + sides[1 - sender].st.pending_reflects.iter().filter(|p| p.is_special()).count();
         let rank = sides[sender].st.extra_level as i32;
-        let reimu = sides[sender].player.as_ref().map_or(true, |p| p.character == crate::character::Character::Reimu);
+        let character = sides[sender].player.as_ref().map_or(Default::default(),|p|p.character);
         let st = &mut sides[sender].st;
         // White dots: threshold 150 minus the pressure term, one bullet each.
         let threshold = (150 - (st.spirit_pressure as f32 / 200.0 * 100.0) as i32).max(1);
@@ -956,27 +1001,43 @@ pub fn dispatch_charges(sides: &mut [Side]) {
         // Special bullets: threshold 100/90/90/80 by difficulty (Normal assumed), limited.
         // Reimu's special bullet is a yin-yang (EXOnmyoInf); Marisa's a laser orb (EXLaserInf,
         // bullet.anm script 63). Both land as ExtraAttack00 of the sender's program.
-        const THRESHOLD: i32 = 90;
-        while st.special_counter >= THRESHOLD {
-            st.special_counter -= THRESHOLD;
+        let threshold=if character==crate::character::Character::Ran {65} else {90};
+        while st.special_counter >= threshold {
+            st.special_counter -= threshold;
             if active >= crate::reflect::special_limit(frames) { break; }
             active += 1;
-            let target = [st.randf2() * 160.0, st.randf() * 60.0];
+            let target = match character {
+                crate::character::Character::Sanae => {
+                    let k=st.special_sequence;st.special_sequence+=1;
+                    let x=if k%2==0 {-148.0+st.randf()*32.0} else {148.0-st.randf()*32.0};
+                    [x,st.randf()*20.0]
+                }
+                crate::character::Character::Ran => {
+                    let k=st.special_sequence%11;st.special_sequence+=1;
+                    match k {
+                        0|3|7 => [st.randf2()*132.0,0.0],
+                        4|8 => [st.randf2()*132.0,448.0],
+                        _ => [if matches!(k,1|6|9) {-148.0} else {148.0},st.randf()*416.0+16.0],
+                    }
+                }
+                _ => [st.randf2()*160.0,st.randf()*60.0],
+            };
             st.outgoing_reflects.push(crate::reflect::Request { kind: 44, color: 1, speed: 0.0,
                 origin: st.last_special_pos, target: Some(target), special_rank: Some(rank), owner: sender,
-                script: if reimu { None } else { Some(63) }, tangents: None, aim_player: false });
+                script: match character {crate::character::Character::Reimu=>None,crate::character::Character::Marisa=>Some(63),crate::character::Character::Sanae=>Some(61),crate::character::Character::Ran=>Some(14)}, tangents: None, aim_player: false });
         }
     }
     // Bullets cancelled by a kill explosion fly to the opponent's field and fire there.
     for sender in 0..2 {
         let field = sides[sender].st.field;
+        let character=sides[sender].player.as_ref().map_or(Default::default(),|p|p.character);
         for mut req in std::mem::take(&mut sides[sender].st.outgoing_reflects) {
             if req.aim_player {
                 let x = sides[1 - sender].player.as_ref().map_or(0.0, |p| p.pos[0]);
                 req.target = Some([x, 448.0]);
             }
             let receiver = &mut sides[1 - sender].st;
-            let pending = crate::reflect::Pending::new(req, field, receiver);
+            let pending = crate::reflect::Pending::new_character(req, field, receiver, character);
             receiver.pending_reflects.push(pending);
         }
     }
@@ -1059,7 +1120,7 @@ impl Side {
                 angle: std::f32::consts::FRAC_PI_2 + st.randf2() * 0.15,
                 pos: [x, 0.0],
                 special: None,
-                owner: 0,
+                owner: 0, character:Default::default(),
             };
             st.arrived_reflects.push(a);
         }
@@ -1075,6 +1136,11 @@ impl Side {
     /// EX/boss attack script on this field at once, without death effects or rewards.
     /// The stage script keeps running.
     pub fn dev_clear(&mut self, world: &mut World) {
+        self.st.chain_timer = 0;
+        self.tick_chain();
+        self.st.combo_shown = 0;
+        self.st.combo_timer = 0;
+        for id in self.st.combo_vms.drain(..) { world.delete(id); }
         for mut e in self.enemies.drain(..) {
             e.remove_sprites(world);
         }
@@ -1118,6 +1184,35 @@ fn script_request(sub: &str,pos: [f32;2],owner: Option<usize>) -> SpawnRequest {
 
 #[cfg(test)]
 mod spirit_tests {
+    #[test]
+    fn expired_chain_does_not_boost_next_kill_rewards() {
+        for timer in [1, 0, -1] {
+            let mut side = Side::new(crate::FIELDS[0], 77, [0; 256], [None; 8]);
+            let mut world = World::default();
+            let lib = AnmLibrary::default();
+            side.st.chain = 24;
+            side.st.chain_max = 24;
+            side.st.chain_timer = timer;
+            side.tick_chain();
+            assert_eq!((side.st.chain, side.st.chain_timer), (0, 0));
+            let mut enemy = crate::EnemyData::default();
+            Side::kill(&mut side.st, &mut enemy, &mut world, &lib);
+            assert_eq!(side.st.chain, 1);
+            assert_eq!(side.st.dot_counter, 40, "no old-chain dot bonus");
+            assert_eq!(side.st.spirit_credit, 0);
+            assert!(side.st.items.list.is_empty(), "no old-chain meter orbs");
+            assert_eq!(side.st.chain_max, 24, "best is only a statistic");
+            // Hits awarding no time must not accumulate across simulation frames.
+            side.st.chain_timer = 0;
+            side.tick_chain();
+            assert_eq!(side.st.chain, 0);
+            let mut spirit = crate::EnemyData { spirit_kind: 1, ..Default::default() };
+            Side::kill(&mut side.st, &mut spirit, &mut world, &lib);
+            assert_eq!(side.st.auto.ex, 0, "no old-chain automatic attack credit");
+            assert_eq!(side.st.auto.boss, 0);
+        }
+    }
+
     #[test]
     fn automatic_ex_and_boss_counters_follow_the_native_rules() {
         use super::AutoSend;

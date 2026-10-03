@@ -57,6 +57,7 @@ pub struct Pending {
     special_rank: Option<i32>,
     owner: usize,
     script: Option<i32>,
+    character: crate::character::Character,
 }
 
 /// A converted bullet reaching the opponent's field.
@@ -70,11 +71,15 @@ pub struct Arrival {
     pub special: Option<i32>,
     /// Side whose program runs it (special bullets).
     pub owner: usize,
+    pub character: crate::character::Character,
 }
 
 impl Pending {
     /// Whether this is a special bullet (counts against the sender's special limit).
     pub fn is_special(&self) -> bool { self.special_rank.is_some() }
+
+    /// Where it will land, in the receiving field's coordinates, and whether it is still queued fresh.
+    pub fn landing(&self) -> ([f32; 2], bool) { (self.target, self.time == 0) }
 
     pub fn delete(self, world: &mut World) {
         if let Some(id) = self.vm { world.delete(id); }
@@ -83,15 +88,24 @@ impl Pending {
     /// `FUN_0051c250`: 60-159 frames of flight along a Hermite curve to a point near the top of
     /// the receiving field (x within 16 of where the bullet was, y in 0..32).
     pub fn new(req: Request, source_field: [f32; 4], receiver: &mut SideState) -> Self {
-        let delay = (receiver.rand() & 0xffff) as i32 % 100 + 60;
+        Self::new_character(req,source_field,receiver,crate::character::Character::Reimu)
+    }
+    pub fn new_character(req: Request, source_field: [f32;4], receiver: &mut SideState, character: crate::character::Character) -> Self {
+        let delay = match character {
+            crate::character::Character::Sanae if req.special_rank.is_some() => (receiver.rand()&0xffff) as i32%80+80,
+            crate::character::Character::Ran if req.special_rank.is_some() => (receiver.rand()&0xffff) as i32%40+50,
+            _ => (receiver.rand()&0xffff) as i32%100+60,
+        };
         let jitter = [receiver.randf2() * 16.0, receiver.randf() * 32.0];
         let target = req.target.unwrap_or([req.origin[0] + jitter[0], jitter[1]]);
         let start = field_to_canvas(source_field, req.origin);
         let end = field_to_canvas(receiver.field, target);
         let mut curve = Interp::default();
-        let (t0, t1) = req.tangents.unwrap_or_else(|| ([receiver.randf2() * 100.0, -400.0], [receiver.randf2() * 100.0, 100.0]));
+        let (t0, t1) = req.tangents.unwrap_or_else(|| if matches!(character,crate::character::Character::Sanae|crate::character::Character::Ran) && req.special_rank.is_some() {
+            ([receiver.randf2()*100.0,200.0],[receiver.randf2()*100.0,-300.0])
+        } else {([receiver.randf2() * 100.0, -400.0], [receiver.randf2() * 100.0, 100.0])});
         curve.start_bezier(start, t0, end, t1, delay);
-        Self { kind: req.kind, color: req.color, speed: (req.speed + 0.5).min(6.0), target, delay, time: 0, start, curve, vm: None, special_rank: req.special_rank, owner: req.owner, script: req.script }
+        Self { kind: req.kind, color: req.color, speed: (req.speed + 0.5).min(6.0), target, delay, time: 0, start, curve, vm: None, special_rank: req.special_rank, owner: req.owner, script: req.script, character }
     }
 
     /// One frame: the bullet's sprite (0.8 scale) flies; on arrival it becomes a bullet
@@ -99,10 +113,14 @@ impl Pending {
     /// within 30 degrees from the middle of the field and inward from the sides.
     pub fn tick(&mut self, anm: Option<usize>, types: &[BulletType], receiver: &mut SideState, world: &mut World, lib: &AnmLibrary) -> Option<Arrival> {
         if self.time == 0 && self.script.is_some() {
-            if let (Some(file), Some(script)) = (anm, self.script) {
+            let own_file=match self.character {
+                crate::character::Character::Ran => lib.file_id("pl03b.anm"),
+                _ => anm,
+            };
+            if let (Some(file), Some(script)) = (own_file, self.script) {
                 let id = world.spawn_clipped(lib, file, script as usize, self.start, [0.0, 0.0, 640.0, 480.0]);
                 world.set_draw_priority(id, crate::bullet::BULLET_DRAW_PRIORITY);
-                if let Some(vm) = world.get_mut(id) { vm.scale = [0.8, 0.8]; }
+                if let Some(vm) = world.get_mut(id) { vm.scale = [0.8, 0.8]; if self.special_rank.is_some() && matches!(self.character,crate::character::Character::Sanae|crate::character::Character::Ran) {vm.alpha=192.0;} }
                 self.vm = Some(id);
             }
         } else if self.time == 0 {
@@ -123,7 +141,7 @@ impl Pending {
         }
         if let Some(id) = self.vm.take() { world.delete(id); }
         if self.special_rank.is_some() {
-            return Some(Arrival { kind: self.kind, color: self.color, speed: 0.0, angle: 0.0, pos: self.target, special: self.special_rank, owner: self.owner });
+            return Some(Arrival { kind: self.kind, color: self.color, speed: 0.0, angle: 0.0, pos: self.target, special: self.special_rank, owner: self.owner, character:self.character });
         }
         // APPROX: FUN_00404c90's result is hidden in the decompile; the side fans are read as
         // a random angle in the quarter turn that points inward.
@@ -134,7 +152,7 @@ impl Pending {
             FRAC_PI_2 + (receiver.randf() * 2.0 - 1.0) * FRAC_PI_6
         };
         let speed = receiver.randf() * 0.2 + self.speed + receiver.spirit_pressure as f32 / 200.0 * 2.0;
-        Some(Arrival { kind: self.kind, color: self.color, speed, angle, pos: self.target, special: None, owner: self.owner })
+        Some(Arrival { kind: self.kind, color: self.color, speed, angle, pos: self.target, special: None, owner: self.owner, character:self.character })
     }
 }
 

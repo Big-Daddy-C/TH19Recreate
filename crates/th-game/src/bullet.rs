@@ -151,9 +151,11 @@ pub struct Bullet {
     /// Removed by a cancel (not by its own script or by leaving the field): plays the
     /// type's cancel effect when it goes (`FUN_004eeb30`).
     pub cancelled: bool,
-    /// Already grazed (each bullet is grazed once).
-    pub grazed: bool,
+    /// Graze allowance and timers (`FUN_004f5130`).
+    pub graze: crate::graze::Gate,
     pub scope_time_scale: f32,
+    /// Consecutive scope-contact frames (native timer at bullet+0xfec).
+    pub scope_frames: i32,
     timer_fraction: f32,
 }
 
@@ -299,8 +301,9 @@ fn make_bullet(et: &Et, origin: [f32; 2], i: i32, j: i32, aim: f32, ctx: &mut Ct
         vm: None,
         delete: false,
         cancelled: false,
-        grazed: false,
+        graze: Default::default(),
         scope_time_scale: 1.0,
+        scope_frames: 0,
         timer_fraction: 0.0,
     };
     b.set_sprite(et.sprite, et.color, ctx);
@@ -459,6 +462,29 @@ impl Bullet {
                 ex::DELETE => self.delete = true,
                 // Not implemented yet: other kinds are skipped.
                 _ => {}
+            }
+        }
+    }
+
+    /// Shared scope contact presentation (004f54a7): interrupt 2 on entry, tint
+    /// ARGB ff/ff/clamp((104-age)*2,96,255)/80 while slowed, interrupt 3 on exit.
+    pub fn scope_contact(&mut self, slowed: bool, world: &mut World) {
+        self.scope_time_scale = if slowed {0.5} else {1.0};
+        if slowed {
+            self.scope_frames = self.scope_frames.saturating_add(1);
+            if self.scope_frames == 1 {
+                if let Some(id) = self.vm { world.interrupt(id, 2); }
+            }
+            if let Some(vm) = self.vm.and_then(|id| world.get_mut(id)) {
+                vm.color2 = [255.0, ((104-self.scope_frames)*2).clamp(96,255) as f32, 128.0];
+                vm.alpha2 = 255.0;
+                vm.color_mode = 1;
+            }
+        } else if self.scope_frames > 0 {
+            self.scope_frames = 0;
+            if let Some(id) = self.vm {
+                world.interrupt(id, 3);
+                if let Some(vm) = world.get_mut(id) { vm.color_mode = 0; }
             }
         }
     }
