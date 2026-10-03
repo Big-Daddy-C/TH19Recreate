@@ -1,4 +1,7 @@
-//! Reimu's AuraReimuInf callbacks (00416d50, 00416e80, 00416f10, 00416f60).
+//! The charging aura (`AuraReimuInf` callbacks 00416d50, 00416e80, 00416f10, 00416f60; Marisa's
+//! `AuraMarisaInf` 00417840, 00417980, 00417a10, 00417a60). Reimu's grows into a circle of radius
+//! 64, Marisa's into a full-height column of half width 14, both over 20 frames (interpolation
+//! mode 4) at the default 100% rate.
 use th_anm::{interp::Interp, AnmLibrary, VmId, World};
 use crate::enemy::field_to_canvas;
 
@@ -13,13 +16,13 @@ pub struct Scope {
 impl Scope {
     pub fn active(&self) -> bool { self.active }
 
-    pub fn update(&mut self, held: bool, pos: [f32; 2], file: usize,
+    pub fn update(&mut self, held: bool, column: bool, pos: [f32; 2], file: usize,
                   world: &mut World, lib: &AnmLibrary, field: [f32; 4]) {
         if held && !self.active {
             self.active = true;
             self.radius = 1.0;
             // Default status +0x8c is 100 percent; ability modifiers remain unported.
-            self.growth.start([1.0], [64.0], 20, 4);
+            self.growth.start([1.0], [if column { 14.0 } else { 64.0 }], 20, 4);
             self.vm = Some(world.spawn_clipped(lib, file, 15, field_to_canvas(field, pos), field));
         } else if !held && self.active {
             self.active = false;
@@ -32,7 +35,8 @@ impl Scope {
             if let Some(v) = self.vm.and_then(|id| world.get_mut(id)) {
                 let at = field_to_canvas(field, pos);
                 v.origin = [at[0], at[1], 0.0];
-                v.scale = [self.radius; 2];
+                // Reimu's circle scales both axes; Marisa's column only its width.
+                v.scale = if column { [self.radius, 1.0] } else { [self.radius; 2] };
             }
         }
     }

@@ -637,6 +637,90 @@
     "enemy_body_graze": {
       "address": "00509980",
       "decompile_sha256": "109f74133fe7e3e0fc7a1926c73dd511b844c815be1c28d1e38024fea216d511"
+    },
+    "shot_record_to_bullet": {
+      "address": "0054e960",
+      "decompile_sha256": "555ae865c2f42c4b106a9fc22480f54e5da704713ab59303ab54f5c41537d056"
+    },
+    "shot_record_pick": {
+      "address": "0054f990",
+      "decompile_sha256": "6fe3d91e0d76f7c42068903dd464130c0ccd4704305bc4f0136e6922971a332e"
+    },
+    "marisa_beam_init": {
+      "address": "0054d9e0",
+      "decompile_sha256": "8607293bea0cf84d697ad9509a77f4f84bdba3b767e19c8f77fbbfae219a1250"
+    },
+    "marisa_beam_update": {
+      "address": "0054d370",
+      "decompile_sha256": "513200b3ae5c14ac4eb5c2f8f83e7deb34c9546c8a9cc36d8a4948462e7a7023"
+    },
+    "marisa_beam_hit": {
+      "address": "0054cd70",
+      "decompile_sha256": "37945eec52bd6e7d42b0e5d1bafd3a45821ded20f01d2e6a19e892bcdb618532"
+    },
+    "marisa_charge_beam_init": {
+      "address": "0054ccf0",
+      "decompile_sha256": "ffd0f2aa7780316f592f43fd5ebc220dc48a83402e70965a58d0069e73a43e94"
+    },
+    "marisa_charge_beam_update": {
+      "address": "0054c830",
+      "decompile_sha256": "51c5eac99eb02e3884a0714631751baca1543b29f507e7766bb0edca0cf59cd4"
+    },
+    "marisa_charge_beam_hit": {
+      "address": "0054c7c0",
+      "decompile_sha256": "9ffbb416849468b89bef6115b30d7a1f379647492b47c54f25afed74cf5764bd"
+    },
+    "marisa_special_update": {
+      "address": "0053cbe0",
+      "decompile_sha256": "c11c819e4f3f340d3f2448c91de4342bfa27b8e0ed13edf7d6f89bbb0490a9b3"
+    },
+    "marisa_special_send": {
+      "address": "0053cf00",
+      "decompile_sha256": "6d6619f55c92ad09035d8e93e9a6b3d77ebbd7f13bc47205cd0587e65405e39f"
+    },
+    "marisa_skill_start": {
+      "address": "00417b90",
+      "decompile_sha256": "1256357804b2ed2f2752f692691745686da10b34279655e998ec5a03d34d423d"
+    },
+    "marisa_scope_start": {
+      "address": "00417840",
+      "decompile_sha256": "53ac1772555e548d45faf3dd4158c954da919a9ca44a4fe477feef58c661ee1d"
+    },
+    "marisa_scope_update": {
+      "address": "00417980",
+      "decompile_sha256": "c8c281f6ab90692e71a906e7ac09bc91e0c847bcf4df1290c2accb4b1fdf45ed"
+    },
+    "marisa_scope_bullet": {
+      "address": "00417a10",
+      "decompile_sha256": "a216b659211ca8b56cf2ee37559dae7ce32105f3cc4f0a5565567dd0c7ca73d1"
+    },
+    "marisa_scope_rect": {
+      "address": "00417a60",
+      "decompile_sha256": "d183621736294aacce74bd7b49bef7846bdd3ab6d5230b42e03dbb703d084d24"
+    },
+    "marisa_bomb_update": {
+      "address": "0053d9b0",
+      "decompile_sha256": "9b58522650428d2c9535113e0fad0b3b6baac364c0f17e983b679f0a08c1d2f8"
+    },
+    "marisa_laser_object": {
+      "address": "0053d280",
+      "decompile_sha256": "445b64b99144eb3ba51339e033206ea18819251fef07ebc9ce199d73a3c4d783"
+    },
+    "ray_circle": {
+      "address": "004d3720",
+      "decompile_sha256": "24570792a04b1af41fb4428a1e6f8a6fe1b8c4ea88ccf9b05aa4600c62b99474"
+    },
+    "ray_rect": {
+      "address": "004d3140",
+      "decompile_sha256": "f13f2dbaa722189ad68d709ef1d7d29ad79629b02022014e976626e89465b652"
+    },
+    "rect_rect": {
+      "address": "004d2c30",
+      "decompile_sha256": "10f3060dac612bc761e62ab05435705c20d0579fbf4066f14e91790bd7e92fa2"
+    },
+    "ecl_cases_laser": {
+      "address": "004fecc0",
+      "decompile_sha256": "145bb78a3907254fc4f19360d88f5865d82d3514bf44c3babe91d4219841972a"
     }
   },
   "features": {
@@ -1732,6 +1816,109 @@
       },
       "next": [
         "Look for the focus-spirit orb source again once other characters are ported; the meter's starting value; item types 1..8 and the 0x14 counter item."
+      ]
+    },
+    "marisa": {
+      "implementation": "partial",
+      "summary": "Marisa is selectable (] / [ for the bot, Shift for the player; --p1 / --p2 N): her own pl01 shots, option beams, charge beams, charging column and ECL program per side. Her skill, bomb, special bullet, ECL lasers and bot rules are not ported.",
+      "symbols": [
+        "shot_record_to_bullet",
+        "shot_record_pick",
+        "marisa_beam_init",
+        "marisa_beam_update",
+        "marisa_beam_hit",
+        "marisa_charge_beam_init",
+        "marisa_charge_beam_update",
+        "marisa_charge_beam_hit",
+        "marisa_special_update",
+        "marisa_special_send",
+        "marisa_skill_start",
+        "marisa_scope_start",
+        "marisa_scope_update",
+        "marisa_scope_bullet",
+        "marisa_scope_rect",
+        "marisa_bomb_update",
+        "marisa_laser_object",
+        "ray_circle",
+        "ray_rect",
+        "rect_rect",
+        "ecl_cases_laser"
+      ],
+      "code": [
+        "crates/th-game/src/character.rs",
+        "crates/th-game/src/beam.rs",
+        "crates/th-game/src/scope.rs",
+        "crates/th-game/src/player.rs",
+        "crates/th-game/src/side.rs",
+        "crates/th19/src/main.rs"
+      ],
+      "tests": [
+        "crates/th-game/tests/higher_charge.rs",
+        "crates/th-game/src/beam.rs"
+      ],
+      "findings": [
+        {
+          "text": "Per-character data: each character has plNN.sht / .anm / .ecl (Reimu 00, Marisa 01) and plNNb.anm (sprite slot 3 of its ECL anim list). Attacks a side sends (ExtraAttack, BossAttack, special bullets) run the SENDER's program and sprite slots on the receiver's field (enemies carry an owner side). Stage waves and spirits live in default.ecl / waveNN.ecl, included by every character's program. Character select: Reimu 1, Marisa 2.",
+          "sources": [],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Marisa's SHT: same speeds (5/2) and radii as Reimu (hit 2.3), main shots are kind 7 needles (48x18, damage 16 / 9), options are kind 2 beams (callbacks [2,2,0,2], record interval 15, one live per SHT group, phase staggers the side beams), slot 10 is one charge beam and slot 11 the two side charge beams at +-32 (callbacks [12,9,0,8]); slots 20..37 are shared with Reimu. Callback tables: init 0x5a0440, update 0x5a0400, +0x4c 0x5a03fc, hit 0x5a03d0 (indexed by the record's four ids).",
+          "sources": [
+            "shot_record_to_bullet",
+            "shot_record_pick"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Option beam (FUN_0054d9e0 init, 0054d370 update, 0054cd70 hit): a rotated rectangle collider of width = record hitbox y (16) that starts at the option (or player) plus the record offset, points along the record angle, grows 18 px per frame while its length is <= 512 (stops at 522), and ends when the shot button is released, the player is hit or dead, charging starts (gauge >= 1) or a bomb runs. Each overlapping enemy is damaged on every 4th frame of the beam's age by the record damage; the beam is cut to the entry distance of the (last) overlapped enemy plus 8 (ray vs circle of radius half width + hurtbox radius, FUN_004d3720). An even-frame impact glow (record +0x2e, pl01.anm script 10) appears at the end; the VM gets interrupt 2 while hitting and 3 afterwards, scale2.x = length / 512 (the sprite is 510 px long), rotation = angle. All colliders' damage to one enemy is capped per frame by SHT+0x28 (90).",
+          "sources": [
+            "marisa_beam_init",
+            "marisa_beam_update",
+            "marisa_beam_hit",
+            "ray_circle"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Charge beam (callbacks 12 / 9 / 8, FUN_0054ccf0 / 0054c830 / 0054c7c0): the same geometry, but it lasts until its age passes 0x77 frames regardless of the shot button, is not cut by what it hits, and damages every overlapping enemy on every frame (the hit callback returns the record damage each frame). Fired from the release controller: slot 10 once on any release (FUN_0053cbe0 calls FUN_0054f990(0,0,10)), slot 11 additionally after the skill start (FUN_00417b90 sets +0xd4 = 1).",
+          "sources": [
+            "marisa_charge_beam_init",
+            "marisa_charge_beam_update",
+            "marisa_charge_beam_hit",
+            "marisa_special_update",
+            "marisa_skill_start"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Marisa's charging aura (AuraMarisaInf, FUN_00417840 / 00417980 / 00417a10 / 00417a60) is a column, not a circle: pl01.anm script 15 with scale x = half width, grown 1 -> 14 over 20 frames (mode 4) at 100% rate (Reimu: circle 1 -> 64). Bullets are slowed when |x - centre| < width; for bodies the game tests an oriented rectangle (centre x, y 224, width 2w, height 448) with FUN_004d2c30; the port tests the body's x extent against the band.",
+          "sources": [
+            "marisa_scope_start",
+            "marisa_scope_update",
+            "marisa_scope_bullet",
+            "marisa_scope_rect",
+            "rect_rect"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "What is still Reimu-only or missing for Marisa: her skill (FUN_00417b90 creates six EXLaserInf objects, 6.28/6 apart, vtable 0x5a8b8c), her special bullet (FUN_0053cf00 creates an EXLaserInf at a random x within +-120 on the opponent's field; thresholds table 0x59d7d8) and bomb (BombMarisaInf, vtable 0x5a8c28, update FUN_0053d9b0) are laser-object based and not ported; ECL laser ops 700..703 (cases 0x8d..0x90 of FUN_004fecc0) used by pl01.ecl are not handled, so her ExtraAttack / Boss scripts run without their lasers; the bot has no Marisa rules (CPUHitMarisaInf, vtable 0x5a8444: 0x4f9810 target, 0x4f8d10 approach). For Marisa the skill, bomb and special bullets are disabled rather than borrowed from Reimu.",
+          "sources": [
+            "marisa_skill_start",
+            "marisa_special_send",
+            "marisa_bomb_update",
+            "marisa_laser_object",
+            "ecl_cases_laser"
+          ],
+          "evidence": "code_checked"
+        }
+      ],
+      "checks": {
+        "automated_marisa": "2026-10-03: marisa_beams_grow_cut_at_enemies_damage_and_end_with_the_shot_button, marisa_charge_releases_fire_charge_beams, ray_enters_a_circle_ahead"
+      },
+      "next": [
+        "Port the laser system (ECL ops 700..703, LaserInf family, collisions, graze, cancel), then Marisa's skill, special bullet, bomb and bot rules; verify beam alpha (script sets 96) against footage."
       ]
     }
   }

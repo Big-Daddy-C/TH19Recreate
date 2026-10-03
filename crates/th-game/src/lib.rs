@@ -23,5 +23,7 @@ pub mod scope;
 pub mod spirit;
 pub mod reflect;
 pub mod bot;
+pub mod beam;
+pub mod character;
 pub mod item;
 pub mod text;

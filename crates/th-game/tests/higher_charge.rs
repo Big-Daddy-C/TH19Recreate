@@ -13,7 +13,7 @@ use th_game::{
 };
 struct Game {
     sides: Vec<Side>,
-    prog: th_ecl::Program,
+    prog: Vec<th_ecl::Program>,
     world: World,
     lib: AnmLibrary,
 }
@@ -106,6 +106,7 @@ fn setup() -> Option<Game> {
     ));
     let mut dat = Archive::open(path).unwrap();
     let prog = th_ecl::Program::load("pl00.ecl", |name| dat.read(name).ok()).unwrap();
+    let prog2 = th_ecl::Program::load("pl00.ecl", |name| dat.read(name).ok()).unwrap();
     let mut lib = AnmLibrary::default();
     let mut files = [None; 8];
     let names: Vec<_> = ["bullet.anm".to_string(), "effect.anm".to_string()]
@@ -127,7 +128,8 @@ fn setup() -> Option<Game> {
         .into_iter()
         .map(|field| Side::new(field, 77, [0; 256], files))
         .collect();
-    for side in &mut sides {
+    for (i, side) in sides.iter_mut().enumerate() {
+        side.st.index = i;
         side.st.bullet_types = types.clone();
         side.st.ascii_anm = Some(ascii);
         let mut p = Player::new(sht.clone(), player);
@@ -139,7 +141,7 @@ fn setup() -> Option<Game> {
     }
     Some(Game {
         sides,
-        prog,
+        prog: vec![prog, prog2],
         world: World::default(),
         lib,
     })
@@ -721,7 +723,7 @@ fn animal_spirits_face_their_travel_direction() {
     for (sub, x, y) in [("GhostWolf", 0.0, 60.0), ("GhostOtterL", -100.0, 200.0), ("GhostEagle", 80.0, 60.0)] {
         let Some(mut g) = setup() else { return };
         g.sides[1].st.request(SpawnRequest { id: 0, difficulty: 0, sub: sub.into(), pos: [x, y], hp: 200,
-            score: 0, item: -1, mirrored: false, ivars: [1, 0, 1, 0], fvars: [0.0; 8] });
+            score: 0, item: -1, mirrored: false, ivars: [1, 0, 1, 0], fvars: [0.0; 8], owner: None });
         let mut checked = 0;
         for _ in 0..120 {
             g.tick([0; 2]);
@@ -751,7 +753,7 @@ fn charge_orbs_hit_an_overlapping_spirit_every_frame() {
     use th_game::side::SpawnRequest;
     let Some(mut g) = setup() else { return };
     g.sides[0].st.request(SpawnRequest { id: 0, difficulty: 0, sub: "GhostPure".into(), pos: [0.0, 300.0],
-        hp: 200, score: 0, item: -1, mirrored: false, ivars: [2, 0, 2, 0], fvars: [0.0; 8] });
+        hp: 200, score: 0, item: -1, mirrored: false, ivars: [2, 0, 2, 0], fvars: [0.0; 8], owner: None });
     let mut released = None;
     let mut hp = vec![];
     let mut dead_at = None;
@@ -781,7 +783,7 @@ fn explosions_damage_overlapping_enemies_every_frame() {
     use th_game::side::SpawnRequest;
     let Some(mut g) = setup() else { return };
     let req = |x: f32| SpawnRequest { id: 0, difficulty: 0, sub: "GhostPure".into(), pos: [x, 100.0], hp: 200,
-        score: 0, item: -1, mirrored: false, ivars: [2, 0, 2, 0], fvars: [0.0; 8] };
+        score: 0, item: -1, mirrored: false, ivars: [2, 0, 2, 0], fvars: [0.0; 8], owner: None };
     g.sides[1].st.request(req(0.0));
     g.sides[1].st.request(req(8.0));
     for _ in 0..80 { g.tick([0; 2]); }
@@ -821,7 +823,7 @@ fn explosions_cancel_small_bullets_and_send_them_to_the_opponent() {
     use th_game::side::SpawnRequest;
     let Some(mut g) = setup() else { return };
     g.sides[1].st.request(SpawnRequest { id: 0, difficulty: 0, sub: "GhostPure".into(), pos: [0.0, 200.0], hp: 200,
-        score: 0, item: -1, mirrored: false, ivars: [2, 0, 2, 0], fvars: [0.0; 8] });
+        score: 0, item: -1, mirrored: false, ivars: [2, 0, 2, 0], fvars: [0.0; 8], owner: None });
     for _ in 0..70 { g.tick([0; 2]); }
     g.sides[1].st.bullets.clear();
     // The spirit has drifted; put the bullets around where it will die.
@@ -903,7 +905,7 @@ fn bomb_cancels_bullets_damages_enemies_and_protects_the_player() {
     assert_eq!(Bomb::duration(100), 120);
     let Some(mut g) = setup() else { return };
     g.sides[0].st.request(SpawnRequest { id: 0, difficulty: 0, sub: "GhostPure".into(), pos: [0.0, 300.0], hp: 200,
-        score: 0, item: -1, mirrored: false, ivars: [2, 0, 2, 0], fvars: [0.0; 8] });
+        score: 0, item: -1, mirrored: false, ivars: [2, 0, 2, 0], fvars: [0.0; 8], owner: None });
     for _ in 0..20 { g.tick([0; 2]); }
     put_bullet(&mut g, 0, 0, 1, [60.0, 380.0], false);
     put_bullet(&mut g, 0, 0, 1, [-60.0, 380.0], true);
@@ -1026,7 +1028,7 @@ fn bot_plays_the_opening_waves() {
     use th_game::side::SpawnRequest;
     for x in [-60.0, 0.0, 60.0] {
         g.sides[1].st.request(SpawnRequest { id: 0, difficulty: 0, sub: "GhostPure".into(), pos: [x, 120.0], hp: 200,
-            score: 0, item: -1, mirrored: false, ivars: [2, 0, 2, 0], fvars: [0.0; 8] });
+            score: 0, item: -1, mirrored: false, ivars: [2, 0, 2, 0], fvars: [0.0; 8], owner: None });
     }
     let mut bot = th_game::bot::Bot::new();
     let (mut shot, mut moved, mut charged, mut lowest_x, mut highest_x) = (0, 0, 0, 0.0f32, 0.0f32);
@@ -1135,4 +1137,69 @@ fn orbs_home_in_when_the_player_is_above_the_collect_line() {
     }
     for _ in 0..150 { g.tick([0; 2]); }
     assert_eq!(g.sides[0].player.as_ref().unwrap().meter, 30, "both collected");
+}
+
+
+/// Give `side` Marisa (pl01.sht / pl01.anm).
+fn use_marisa(g: &mut Game, side: usize) {
+    let path = std::path::PathBuf::from(std::env::var_os("USERPROFILE").unwrap()).join("Downloads/th19/th19/th19.dat");
+    let mut dat = Archive::open(path).unwrap();
+    let sht = ShtFile::parse(&dat.read("pl01.sht").unwrap()).unwrap();
+    let anm = g.lib.load("pl01.anm", &dat.read("pl01.anm").unwrap()).unwrap();
+    let mut p = Player::new(sht, anm);
+    p.character = th_game::character::Character::Marisa;
+    p.state = State::Normal;
+    p.free_charge = true;
+    p.effect_anm = g.sides[side].st.anm_files[1];
+    g.sides[side].player = Some(p);
+}
+
+/// Marisa's option beams grow 18 px a frame to ~512, are cut at the enemy they hit, damage
+/// it every 4th frame, and end when the shot button is released (one per SHT group).
+#[test]
+fn marisa_beams_grow_cut_at_enemies_damage_and_end_with_the_shot_button() {
+    use th_game::side::SpawnRequest;
+    let Some(mut g) = setup() else { return };
+    use_marisa(&mut g, 1);
+    for _ in 0..20 { g.tick([0, input::SHOT]); }
+    {
+        let p = g.sides[1].player.as_ref().unwrap();
+        assert_eq!(p.beams.len(), 2, "two option beams at power 200 (groups 1 and 2)");
+        assert!(p.beams.iter().all(|b| b.len > 300.0), "{:?}", p.beams.iter().map(|b| b.len).collect::<Vec<_>>());
+    }
+    for _ in 0..40 { g.tick([0, input::SHOT]); }
+    let p = g.sides[1].player.as_ref().unwrap();
+    assert_eq!(p.beams.len(), 2, "still one beam per group");
+    assert!(p.beams.iter().all(|b| (b.len - 522.0).abs() < 1.0), "full length: {:?}", p.beams.iter().map(|b| b.len).collect::<Vec<_>>());
+    // An enemy straight above an option: the beam stops 8 px past where it enters it.
+    let x = p.beams[0].pos[0];
+    g.sides[1].st.request(SpawnRequest { id: 0, difficulty: 0, sub: "GhostPure".into(), pos: [x, 200.0], hp: 200,
+        score: 0, item: -1, mirrored: false, ivars: [2, 0, 2, 0], fvars: [0.0; 8], owner: None });
+    let before = |g: &Game| g.sides[1].enemies.iter().find(|e| e.data.sub == "GhostPure").map(|e| e.data.hp);
+    for _ in 0..6 { g.tick([0, input::SHOT]); }
+    let hp0 = before(&g).unwrap();
+    for _ in 0..30 { g.tick([0, input::SHOT]); }
+    let hp1 = before(&g).map_or(i32::MIN, |h| h);
+    assert!(hp1 < hp0 || before(&g).is_none(), "{hp0} -> {hp1}");
+    // Releasing the button ends the beams and frees their groups.
+    for _ in 0..40 { g.tick([0, 0]); }
+    assert!(g.sides[1].player.as_ref().unwrap().beams.is_empty());
+}
+
+/// Marisa's releases fire her charge beam (SHT slot 10); a skill release adds the two side
+/// beams (slot 11). Charge beams last 120 frames and ignore the shot button.
+#[test]
+fn marisa_charge_releases_fire_charge_beams() {
+    let Some(mut g) = setup() else { return };
+    use_marisa(&mut g, 0);
+    g.charge(0, 60);
+    {
+        let p = g.sides[0].player.as_ref().unwrap();
+        assert_eq!(p.beams.len(), 1, "attack release: one charge beam");
+        assert!(p.beams[0].is_charge());
+    }
+    for _ in 0..130 { g.tick([0; 2]); }
+    assert!(g.sides[0].player.as_ref().unwrap().beams.is_empty(), "it ends after 120 frames");
+    g.charge(0, 110);
+    assert_eq!(g.sides[0].player.as_ref().unwrap().beams.len(), 3, "skill release: centre and two side beams");
 }

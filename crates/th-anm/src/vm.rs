@@ -320,7 +320,7 @@ pub struct Vm {
     pub rot: [f32; 3],
     angle_vel: [f32; 3],
     pub scale: [f32; 2],
-    scale2: [f32; 2],
+    pub scale2: [f32; 2],
     scale_growth: [f32; 2],
     pub color: [f32; 3],
     pub color2: [f32; 3],

@@ -55,7 +55,7 @@ use th_game::FIELDS;
 
 /// Gameplay state for game mode: the ECL program and the two sides.
 struct Game {
-    prog: th_ecl::Program,
+    progs: Vec<th_ecl::Program>,
     sides: Vec<th_game::Side>,
     round: th_game::round::Round,
 }
@@ -84,6 +84,8 @@ struct Viewer {
     godmode: bool,
     /// Player 2 is run by the game's bot (K) instead of just holding the shot button.
     bot_ai: bool,
+    /// Each side's character (`]` / `[` change the bot's, with Shift the player's).
+    chars: [th_game::character::Character; 2],
     /// Development full-charge mode (M): every tier is always available and costs nothing.
     full_charge: bool,
     bot: th_game::bot::Bot,
@@ -124,6 +126,7 @@ impl Viewer {
             held: Default::default(),
             godmode: false,
             bot_ai: true,
+            chars: [th_game::character::Character::Reimu; 2],
             full_charge: false,
             bot: th_game::bot::Bot::new(),
             start_boss_level: 0,
@@ -174,57 +177,52 @@ impl Viewer {
 
     /// Load the ECL scripts and their sprites and start both sides' stage scripts.
     fn load_game(&mut self) -> Option<Game> {
-        let dat = &mut self.dat;
-        let prog = th_ecl::Program::load("pl00.ecl", |n| dat.read(n).ok())
-            .map_err(|e| log::error!("pl00.ecl: {e}"))
-            .ok()?;
-        // Enemy sprite slots: 0 = bullet.anm, 1 = effect.anm (FUN_0050d380), then the ECL
-        // file's anim list from 2 upwards.
-        let mut anm_files = [None; 8];
-        let names: Vec<String> =
-            ["bullet.anm".to_string(), "effect.anm".to_string()].into_iter().chain(prog.files[0].1.anim.clone()).collect();
-        for (i, name) in names.iter().enumerate() {
-            let id = match self.lib.file_id(name) {
-                Some(id) => id,
-                None => {
-                    let bytes = self.dat.read(name).map_err(|e| log::error!("{name}: {e}")).ok()?;
-                    self.lib.load(name, &bytes).map_err(|e| log::error!("{name}: {e}")).ok()?
-                }
-            };
-            anm_files[i] = Some(id);
+        let chars = self.chars;
+        // One ECL program and sprite-slot set per side's character: attacks a side sends run
+        // the sender's script on the other field.
+        let mut progs = Vec::new();
+        let mut sets = [[None; 8]; 2];
+        for (i, c) in chars.iter().enumerate() {
+            let ecl = format!("{}.ecl", c.prefix());
+            let dat = &mut self.dat;
+            let prog = th_ecl::Program::load(&ecl, |n| dat.read(n).ok()).map_err(|e| log::error!("{ecl}: {e}")).ok()?;
+            // Enemy sprite slots: 0 = bullet.anm, 1 = effect.anm (FUN_0050d380), then the ECL
+            // file's anim list from 2 upwards.
+            let names: Vec<String> = ["bullet.anm".to_string(), "effect.anm".to_string()]
+                .into_iter()
+                .chain(prog.files[0].1.anim.clone())
+                .collect();
+            for (k, name) in names.iter().enumerate().take(8) {
+                sets[i][k] = Some(self.load_anm(name)?);
+            }
+            progs.push(prog);
         }
         // Both players face the same wave order.
         let seq = th_game::side::roll_wave_sequence(0x1234_5678);
         let mut sides: Vec<th_game::Side> = FIELDS
             .iter()
             .enumerate()
-            .map(|(i, &f)| th_game::Side::new(f, 0x9e37_79b9 ^ i as u32, seq, anm_files))
+            .map(|(i, &f)| {
+                let mut s = th_game::Side::new(f, 0x9e37_79b9 ^ i as u32, seq, sets[i]);
+                s.st.anm_sets = sets;
+                s.st.index = i;
+                s
+            })
             .collect();
-        // APPROX: both sides play Reimu until character select exists.
-        let sht = self.dat.read("pl00.sht").ok().and_then(|b| th_formats::sht::ShtFile::parse(&b).ok());
-        let pl_anm = match self.lib.file_id("pl00.anm") {
-            Some(id) => Some(id),
-            None => self.dat.read("pl00.anm").ok().and_then(|b| self.lib.load("pl00.anm", &b).ok()),
-        };
-        let ghost = match self.lib.file_id("ghost.anm") {
-            Some(id) => Some(id),
-            None => self.dat.read("ghost.anm").ok().and_then(|b| self.lib.load("ghost.anm", &b).ok()),
-        };
-        let aura = match self.lib.file_id("aura.anm") {
-            Some(id) => Some(id),
-            None => self.dat.read("aura.anm").ok().and_then(|b| self.lib.load("aura.anm", &b).ok()),
-        };
-        let ascii = match self.lib.file_id("ascii.anm") {
-            Some(id) => Some(id),
-            None => self.dat.read("ascii.anm").ok().and_then(|b| self.lib.load("ascii.anm", &b).ok()),
-        };
-        for s in &mut sides {
+        let ghost = self.load_anm("ghost.anm");
+        let aura = self.load_anm("aura.anm");
+        let ascii = self.load_anm("ascii.anm");
+        for (i, s) in sides.iter_mut().enumerate() {
             s.st.bullet_types = self.bullet_types.clone();
             s.st.ascii_anm = ascii;
             s.st.ghost_anm = ghost;
-            s.start(&prog);
-            if let (Some(sht), Some(anm)) = (&sht, pl_anm) {
-                let mut p = th_game::player::Player::new(sht.clone(), anm);
+            s.start(&progs[i]);
+            let prefix = chars[i].prefix();
+            let sht = self.dat.read(&format!("{prefix}.sht")).ok().and_then(|b| th_formats::sht::ShtFile::parse(&b).ok());
+            let pl_anm = self.load_anm(&format!("{prefix}.anm"));
+            if let (Some(sht), Some(anm)) = (sht, pl_anm) {
+                let mut p = th_game::player::Player::new(sht, anm);
+                p.character = chars[i];
                 p.free_charge = self.full_charge;
                 p.aura_anm = aura;
                 p.effect_anm = s.st.anm_files[1];
@@ -232,7 +230,16 @@ impl Viewer {
             }
         }
         sides[0].st.boss_level = self.start_boss_level;
-        Some(Game { prog, sides, round: Default::default() })
+        Some(Game { progs, sides, round: Default::default() })
+    }
+
+    /// Load an `.anm` from the archive once and return its library id.
+    fn load_anm(&mut self, name: &str) -> Option<usize> {
+        if let Some(id) = self.lib.file_id(name) {
+            return Some(id);
+        }
+        let bytes = self.dat.read(name).map_err(|e| log::error!("{name}: {e}")).ok()?;
+        self.lib.load(name, &bytes).map_err(|e| log::error!("{name}: {e}")).ok()
     }
 
     fn tick(&mut self) {
@@ -279,7 +286,7 @@ impl Viewer {
                         p.godmode = self.godmode;
                         p.free_charge = self.full_charge;
                     }
-                    s.tick(&g.prog, k, &mut self.world, &self.lib);
+                    s.tick(&g.progs, k, &mut self.world, &self.lib);
                 }
                 th_game::side::dispatch_charges(&mut g.sides);
                 let defeated = std::array::from_fn(|i| g.sides[i].player.as_ref()
@@ -508,6 +515,15 @@ impl Viewer {
                 self.full_charge = !self.full_charge;
                 log::info!("full charge mode {}", if self.full_charge { "on" } else { "off (meter from orbs)" });
             }
+            // Character select: ] / [ move the bot's character up / down the list; with Shift
+            // they change the player's. The match restarts with the new characters.
+            KeyCode::BracketRight | KeyCode::BracketLeft if self.mode == Mode::Game => {
+                let side = if self.held.contains(&KeyCode::ShiftLeft) || self.held.contains(&KeyCode::ShiftRight) { 0 } else { 1 };
+                let delta = if code == KeyCode::BracketRight { 1 } else { -1 };
+                self.chars[side] = self.chars[side].shifted(delta);
+                log::info!("player {} is {} ({})", side + 1, self.chars[side].name(), self.chars[side].number());
+                self.load_stage();
+            }
             KeyCode::KeyV => self.show_fields = !self.show_fields,
             KeyCode::ArrowRight | KeyCode::ArrowLeft if self.mode != Mode::Anm => {
                 let n = self.stage_files.len().max(1);
@@ -599,7 +615,7 @@ impl Viewer {
             if let Some(side) = g.sides.get_mut(num(4) as usize) {
                 side.st.request(th_game::side::SpawnRequest {
                     id: 0, difficulty: 0, sub: f[1].into(), pos: [num(2), num(3)], hp: 200, score: 0,
-                    item: -1, mirrored: false, ivars: [level, 0, level, 0], fvars: [0.0; 8],
+                    item: -1, mirrored: false, ivars: [level, 0, level, 0], fvars: [0.0; 8], owner: None,
                 });
             }
         }
@@ -619,6 +635,7 @@ impl Viewer {
                 mirrored: false,
                 ivars: [0; 4],
                 fvars: [0.0; 8],
+                owner: None,
             });
         }
     }
@@ -791,6 +808,13 @@ fn main() {
             viewer.start_boss_level = n.clamp(1, 8) - 1;
         }
         viewer.godmode = args.iter().any(|a| a == "--godmode");
+        viewer.bot_ai = !args.iter().any(|a| a == "--no-bot");
+        // `--p1 N` / `--p2 N`: character select numbers (1 Reimu, 2 Marisa).
+        for (flag, side) in [("--p1", 0), ("--p2", 1)] {
+            if let Some(n) = args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)?.parse::<usize>().ok()) {
+                viewer.chars[side] = th_game::character::Character::ALL[(n.max(1) - 1).min(th_game::character::Character::ALL.len() - 1)];
+            }
+        }
         viewer.mode = mode;
         viewer.stage_idx = n.saturating_sub(1).min(viewer.stage_files.len().saturating_sub(1));
         viewer.restart();

@@ -8,6 +8,7 @@
 use th_anm::{AnmLibrary, VmId, World};
 use th_formats::sht::{ShotRecord, ShtFile};
 
+use crate::character::Character;
 use crate::enemy::{field_to_canvas, flag, Enemy};
 
 /// Input bits, as the game stores them.
@@ -106,6 +107,7 @@ pub struct PlayerBullet {
 }
 
 pub struct Player {
+    pub character: crate::character::Character,
     /// Development toggle: the player can't be hit.
     pub godmode: bool,
     /// Set when a heart is lost; the side consumes it (EX/boss level catch-up).
@@ -137,6 +139,8 @@ pub struct Player {
     damage_circles: Vec<crate::skill::DamageCircle>,
     skill_rng: u32,
     charge_timer: Option<i32>,
+    /// Marisa: a skill release also fires the two side charge beams (SHT slot 11).
+    wide_charge: bool,
     pub aura_anm: Option<usize>,
     charge_vm: Option<VmId>,
     focus_vm: Option<VmId>,
@@ -146,6 +150,9 @@ pub struct Player {
     shot_timer: Timer,
     long_timer: Timer,
     pub bullets: Vec<PlayerBullet>,
+    /// Marisa's beams and which SHT groups have one alive.
+    pub beams: Vec<crate::beam::Beam>,
+    beam_groups: [bool; 64],
     /// Frames of invulnerability left.
     pub invuln: i32,
     /// Times hit so far.
@@ -185,6 +192,7 @@ impl Player {
         // APPROX: use 100% charge speed until match settings / card modifiers are loaded.
         let charge_settings = crate::charge::Settings::from_sht(&sht, 100);
         Self {
+            character: crate::character::Character::Reimu,
             sht,
             anm_file,
             fixed: [0, 400 * 128],
@@ -200,6 +208,7 @@ impl Player {
             free_charge: false, opponent_boss_active: false, charge_event: None, last_charge: None,
             skills: Vec::new(), bomb: None, bomb_prev: false, cancel_circles: Vec::new(), damage_circles: Vec::new(), skill_rng: 0x1cafe777,
             charge_timer: None,
+            wide_charge: false,
             aura_anm: None,
             charge_vm: None,
             focus_vm: None,
@@ -209,6 +218,8 @@ impl Player {
             shot_timer: Timer::OFF,
             long_timer: Timer::OFF,
             bullets: Vec::new(),
+            beams: Vec::new(),
+            beam_groups: [false; 64],
             invuln: 0,
             hits: 0,
             lives: DEFAULT_LIVES,
@@ -410,7 +421,7 @@ impl Player {
         self.update_charge(keys, world, lib, field);
         self.update_focus_marker(world, lib, field);
         self.scope.update(self.charge.value > 0 && keys & input::CHARGE != 0
-            && self.state == State::Normal, self.pos, self.anm_file, world, lib, field);
+            && self.state == State::Normal, self.character == Character::Marisa, self.pos, self.anm_file, world, lib, field);
         self.cancel_circles.clear();
         self.skills.retain_mut(|s| s.tick(world, field, &mut self.cancel_circles, &mut self.damage_circles));
         // The bomb button (FUN_00546320 states 1 and 4): pressing it starts the bomb, and during
@@ -419,7 +430,7 @@ impl Player {
         // and read the meter, both deferred).
         let bomb_pressed = keys & input::BOMB != 0 && !self.bomb_prev;
         self.bomb_prev = keys & input::BOMB != 0;
-        if bomb_pressed && self.bomb.is_none() && matches!(self.state, State::Normal | State::Hit) {
+        if bomb_pressed && self.bomb.is_none() && self.character == Character::Reimu && matches!(self.state, State::Normal | State::Hit) {
             if self.state == State::Hit {
                 self.state = State::Normal;
                 self.state_time = 0;
@@ -451,6 +462,7 @@ impl Player {
         }
         self.damage_circles.retain(|c| c.remaining > 0);
         self.update_bullets(enemies, world, lib, field, &mut damage);
+        self.update_beams(enemies, world, lib, field, &mut damage);
         // FUN00520450 caps the sum of colliders at player+2274, loaded from SHT+28.
         let cap = i32::from_le_bytes(self.sht.params_raw[8..12].try_into().unwrap()).max(0);
         for (enemy, (amount, from)) in enemies.iter_mut().zip(damage) {
@@ -544,7 +556,10 @@ impl Player {
                 Level::Boss => self.charge_settings.boss,
             };
             if !self.free_charge { self.meter = (self.meter-threshold+self.charge_settings.attack).clamp(0,2500); }
-            if level == Level::Skill {
+            if level == Level::Skill && self.character == Character::Marisa {
+                self.wide_charge = true;
+            }
+            if level == Level::Skill && self.character == Character::Reimu {
                 // APPROX: deterministic local RNG instead of the game's replay RNG.
                 self.skill_rng ^= self.skill_rng << 13; self.skill_rng ^= self.skill_rng >> 17; self.skill_rng ^= self.skill_rng << 5;
                 let phase = (self.skill_rng as f64/u32::MAX as f64) as f32*std::f32::consts::TAU-std::f32::consts::PI;
@@ -555,6 +570,9 @@ impl Player {
         }
         if let Some(t) = self.charge_timer {
             self.fire_slot(10, t, 0, world, lib, field);
+            if t == 0 && std::mem::take(&mut self.wide_charge) {
+                self.fire_slot(11, t, 0, world, lib, field);
+            }
             self.charge_timer = (t < 20).then_some(t + 1);
         }
     }
@@ -632,6 +650,9 @@ impl Player {
         let records: Vec<ShotRecord> = records.clone();
         for r in &records {
             if r.interval < 0 { break; }
+            if r.kind == 2 && self.beam_groups.get(r.group.max(0) as usize).copied().unwrap_or(false) {
+                continue;
+            }
             let fires = if r.alt_interval != 0 {
                 long >= 0 && long % r.alt_interval as i32 == r.alt_phase as i32
             } else {
@@ -643,15 +664,25 @@ impl Player {
         }
     }
 
+    /// Where a record's origin nibble points: the player, the field origin or an option.
+    fn origin_of(&self, nibble: u8) -> Option<[f32; 2]> {
+        match nibble & 0xf {
+            0 => Some(self.pos),
+            6 => Some([0.0, 0.0]),
+            k => self.options.get(k as usize - 1).map(|o| [o.pos[0] as f32 / 128.0, o.pos[1] as f32 / 128.0]),
+        }
+    }
+
     fn spawn_bullet(&mut self, r: &ShotRecord, world: &mut World, lib: &AnmLibrary, field: [f32; 4]) {
-        let origin = match r.origin & 0xf {
-            0 => self.pos,
-            6 => [0.0, 0.0],
-            k => match self.options.get(k as usize - 1) {
-                Some(o) => [o.pos[0] as f32 / 128.0, o.pos[1] as f32 / 128.0],
-                None => return,
-            },
-        };
+        let Some(origin) = self.origin_of(r.origin) else { return };
+        if r.kind == 2 || r.funcs[0] == 12 {
+            let pos = [origin[0] + r.offset[0], origin[1] + r.offset[1]];
+            self.beams.push(crate::beam::Beam::new(r, self.anm_file, world, lib, field, pos));
+            if r.kind == 2 {
+                if let Some(g) = self.beam_groups.get_mut(r.group.max(0) as usize) { *g = true; }
+            }
+            return;
+        }
         let (s, c) = r.angle.sin_cos();
         let vel = [c * r.speed, s * r.speed];
         // The game places the bullet one step back, so its first update lands on the offset.
@@ -682,6 +713,33 @@ impl Player {
             impacting: false,
             hit_callback: r.funcs[3],
         });
+    }
+
+    /// Marisa's beams (`FUN_0054d370` / `FUN_0054cd70`): grow, hit, and end with the shot button.
+    fn update_beams(&mut self, enemies: &[Enemy], world: &mut World, lib: &AnmLibrary, field: [f32; 4], damage: &mut [(i32, [f32; 2])]) {
+        let keep = self.shot_timer.cur >= 0
+            && !matches!(self.state, State::Dead | State::Hit | State::GameOver)
+            && self.charge.value < 1
+            && self.bomb.is_none();
+        let mut beams = std::mem::take(&mut self.beams);
+        let mut hits = Vec::new();
+        for b in &mut beams {
+            let origin = self.origin_of(b.origin()).unwrap_or(self.pos);
+            let alive = if b.is_charge() { !matches!(self.state, State::GameOver) } else { keep };
+            b.update(origin, alive, field, world);
+            b.collide(enemies, world, lib, field, self.anm_file, &mut hits);
+            if b.ended && !b.is_charge() { if let Some(g) = self.beam_groups.get_mut(b.group.max(0) as usize) { *g = false; } }
+        }
+        for (index, amount, from) in hits {
+            damage[index].0 += amount;
+            damage[index].1 = from;
+        }
+        beams.retain_mut(|b| {
+            let alive = !b.ended || b.faded(world);
+            if !alive { b.delete(world); }
+            alive
+        });
+        self.beams = beams;
     }
 
     fn update_bullets(&mut self, enemies: &mut [Enemy], world: &mut World, lib: &AnmLibrary, field: [f32; 4], damage: &mut [(i32, [f32; 2])]) {
@@ -809,7 +867,7 @@ fn update_homing(b: &mut PlayerBullet, enemies: &[Enemy]) {
 /// shot is a rectangle rotated to its angle, `size[0]` along its direction (collider
 /// +0x2c/+0x30 from record +0xc/+0x10). Enemies are a circle of radius `hurtbox[0] / 2`
 /// unless flag 0x1000 selects their rectangle (FUN_004d44e0 / FUN_004d2c30).
-fn shot_hits(pos: [f32; 2], size: [f32; 2], angle: f32, d: &crate::enemy::EnemyData) -> bool {
+pub(crate) fn shot_hits(pos: [f32; 2], size: [f32; 2], angle: f32, d: &crate::enemy::EnemyData) -> bool {
     if d.flags & 0x1000 != 0 {
         // APPROX: the rectangle-rectangle test ignores the shot's rotation.
         return (pos[0] - d.pos[0]).abs() * 2.0 < size[0] + d.hurtbox[0]

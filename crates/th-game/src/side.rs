@@ -50,6 +50,8 @@ pub struct SpawnRequest {
     pub mirrored: bool,
     pub ivars: [i32; 4],
     pub fvars: [f32; 8],
+    /// Side whose character's ECL program runs this enemy (`None`: this field's own).
+    pub owner: Option<usize>,
 }
 
 /// Everything enemies can read or change besides themselves.
@@ -74,6 +76,11 @@ pub struct SideState {
     pub wave_param: i32,
     /// ECL anm slot -> loaded file.
     pub anm_files: [Option<usize>; 8],
+    /// The sprite slots of each side's character program (slot 3 is its `plXXb.anm`); enemies
+    /// run their owner's slots.
+    pub anm_sets: [[Option<usize>; 8]; 2],
+    /// This field's side index (0 left, 1 right).
+    pub index: usize,
     pub spawn: Vec<SpawnRequest>,
     /// (id, wave member) of every live enemy, refreshed as enemies come and go.
     pub alive: Vec<(i32, bool)>,
@@ -115,7 +122,10 @@ pub struct SideState {
     pub graze: i32,
     /// Kill explosions in progress.
     pub explosions: Vec<Explosion>,
+    /// The charging aura of this field's player: Reimu's circle (centre, radius) or Marisa's
+    /// full-height column (centre x in `pos[0]`, half width).
     pub scope_circle: Option<([f32; 2], f32)>,
+    pub scope_column: bool,
     pub spirit_credit: i32,
     pub spirit_origin: [f32;2],
     pub spirit_pressure: i32,
@@ -219,9 +229,26 @@ impl AutoSend {
 }
 
 impl SideState {
+    /// Whether the aura touches a body of `radius` at `pos`. The circle adds squared radii
+    /// (`FUN_00416f10`); the column (`FUN_00417a60`) is a full-height band of half width `w`,
+    /// tested here as the body's extent overlapping it.
     pub fn scope_contains(&self, pos: [f32;2], radius: f32) -> bool {
-        self.scope_circle.is_some_and(|(centre,r)|
-            (pos[0]-centre[0]).powi(2)+(pos[1]-centre[1]).powi(2) < r*r+radius*radius)
+        self.scope_circle.is_some_and(|(centre,r)| if self.scope_column {
+            (pos[0]-centre[0]).abs() < r + radius
+        } else {
+            (pos[0]-centre[0]).powi(2)+(pos[1]-centre[1]).powi(2) < r*r+radius*radius
+        })
+    }
+    /// The bullet callback: Reimu's circle again, Marisa's column by x alone (`FUN_00417a10`).
+    pub fn scope_bullet(&self, pos: [f32;2], radius: f32) -> bool {
+        Self::scope_hit(self.scope_circle, self.scope_column, pos, radius)
+    }
+    fn scope_hit(scope: Option<([f32; 2], f32)>, column: bool, pos: [f32;2], radius: f32) -> bool {
+        scope.is_some_and(|(centre,r)| if column {
+            (pos[0]-centre[0]).abs() < r
+        } else {
+            (pos[0]-centre[0]).powi(2)+(pos[1]-centre[1]).powi(2) < r*r+radius*radius
+        })
     }
     /// `FUN_00548bc0`: feed the white dot counter (cap 1400) and remember where it happened.
     pub fn add_dots(&mut self, n: i32, pos: [f32; 2]) {
@@ -255,6 +282,11 @@ impl SideState {
 
     /// Queue an enemy for creation. Its id is allocated now, as the game creates enemies
     /// synchronously and scripts read the new id right away (variable -9931).
+    /// Sprite slots of `owner`'s character program.
+    pub fn anm_set(&self, owner: usize) -> &[Option<usize>; 8] {
+        &self.anm_sets[owner.min(1)]
+    }
+
     pub fn request(&mut self, mut req: SpawnRequest) {
         req.difficulty = self.difficulty;
         req.id = self.next_enemy_id;
@@ -316,6 +348,7 @@ impl SideState {
             mirrored: false,
             ivars: [0; 4],
             fvars: [0.0; 8],
+            owner: None,
         });
     }
 }
@@ -344,6 +377,8 @@ impl Side {
                 wave_counter: 0,
                 wave_param: 0,
                 anm_files,
+                anm_sets: [anm_files; 2],
+                index: 0,
                 spawn: Vec::new(),
                 alive: Vec::new(),
                 next_enemy_id: 1,
@@ -369,6 +404,7 @@ impl Side {
                 graze: 0,
                 explosions: Vec::new(),
                 scope_circle: None,
+                scope_column: false,
                 spirit_credit: 0, spirit_origin: [0.0;2], spirit_pressure: 0, spirit_frames: 0,
                 outgoing_spirits: Vec::new(), pending_spirits: Vec::new(), outgoing_reflects: Vec::new(), pending_reflects: Vec::new(), arrived_reflects: Vec::new(), rain: 0, dot_counter: 0, special_counter: 0, last_credit_pos: [0.0; 2], last_special_pos: [0.0; 2],
                 sent_spirits_pending: 0,
@@ -425,7 +461,7 @@ impl Side {
         for (kind, color, speed, origin) in cancelled {
             let roll = st.rand();
             let kind = crate::reflect::converted_kind(kind, st.spirit_frames, roll);
-            st.outgoing_reflects.push(crate::reflect::Request { kind, color, speed, origin, target: None, special_rank: None });
+            st.outgoing_reflects.push(crate::reflect::Request { kind, color, speed, origin, target: None, special_rank: None, owner: 0 });
             // FUN_00548bc0(30) and FUN_00548d00(1) per cancelled bullet.
             st.add_dots(30, origin);
             st.add_special(1, origin);
@@ -460,12 +496,12 @@ impl Side {
         let mut grazes: Vec<[f32; 2]> = Vec::new();
         let player_r = self.player.as_ref().map_or(0.0, |p| p.hitbox_radius());
         let cancel = self.player.as_ref().and_then(|p| p.cancel_radius);
+        let (scope, scope_column) = (st.scope_circle, st.scope_column);
         for b in st.bullets.iter_mut() {
             // Original contact callback applies its factor to the following movement tick.
             let dt = b.scope_time_scale;
             b.update_scaled(&mut ctx, dt);
-            b.scope_time_scale = if b.state == 1 && b.hitbox > 0.0 && st.scope_circle.is_some_and(|(pos,r)|
-                (b.pos[0]-pos[0]).powi(2)+(b.pos[1]-pos[1]).powi(2) < r*r+b.hitbox*b.hitbox) { 0.5 } else { 1.0 };
+            b.scope_time_scale = if b.state == 1 && b.hitbox > 0.0 && SideState::scope_hit(scope, scope_column, b.pos, b.hitbox) { 0.5 } else { 1.0 };
             let (dx, dy) = (b.pos[0] - st.player_pos[0], b.pos[1] - st.player_pos[1]);
             let d2 = dx * dx + dy * dy;
             if let Some(r) = cancel {
@@ -522,7 +558,7 @@ impl Side {
                 // EXOnmyoInf: the flying yin-yang becomes ExtraAttack00 (FUN_0053bc50).
                 st.incoming_extra_level = rank.clamp(0, 7) as u8;
                 st.request(SpawnRequest { id: 0, difficulty: 0, sub: "ExtraAttack00".into(), pos: a.pos, hp: 200, score: 0,
-                    item: -1, mirrored: false, ivars: [0; 4], fvars: [0.0; 8] });
+                    item: -1, mirrored: false, ivars: [0; 4], fvars: [0.0; 8], owner: Some(a.owner) });
                 continue;
             }
             let et = bullet::Et { sprite: a.kind, color: a.color, absolute: true, angle: [a.angle, 0.0],
@@ -629,14 +665,15 @@ impl Side {
             mirrored: false,
             ivars: [0; 4],
             fvars: [0.0; 8],
+            owner: None,
         };
         let req = SpawnRequest { difficulty: self.st.difficulty, ..req };
-        self.stage = Enemy::new(prog, &req, 0);
+        self.stage = Enemy::new(prog, &req, 0, self.st.index);
     }
 
-    fn create_pending(&mut self, prog: &Program) {
+    fn create_pending(&mut self, progs: &[Program]) {
         for req in std::mem::take(&mut self.st.spawn) {
-            match Enemy::new(prog, &req, req.id) {
+            match Enemy::new(&progs[req.owner.unwrap_or(self.st.index)], &req, req.id, self.st.index) {
                 Some(e) => self.enemies.push(e),
                 None => self.st.alive.retain(|a| a.0 != req.id),
             }
@@ -644,8 +681,9 @@ impl Side {
     }
 
     /// One frame. `keys` are the player's input bits ([`crate::player::input`]).
-    pub fn tick(&mut self, prog: &Program, keys: u32, world: &mut World, lib: &AnmLibrary) {
+    pub fn tick(&mut self, progs: &[Program], keys: u32, world: &mut World, lib: &AnmLibrary) {
         self.st.scope_circle = self.player.as_ref().filter(|p| p.scope.active()).map(|p| (p.scope.pos,p.scope.radius));
+        self.st.scope_column = self.player.as_ref().is_some_and(|p| p.character == crate::character::Character::Marisa);
         let mut requests = Vec::new();
         self.st.pending_spirits.retain_mut(|p| {
             if let Some(req) = p.tick(self.st.ghost_anm,world,lib) { requests.push(req); false } else { true }
@@ -661,13 +699,14 @@ impl Side {
         self.st.pending_reflects = pending;
         self.rain_tick();
         if let Some(stage) = &mut self.stage {
-            stage.update(prog, &mut self.st, world, lib);
+            stage.update(&progs[self.st.index], &mut self.st, world, lib);
         }
-        self.create_pending(prog);
+        self.create_pending(progs);
         // Enemies created during the frame run in that same frame, like the game's list walk.
         let mut i = 0;
         while i < self.enemies.len() {
-            self.enemies[i].update(prog, &mut self.st, world, lib);
+            let owner = self.enemies[i].data.owner;
+            self.enemies[i].update(&progs[owner], &mut self.st, world, lib);
             if std::mem::take(&mut self.st.clear_enemies) {
                 self.clear_enemies();
             }
@@ -675,7 +714,7 @@ impl Side {
             if let Some(a) = self.st.alive.iter_mut().find(|a| a.0 == id) {
                 a.1 = member;
             }
-            self.create_pending(prog);
+            self.create_pending(progs);
             i += 1;
         }
         if let Some(p) = &mut self.player {
@@ -694,10 +733,11 @@ impl Side {
                 use crate::charge::Level;
                 let sub = match level { Level::Attack => None, Level::Skill => Some("Ecl_EtBreakLv2"),
                     Level::Extra => Some("Ecl_EtBreakLv3"), Level::Boss => Some("Ecl_EtBreakLv4") };
-                if let Some(sub) = sub { self.st.request(script_request(sub,p.pos)); }
+                if let Some(sub) = sub { self.st.request(script_request(sub,p.pos,None)); }
             }
         }
         self.st.scope_circle = self.player.as_ref().filter(|p| p.scope.active()).map(|p| (p.scope.pos,p.scope.radius));
+        self.st.scope_column = self.player.as_ref().is_some_and(|p| p.character == crate::character::Character::Marisa);
         self.update_bullets(world, lib);
         self.update_explosions(world);
         for e in &mut self.enemies {
@@ -822,12 +862,12 @@ pub fn dispatch_charges(sides: &mut [Side]) {
         if sends.ex || boss_as_ex {
             let rank = sides[sender].st.extra_level.min(7);
             sides[1 - sender].st.incoming_extra_level = rank;
-            sides[1 - sender].st.request(script_request("ExtraAttack", [0.0, 0.0]));
+            sides[1 - sender].st.request(script_request("ExtraAttack", [0.0, 0.0], Some(sender)));
         }
         if sends.boss && !boss_as_ex {
             let rank = sides[sender].st.boss_level.min(7);
             sides[1 - sender].st.incoming_boss_level = rank;
-            sides[1 - sender].st.request(script_request("BossAttack", [0.0, 0.0]));
+            sides[1 - sender].st.request(script_request("BossAttack", [0.0, 0.0], Some(sender)));
         }
     }
     // The dot and special-bullet counters send attacks (FUN_005450e0 and Reimu's FUN_0053ac80).
@@ -836,6 +876,7 @@ pub fn dispatch_charges(sides: &mut [Side]) {
         let mut active = sides[1 - sender].enemies.iter().filter(|e| e.data.sub == "ExtraAttack00").count()
             + sides[1 - sender].st.pending_reflects.iter().filter(|p| p.is_special()).count();
         let rank = sides[sender].st.extra_level as i32;
+        let reimu = sides[sender].player.as_ref().map_or(true, |p| p.character == crate::character::Character::Reimu);
         let st = &mut sides[sender].st;
         // White dots: threshold 150 minus the pressure term, one bullet each.
         let threshold = (150 - (st.spirit_pressure as f32 / 200.0 * 100.0) as i32).max(1);
@@ -848,17 +889,19 @@ pub fn dispatch_charges(sides: &mut [Side]) {
             let target = [st.randf2() * 148.0, st.randf() * 16.0];
             let color = (st.rand() & 0xf) as i32;
             st.outgoing_reflects.push(crate::reflect::Request { kind: crate::reflect::dot_kind(frames, roll), color,
-                speed: 0.5, origin, target: Some(target), special_rank: None });
+                speed: 0.5, origin, target: Some(target), special_rank: None, owner: 0 });
         }
         // Special bullets: threshold 100/90/90/80 by difficulty (Normal assumed), limited.
+        // Only Reimu's special bullet (the yin-yang, EXOnmyoInf) is ported; Marisa's is a laser
+        // object (EXLaserInf) and is not.
         const THRESHOLD: i32 = 90;
-        while st.special_counter >= THRESHOLD {
+        while st.special_counter >= THRESHOLD && reimu {
             st.special_counter -= THRESHOLD;
             if active >= crate::reflect::special_limit(frames) { break; }
             active += 1;
             let target = [st.randf2() * 160.0, st.randf() * 60.0];
             st.outgoing_reflects.push(crate::reflect::Request { kind: 44, color: 1, speed: 0.0,
-                origin: st.last_special_pos, target: Some(target), special_rank: Some(rank) });
+                origin: st.last_special_pos, target: Some(target), special_rank: Some(rank), owner: sender });
         }
     }
     // Bullets cancelled by a kill explosion fly to the opponent's field and fire there.
@@ -886,13 +929,13 @@ pub fn dispatch_charges(sides: &mut [Side]) {
                 let rank=sides[sender].st.extra_level.min(7);
                 sides[sender].st.extra_level=(rank+1).min(7);
                 sides[1-sender].st.incoming_extra_level=rank;
-                sides[1-sender].st.request(script_request("ExtraAttack",[0.0,0.0]));
+                sides[1-sender].st.request(script_request("ExtraAttack",[0.0,0.0],Some(sender)));
             }
             Some(Level::Boss) => {
                 let rank=sides[sender].st.boss_level.min(7);
                 sides[sender].st.boss_level=(rank+1).min(7);
                 sides[1-sender].st.incoming_boss_level=rank;
-                sides[1-sender].st.request(script_request("BossAttack",[0.0,0.0]));
+                sides[1-sender].st.request(script_request("BossAttack",[0.0,0.0],Some(sender)));
             }
             _ => {}
         }
@@ -936,6 +979,7 @@ impl Side {
                 angle: std::f32::consts::FRAC_PI_2 + st.randf2() * 0.15,
                 pos: [x, 0.0],
                 special: None,
+                owner: 0,
             };
             st.arrived_reflects.push(a);
         }
@@ -943,7 +987,7 @@ impl Side {
             let sub = ["GhostPure", "GhostWolf", "GhostOtterL", "GhostOtterR", "GhostEagle"][(st.rand() % 5) as usize];
             let pos = [st.randf2() * 120.0, 40.0 + st.randf() * 120.0];
             st.request(SpawnRequest { id: 0, difficulty: 0, sub: sub.into(), pos, hp: 200, score: 0, item: -1,
-                mirrored: false, ivars: [1, 0, 1, 0], fvars: [0.0; 8] });
+                mirrored: false, ivars: [1, 0, 1, 0], fvars: [0.0; 8], owner: None });
         }
     }
 
@@ -987,8 +1031,8 @@ impl Side {
             || self.enemies.iter().any(|e| !e.data.delete && (e.data.sub=="BossAttack" || e.data.sub=="Boss00"))
     }
 }
-fn script_request(sub: &str,pos: [f32;2]) -> SpawnRequest {
-    SpawnRequest { id:0,difficulty:0,sub:sub.into(),pos,hp:200,score:0,item:-1,mirrored:false,ivars:[0;4],fvars:[0.0;8] }
+fn script_request(sub: &str,pos: [f32;2],owner: Option<usize>) -> SpawnRequest {
+    SpawnRequest { id:0,difficulty:0,sub:sub.into(),pos,hp:200,score:0,item:-1,mirrored:false,ivars:[0;4],fvars:[0.0;8],owner }
 }
 
 #[cfg(test)]

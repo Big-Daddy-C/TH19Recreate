@@ -20,6 +20,8 @@ pub struct Request {
     /// A character's special bullet: on arrival it becomes `ExtraAttack00` (Reimu: a yin-yang
     /// orb, `EXOnmyoInf`) at the sender's EX rank instead of an ordinary bullet.
     pub special_rank: Option<i32>,
+    /// Side whose character's program runs a special bullet's attack.
+    pub owner: usize,
 }
 
 /// The type the converted bullet takes (`FUN_0051c8c0`): the cancelled bullet's own type
@@ -46,6 +48,7 @@ pub struct Pending {
     curve: Interp<2>,
     vm: Option<VmId>,
     special_rank: Option<i32>,
+    owner: usize,
 }
 
 /// A converted bullet reaching the opponent's field.
@@ -57,6 +60,8 @@ pub struct Arrival {
     pub pos: [f32; 2],
     /// Set for a special bullet: the EX rank its `ExtraAttack00` plays at.
     pub special: Option<i32>,
+    /// Side whose program runs it (special bullets).
+    pub owner: usize,
 }
 
 impl Pending {
@@ -77,7 +82,7 @@ impl Pending {
         let end = field_to_canvas(receiver.field, target);
         let mut curve = Interp::default();
         curve.start_bezier(start, [receiver.randf2() * 100.0, -400.0], end, [receiver.randf2() * 100.0, 100.0], delay);
-        Self { kind: req.kind, color: req.color, speed: (req.speed + 0.5).min(6.0), target, delay, time: 0, start, curve, vm: None, special_rank: req.special_rank }
+        Self { kind: req.kind, color: req.color, speed: (req.speed + 0.5).min(6.0), target, delay, time: 0, start, curve, vm: None, special_rank: req.special_rank, owner: req.owner }
     }
 
     /// One frame: the bullet's sprite (0.8 scale) flies; on arrival it becomes a bullet
@@ -102,7 +107,7 @@ impl Pending {
         }
         if let Some(id) = self.vm.take() { world.delete(id); }
         if self.special_rank.is_some() {
-            return Some(Arrival { kind: self.kind, color: self.color, speed: 0.0, angle: 0.0, pos: self.target, special: self.special_rank });
+            return Some(Arrival { kind: self.kind, color: self.color, speed: 0.0, angle: 0.0, pos: self.target, special: self.special_rank, owner: self.owner });
         }
         // APPROX: FUN_00404c90's result is hidden in the decompile; the side fans are read as
         // a random angle in the quarter turn that points inward.
@@ -113,7 +118,7 @@ impl Pending {
             FRAC_PI_2 + (receiver.randf() * 2.0 - 1.0) * FRAC_PI_6
         };
         let speed = receiver.randf() * 0.2 + self.speed + receiver.spirit_pressure as f32 / 200.0 * 2.0;
-        Some(Arrival { kind: self.kind, color: self.color, speed, angle, pos: self.target, special: None })
+        Some(Arrival { kind: self.kind, color: self.color, speed, angle, pos: self.target, special: None, owner: self.owner })
     }
 }
 

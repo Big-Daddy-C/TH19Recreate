@@ -110,6 +110,8 @@ pub struct EnemyData {
     /// Internal flags 0x700000, separate from ECL's public flags.
     pub spirit_kind: u8,
     pub spirit_disabled: bool,
+    /// Side whose character's program (and sprite slots) this enemy runs.
+    pub owner: usize,
     /// Frames the bot skips this enemy as a target (+0x63ac, set to 10 when it reverses).
     pub bot_cooldown: i32,
     pub scope_disable_sub: Option<String>,
@@ -126,7 +128,7 @@ pub fn field_to_canvas(field: [f32; 4], p: [f32; 2]) -> [f32; 2] {
 }
 
 impl Enemy {
-    pub fn new(prog: &Program, req: &SpawnRequest, id: i32) -> Option<Self> {
+    pub fn new(prog: &Program, req: &SpawnRequest, id: i32, own: usize) -> Option<Self> {
         let sub = prog.sub(&req.sub)?;
         let mut data = EnemyData { id, sub: req.sub.clone(), hp: req.hp, score: req.score, item: req.item, ..Default::default() };
         data.abs.pv.pos = req.pos;
@@ -136,6 +138,7 @@ impl Enemy {
         data.ivars = req.ivars;
         data.fvars = req.fvars;
         data.anm_slot = 2;
+        data.owner = req.owner.unwrap_or(own);
         data.ets = vec![crate::bullet::Et::default(); 16];
         let mut ctx = Context::new(sub);
         ctx.rank_bit = 1 << req.difficulty.min(7);
@@ -527,6 +530,7 @@ impl EnemyHost<'_> {
             mirrored,
             ivars: self.e.ivars,
             fvars: self.e.fvars,
+            owner: Some(self.e.owner),
         });
     }
 
@@ -666,7 +670,7 @@ impl EnemyHost<'_> {
             // anmSet(vm_slot, script) / anmSetMain(vm_slot, script)
             303 | 306 => {
                 let (slot, script) = (i!(0).max(0) as usize, i!(1));
-                let Some(file) = self.st.anm_files.get(self.e.anm_slot).copied().flatten() else {
+                let Some(file) = self.st.anm_set(self.e.owner).get(self.e.anm_slot).copied().flatten() else {
                     return Flow::Next;
                 };
                 if script < 0 {
@@ -684,7 +688,7 @@ impl EnemyHost<'_> {
             // Detached ANM effect, using the selected file (307).
             307 => {
                 let slot=i!(0).max(0) as usize; let script=i!(1);
-                if let Some(file)=self.st.anm_files.get(slot).copied().flatten() {
+                if let Some(file)=self.st.anm_set(self.e.owner).get(slot).copied().flatten() {
                     if script>=0 { self.world.spawn_clipped(self.lib,file,script as usize,field_to_canvas(self.st.field,self.e.pos),self.st.field); }
                 }
             }
@@ -694,7 +698,7 @@ impl EnemyHost<'_> {
                 let slot=i!(0).max(0) as usize; let variant=i!(1);
                 if let Some(main)=self.e.main {
                     let script=if variant<0 {main.base_script} else {main.base_script+5+variant as usize};
-                    let file=self.st.anm_files.get(self.e.anm_slot).copied().flatten().unwrap_or(main.file);
+                    let file=self.st.anm_set(self.e.owner).get(self.e.anm_slot).copied().flatten().unwrap_or(main.file);
                     if slot<self.e.vms.len() {set_vm(self.e,self.world,self.lib,self.st.field,slot,file,script);}
                 }
             }
@@ -848,7 +852,7 @@ impl EnemyHost<'_> {
                     // APPROX: field-space anchor while ANM draw type600 remains unsupported.
                     self.world.spawn_clipped(self.lib,file,13,[self.st.field[0],self.st.field[1]],self.st.field);
                 }
-                if let Some(file)=self.st.anm_files.get(3).copied().flatten() {
+                if let Some(file)=self.st.anm_set(self.e.owner).get(3).copied().flatten() {
                     if let Some(old)=self.st.spell_background.take() { self.world.delete(old); }
                     let at=field_to_canvas(self.st.field,[0.0,0.0]);
                     self.st.spell_background=Some(self.world.spawn_clipped(self.lib,file,0,at,self.st.field));

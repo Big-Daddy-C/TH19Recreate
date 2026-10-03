@@ -55,7 +55,7 @@ impl Pending {
         if self.time <= self.delay { return None; }
         if let Some(id) = self.vm { world.interrupt(id,1); }
         Some(SpawnRequest { id:0,difficulty:0,sub:self.kind.sub(self.target[0]).into(),pos:self.target,
-            hp:200,score:0,item:-1,mirrored:false,ivars:[self.level,0,self.level,0],fvars:[0.0;8] })
+            hp:200,score:0,item:-1,mirrored:false,ivars:[self.level,0,self.level,0],fvars:[0.0;8],owner:None })
     }
 }
 
