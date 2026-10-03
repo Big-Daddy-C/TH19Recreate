@@ -1497,7 +1497,15 @@ fn scoped_bullets_tint_progressively_and_restore_when_scope_ends() {
                 let vm = g.world.get(b.vm.unwrap()).unwrap();
                 assert_eq!(vm.color_mode,1);
                 assert_eq!(vm.color2,[255.0,((104-frame)*2).clamp(96,255) as f32,128.0]);
+                // The contact shake (+0x48/+0x4c) is at most one pixel on each axis.
+                let at=th_game::enemy::field_to_canvas(g.sides[side].st.field,b.pos);
+                assert!((vm.origin[0]-at[0]).abs()<=1.0&&(vm.origin[1]-at[1]).abs()<=1.0);
             }
+            // Still inside the graze ring (35 px), the bullet keeps its contact tint once the scope
+            // ends; it restores only after leaving the ring too (same FUN_004f5130 block).
+            g.tick([0;2]);
+            assert!(g.sides[side].st.bullets[0].scope_frames>0);
+            g.sides[side].st.bullets[0].pos=[pos[0],pos[1]-150.0];
             g.tick([0;2]);
             let b = &g.sides[side].st.bullets[0];
             assert_eq!(b.scope_frames,0);

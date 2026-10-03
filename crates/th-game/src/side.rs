@@ -524,7 +524,13 @@ impl Side {
             let dt = b.scope_time_scale;
             b.update_scaled(&mut ctx, dt);
             let slowed = b.state == 1 && b.hitbox > 0.0 && scope.is_some_and(|(c,r)| crate::scope::bullet_hit(scope_character,c,r,b.pos,b.hitbox));
-            b.scope_contact(slowed, ctx.world);
+            // The graze ring counts as contact too (iVar6 == 2 from FUN_00549e00); a hit does not.
+            let (dx, dy) = (b.pos[0] - st.player_pos[0], b.pos[1] - st.player_pos[1]);
+            let d2 = dx * dx + dy * dy;
+            let ring = b.state == 1 && !b.delete && b.hitbox > 0.0 && self.player.is_some()
+                && !(player_r > 0.0 && d2 < player_r * player_r + b.hitbox * b.hitbox)
+                && d2 < (3.0 + 40.0f32.max(b.hitbox / 2.5)).powi(2) + b.hitbox * b.hitbox;
+            b.scope_contact(slowed, slowed || ring, ctx.world, &mut *ctx.rand);
             let (dx, dy) = (b.pos[0] - st.player_pos[0], b.pos[1] - st.player_pos[1]);
             let d2 = dx * dx + dy * dy;
             if let Some(r) = cancel {

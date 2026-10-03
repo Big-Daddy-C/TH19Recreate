@@ -66,6 +66,8 @@ pub struct ShtFile {
     pub speed_focused_diagonal: f32,
     pub power_levels: i32,
     pub option_script: i32,
+    /// ANM script drawn over each option while power is 400 (`FUN_005483d0` reads header +0x40).
+    pub option_script2: i32,
     /// Option positions for level `n` (1-based): `options[0][n*(n-1)/2 ..][..n]`; `[1]` focused.
     pub options: [[[f32; 2]; 10]; 2],
     /// Bytes `0x20..0xF0`, including fields not decoded yet.
@@ -133,6 +135,7 @@ impl ShtFile {
             unk0: r.peek_u16(0)?,
             power_levels: r.peek_i32(0x20)?,
             option_script: r.peek_i32(0x3c)?,
+            option_script2: r.peek_i32(0x40)?,
             options,
             radii: [r.peek_f32(4)?, r.peek_f32(8)?, r.peek_f32(12)?],
             speed: r.peek_f32(16)?,

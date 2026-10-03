@@ -466,19 +466,27 @@ impl Bullet {
         }
     }
 
-    /// Shared scope contact presentation (004f54a7): interrupt 2 on entry, tint
-    /// ARGB ff/ff/clamp((104-age)*2,96,255)/80 while slowed, interrupt 3 on exit.
-    pub fn scope_contact(&mut self, slowed: bool, world: &mut World) {
+    /// Contact presentation (`FUN_004f5130` label 004f54a7), entered when the bullet is inside
+    /// the player's graze ring or the scope (`touched`): interrupt 2 on entry, tint ARGB
+    /// ff/ff/clamp((104-age)*2,96,255)/80, a random shake of up to one pixel on each axis
+    /// (+0x48/+0x4c, zero otherwise), interrupt 3 on exit. Only the scope (`slowed`) halves the
+    /// following movement tick.
+    pub fn scope_contact(&mut self, slowed: bool, touched: bool, world: &mut World, rand: &mut dyn FnMut() -> f32) {
         self.scope_time_scale = if slowed {0.5} else {1.0};
-        if slowed {
+        if touched {
             self.scope_frames = self.scope_frames.saturating_add(1);
             if self.scope_frames == 1 {
                 if let Some(id) = self.vm { world.interrupt(id, 2); }
             }
+            // FUN_00404bd0(1.0) twice: +0x4c first, then +0x48; each uniform in [-1, 1).
+            let shake_y = rand() * 2.0 - 1.0;
+            let shake_x = rand() * 2.0 - 1.0;
             if let Some(vm) = self.vm.and_then(|id| world.get_mut(id)) {
                 vm.color2 = [255.0, ((104-self.scope_frames)*2).clamp(96,255) as f32, 128.0];
                 vm.alpha2 = 255.0;
                 vm.color_mode = 1;
+                vm.origin[0] += shake_x;
+                vm.origin[1] += shake_y;
             }
         } else if self.scope_frames > 0 {
             self.scope_frames = 0;

@@ -2553,6 +2553,29 @@
             "segment_closest_point"
           ],
           "evidence": "code_checked"
+        },
+        {
+          "text": "Contact presentation in 004f5130 (label 004f54a7) is entered when a bullet is in the player graze ring (00549e00 returned 2) or in the scope (local_14 != 0): interrupt 2 at contact age <2, tint ARGB ff/ff/clamp((0x68-age)*2,0x60,0xff)/0x80, and a shake +0x48/+0x4c set from two game-RNG draws, each uniform in [-1,1) pixels (00404bd0 with multiplier 1.0), zero when not in contact. Only the scope slows movement. So a grazed bullet takes the same tint as a scoped one; the shake consumer for bullets was not located (enemies add +0x48/+0x4c to their draw position in 004feb00), so it is applied to the bullet sprite position.",
+          "sources": [
+            "bullet_contact_tick"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "005483d0 gives every option a second ANM VM (SHT header +0x40; Ran pl03 script 9, a rotating clock hand fading in) while power clamped to 0..400 reaches 400, deletes them below it, and 00546d10 positions both VMs on the option each tick. Normal play is power 200, so only Ran C2 boost (600 ticks) shows it.",
+          "sources": [
+            "option_setup",
+            "option_update"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Focus (player+0x2070 from input bit 8 in 00546ed0) changes: movement speed rows, shot slot +5 (0054f990), option offset rows (00546d10/004dea70), the focus shadow VM (script 0x13), the player-shot flag bit 2 (no consumer found for playable characters), Ran option latch 0054a120, character-6 callback radius 40->24 (00545b70, not playable), and the 0054e490 aim sway update which only runs unfocused (consumer 0054c430 is not referenced by any playable SHT). Hit and graze radii 0x20c4/0x20c8 are both 3.0.",
+          "sources": [
+            "option_update",
+            "ran_option_latch"
+          ],
+          "evidence": "code_checked"
         }
       ],
       "checks": {

@@ -84,6 +84,8 @@ struct PlayerOption {
     /// Current position, fixed point.
     pos: [i32; 2],
     vm: Option<VmId>,
+    /// Second per-option script (SHT +0x40, Ran's rotating clock) while power is 400.
+    extra: Option<VmId>,
     /// Snap-to-target ticks left (option +0x100; Ran's callback sets 10).
     hold: i32,
 }
@@ -295,7 +297,7 @@ impl Player {
         self.state_time = 0;
         self.invuln = 180;
         for o in self.options.drain(..) {
-            if let Some(id) = o.vm {
+            for id in [o.vm, o.extra].into_iter().flatten() {
                 world.interrupt(id, 1);
             }
         }
@@ -647,7 +649,7 @@ impl Player {
             // `FUN_005483d0` rebuilds every option when the count changes; each starts on its
             // slot relative to the live player position (focused offsets when focus is held).
             for o in self.options.drain(..) {
-                if let Some(id) = o.vm {
+                for id in [o.vm, o.extra].into_iter().flatten() {
                     world.delete(id);
                 }
             }
@@ -656,7 +658,18 @@ impl Player {
                 let script = self.sht.option_script;
                 let canvas = field_to_canvas(field, [at[0] as f32 / 128.0, at[1] as f32 / 128.0]);
                 let vm = (script >= 0).then(|| world.spawn_clipped(lib, self.anm_file, script as usize, canvas, field));
-                self.options.push(PlayerOption { pos: at, vm, hold: if latching { 10 } else { 0 } });
+                self.options.push(PlayerOption { pos: at, vm, extra: None, hold: if latching { 10 } else { 0 } });
+            }
+        }
+        // FUN_005483d0: at full power (400) every option carries the SHT +0x40 script; below it
+        // they are removed.
+        let full = self.power >= 400;
+        for o in &mut self.options {
+            if !full {
+                if let Some(id) = o.extra.take() { world.interrupt(id, 1); }
+            } else if o.extra.is_none() && self.sht.option_script2 >= 0 {
+                let canvas = field_to_canvas(field, [o.pos[0] as f32 / 128.0, o.pos[1] as f32 / 128.0]);
+                o.extra = Some(world.spawn_clipped(lib, self.anm_file, self.sht.option_script2 as usize, canvas, field));
             }
         }
         let anchor = if latching { self.option_anchor } else { self.fixed };
@@ -675,8 +688,10 @@ impl Player {
                 o.pos = target;
             }
             let p = field_to_canvas(field, [o.pos[0] as f32 / 128.0, o.pos[1] as f32 / 128.0]);
-            if let Some(vm) = o.vm.and_then(|id| world.get_mut(id)) {
-                vm.origin = [p[0], p[1], 0.0];
+            for id in [o.vm, o.extra].into_iter().flatten() {
+                if let Some(vm) = world.get_mut(id) {
+                    vm.origin = [p[0], p[1], 0.0];
+                }
             }
         }
     }
