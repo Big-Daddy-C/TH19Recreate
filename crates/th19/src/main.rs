@@ -230,6 +230,7 @@ impl Viewer {
             if std::env::var("TH19_DEBUG_EXTRA").ok().and_then(|v| v.parse::<u64>().ok()) == Some(self.frames) {
                 self.debug_extra_attack();
             }
+            self.debug_spawn();
             let keys = self.player_keys();
             if let Some(g) = &mut self.game {
                 th_game::side::prepare_charge_targets(&mut g.sides);
@@ -521,6 +522,27 @@ impl Viewer {
                 self.world.interrupt_all(n);
             }
             _ => {}
+        }
+    }
+
+    /// Development: `TH19_DEBUG_SPAWN=frame:Sub:x:y:side[:level]` (several, separated by `;`)
+    /// creates an ECL sub on a field at that frame, for screenshots and comparisons.
+    fn debug_spawn(&mut self) {
+        let Ok(spec) = std::env::var("TH19_DEBUG_SPAWN") else { return };
+        let Some(g) = &mut self.game else { return };
+        for one in spec.split(';') {
+            let f: Vec<&str> = one.split(':').collect();
+            if f.len() < 5 || f[0].parse::<u64>().ok() != Some(self.frames) {
+                continue;
+            }
+            let num = |i: usize| f.get(i).and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0);
+            let level = num(5) as i32;
+            if let Some(side) = g.sides.get_mut(num(4) as usize) {
+                side.st.request(th_game::side::SpawnRequest {
+                    id: 0, difficulty: 0, sub: f[1].into(), pos: [num(2), num(3)], hp: 200, score: 0,
+                    item: -1, mirrored: false, ivars: [level, 0, level, 0], fvars: [0.0; 8],
+                });
+            }
         }
     }
 

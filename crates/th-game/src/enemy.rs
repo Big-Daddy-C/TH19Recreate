@@ -249,6 +249,7 @@ impl Enemy {
             if let Some(vm) = world.get_mut(*id) {
                 vm.origin = [origin[0], origin[1], 0.0];
                 vm.visible = !hidden;
+                face_travel(vm, e.delta);
             }
         }
     }
@@ -294,6 +295,29 @@ impl EnemyData {
             Some(40) => 0x31,
             _ => 0x25,
         }
+    }
+}
+
+/// The owner-to-ANM rotation path of `FUN_005089d0` (switch on the VM's ANM `424` mode, read
+/// at +0x4cc): the sprite is turned by the enemy's travel direction `atan2(dy, dx)` (+0x80,
+/// +0x84). Mode 1 faces the direction; 2 keeps the sprite within +-pi/2 and flips it
+/// horizontally when heading left; 3, 4 and 5 add pi, pi/2 and -pi/2.
+fn face_travel(vm: &mut th_anm::vm::Vm, delta: [f32; 2]) {
+    use std::f32::consts::{FRAC_PI_2, PI};
+    if !(1..=5).contains(&vm.rotate_mode) {
+        return;
+    }
+    let a = delta[1].atan2(delta[0]);
+    match vm.rotate_mode {
+        1 => vm.rot[2] = a,
+        2 => {
+            let flip = !(-FRAC_PI_2..=FRAC_PI_2).contains(&a);
+            vm.rot[2] = if flip { wrap_angle(a + PI) } else { a };
+            vm.scale[0] = if flip { -vm.scale[0].abs() } else { vm.scale[0].abs() };
+        }
+        3 => vm.rot[2] = wrap_angle(a + PI),
+        4 => vm.rot[2] = wrap_angle(a + FRAC_PI_2),
+        _ => vm.rot[2] = wrap_angle(a - FRAC_PI_2),
     }
 }
 

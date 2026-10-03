@@ -101,7 +101,6 @@ pub struct PlayerBullet {
     /// FUN_0054fba0 state 2: collider removed, ANM interrupt 1 plays the impact.
     pub impacting: bool,
     hit_callback: i32,
-    last_enemy: Option<i32>,
 }
 
 pub struct Player {
@@ -637,7 +636,6 @@ impl Player {
             charge_shot: r.funcs == [11, 8, 0, 7],
             impacting: false,
             hit_callback: r.funcs[3],
-            last_enemy: None,
         });
     }
 
@@ -672,12 +670,13 @@ impl Player {
                     }
                     let overlap = shot_hits(b.pos, b.hitbox, b.angle, d);
                     if overlap {
-                        // The collider skips its most recently hit enemy (+0xa8,
-                        // FUN_00520450). Callback 7 preserves piercing shots (0054fba0).
-                        if b.charge_shot && b.last_enemy == Some(d.id) { continue; }
+                        // A collider remembers the last enemy it hit (+0xa8) only to avoid a
+                        // second hit within one frame: the per-frame collider tick (0051fa30)
+                        // clears it, and the hit interval (+0xa4) is 1. A piercing charge
+                        // orb (callback 7 leaves it alive, 0054fba0) therefore hits every
+                        // overlapping enemy on every frame.
                         damage[index].0 += b.damage;
                         damage[index].1 = b.pos;
-                        b.last_enemy = Some(d.id);
                         if !b.charge_shot {
                             // Callback 1 adds effect 142 before the shared impact transition.
                             if b.hit_callback == 1 {
@@ -791,7 +790,7 @@ use super::*;
     fn amulet(angle: f32, speed: f32, time: i32) -> PlayerBullet {
         PlayerBullet { pos: [0.0, 300.0], angle, speed, hitbox: [4.0; 2], damage: 1,
             homing: true, homing_target: None, angular_velocity: 0.0, acceleration: 0.0,
-            vm: None, time, charge_shot: false, impacting: false, hit_callback: 0, last_enemy: None }
+            vm: None, time, charge_shot: false, impacting: false, hit_callback: 0 }
     }
 
     fn homing_enemy(id: i32, pos: [f32; 2]) -> Enemy {

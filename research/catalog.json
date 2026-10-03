@@ -353,6 +353,34 @@
     "scope_disable_instruction": {
       "address": "00502d5d",
       "decompile_sha256": null
+    },
+    "collider_tick": {
+      "address": "0051fa30",
+      "decompile_sha256": "1d7cb2934397ff4d45cd59a5f22b680036629ab8dfabd6b335d2c8f905f922ac"
+    },
+    "collider_tick_single": {
+      "address": "0051fc00",
+      "decompile_sha256": "615231dac8b2650ef4a95d1992a437635d367922e0b132f523bbf72c72afbc30"
+    },
+    "collider_hit_query": {
+      "address": "00520450",
+      "decompile_sha256": "76913e7f97d07ed2e9232457045ac6c4c4f1d9b282cf76d4da4249fda6ab686f"
+    },
+    "shot_update_native": {
+      "address": "0054df10",
+      "decompile_sha256": "7b71676b02d57bda3f94505e5b0a290c3cda4896106a2b7475329167a57ce192"
+    },
+    "enemy_vm_sync": {
+      "address": "005089d0",
+      "decompile_sha256": "779b050201d81e06ac969feccb7dd0e57da4d74d0d76ddd3a91f1ab2cc0280ab"
+    },
+    "shot_charge_hit_default": {
+      "address": "0054fba0",
+      "decompile_sha256": "76e45d976aa2f97fcf52a13732d2b1ee5c48b3b37c2c6b81431077fd8ee98fd9"
+    },
+    "collider_create_circle": {
+      "address": "005200f0",
+      "decompile_sha256": "f983f0d072b122f646d399e93cd241abae93ed1b6cc48f0284a736cdb10f3e57"
     }
   },
   "features": {
@@ -1000,7 +1028,13 @@
         "shot_update",
         "shot_hit",
         "reimu_focused_shot_hit",
-        "anm_root_spawn"
+        "anm_root_spawn",
+        "collider_tick",
+        "collider_tick_single",
+        "collider_hit_query",
+        "shot_update_native",
+        "shot_charge_hit_default",
+        "collider_create_circle"
       ],
       "code": [
         "crates/th-game/src/player.rs",
@@ -1059,6 +1093,18 @@
             "anm_root_spawn"
           ],
           "evidence": "code_checked"
+        },
+        {
+          "text": "Collider hit cadence: the per-frame collider tick FUN_0051fa30 (and single-collider 0051fc00) sets +0xa8 (last hit enemy id) to 0 every frame, decrements the countdown +0x80 (hit when +0x80 % +0xa4 == 0, interval +0xa4 = 1 for shot and explosion colliders) and the cooldown +0xac. FUN_00520450 therefore only prevents a second hit by one collider on one enemy within a frame. Charge shots (SHT slot 10 funcs [11,8,0,7]: init 0054b3e0 sets +0x114 piercing flag; speed callback 0054b380; hit callback 0054b370 -> 0054fba0 does nothing when +0x114 is set and returns the shot damage +0xac) keep overlapping enemies hit on every frame. The old rule (skip the last-hit enemy across frames) was wrong: a charge release now destroys a scoped pure spirit (HP 50+10*I0 = 70) in ~8 frames; kill explosions (FUN_005200f0 colliders, 1029 damage, 1031 lifetime) likewise damage overlapping enemies every frame.",
+          "sources": [
+            "collider_tick",
+            "collider_tick_single",
+            "collider_hit_query",
+            "shot_update_native",
+            "shot_charge_hit_default",
+            "collider_create_circle"
+          ],
+          "evidence": "code_checked"
         }
       ],
       "checks": {
@@ -1083,7 +1129,9 @@
         "spirit_credit_add",
         "spirit_death_dispatch",
         "scope_spirit_contact",
-        "scope_disable_register"
+        "scope_disable_register",
+        "enemy_vm_sync",
+        "shot_update_native"
       ],
       "code": [
         "crates/th-game/src/spirit.rs",
@@ -1111,10 +1159,18 @@
             "spirit_dispatch"
           ],
           "evidence": "code_checked"
+        },
+        {
+          "text": "Animal spirit attack forms (enemy.anm scripts 265-267) set ANM 424 modes 1/2/1. The mode is a byte at VM+0x4cc, applied every frame by the owning enemy in FUN_005089d0 (also by shots in 0054df10): angle=atan2(dy,dx) of travel (+0x80/+0x84); mode1 rot=angle; mode2 keeps |angle|<=pi/2 and flips scale.x (+0x54) when heading left; modes 3/4/5 add pi, pi/2, -pi/2. The quelled forms (268-270) use no mode and stay upright. Previously enemies ignored 424, so animals always faced right. Pure-spirit script 106 sets none (its 504 trail children inherit rotation 0). No user screenshot shows a spirit; wolf/otter/eagle now face their travel direction in a fixed-frame render, original footage comparison not run.",
+          "sources": [
+            "enemy_vm_sync",
+            "shot_update_native"
+          ],
+          "evidence": "code_checked"
         }
       ],
       "checks": {
-        "automated": "2026-10-03: workspace53 tests passed; chain threshold and three distance ranges checked; all four delayed types create original scripts, scope switch checks disabled HP and0.02 speed.",
+        "automated": "2026-10-03: workspace tests pass (56) incl. animal travel-direction rotation, charge-vs-quelled-spirit kill within 20 frames, explosion per-frame damage. Original-game parity not assessed.",
         "original_game_parity": "not_run",
         "visual": "data/reference/spirits-and-impacts.png frame1600 inspected: naturally chain-earned pure spirit visible on opponent field. Four-type behavior checked with original ECL assets; full footage comparison unrun."
       },

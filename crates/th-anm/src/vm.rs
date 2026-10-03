@@ -368,6 +368,10 @@ pub struct Vm {
     inherited_rot: f32,
     /// ANM `424`: the owning bullet sets the z rotation from its direction.
     pub auto_rotate: bool,
+    /// ANM `424` argument (stored as a byte at +0x4cc). An owning enemy turns the sprite
+    /// by its travel direction each frame according to it (`FUN_005089d0`): 1 faces the
+    /// direction, 2 keeps upright and flips horizontally, 3/4/5 add pi, pi/2, -pi/2.
+    pub rotate_mode: u8,
 }
 
 impl Vm {
@@ -433,6 +437,7 @@ impl Vm {
             sprite_remap: None,
             inherited_rot: 0.0,
             auto_rotate: false,
+            rotate_mode: 0,
         }
     }
 
@@ -1446,7 +1451,10 @@ fn exec(
         }
         423 => vm.color_mode = i!(0),
         // rotateAuto: a bullet's sprite turns to its direction of travel (th19.exe FUN_004f4990).
-        424 => vm.auto_rotate = i!(0) != 0,
+        424 => {
+            vm.auto_rotate = i!(0) != 0;
+            vm.rotate_mode = i!(0) as u8;
+        }
         425 => vm.uv_vel[0] = f!(0),
         426 => vm.uv_vel[1] = f!(0),
         427 => {

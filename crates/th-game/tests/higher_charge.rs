@@ -710,3 +710,87 @@ fn lower_reimu_nonspells_fire_ranked_five_way_fans() {
         assert_eq!(ids.len(),expected,"Reimu level {} fan volley",rank+1);
     }
 }
+
+/// enemy.anm scripts 265-267 (the animals' attack forms) set ANM 424 modes 1/2/1; the
+/// owner turns them by their travel direction every frame (FUN_005089d0).
+#[test]
+fn animal_spirits_face_their_travel_direction() {
+    use th_game::side::SpawnRequest;
+    for (sub, x, y) in [("GhostWolf", 0.0, 60.0), ("GhostOtterL", -100.0, 200.0), ("GhostEagle", 80.0, 60.0)] {
+        let Some(mut g) = setup() else { return };
+        g.sides[1].st.request(SpawnRequest { id: 0, difficulty: 0, sub: sub.into(), pos: [x, y], hp: 200,
+            score: 0, item: -1, mirrored: false, ivars: [1, 0, 1, 0], fvars: [0.0; 8] });
+        let mut checked = 0;
+        for _ in 0..120 {
+            g.tick([0; 2]);
+            let Some(e) = g.sides[1].enemies.iter().find(|e| e.data.sub == sub) else { continue };
+            let Some(vm) = e.data.vms[0].and_then(|id| g.world.get(id)) else { continue };
+            if !(1..=2).contains(&vm.rotate_mode) || e.data.delta[0].hypot(e.data.delta[1]) < 0.05 {
+                continue;
+            }
+            let a = e.data.delta[1].atan2(e.data.delta[0]);
+            let expect = if vm.rotate_mode == 2 && a.abs() > std::f32::consts::FRAC_PI_2 {
+                th_game::motion::wrap_angle(a + std::f32::consts::PI)
+            } else {
+                a
+            };
+            assert!((vm.rot[2] - expect).abs() < 1e-4, "{sub}: rot {} expected {expect}", vm.rot[2]);
+            checked += 1;
+        }
+        assert!(checked > 10, "{sub}: moving attack form not found ({checked})");
+    }
+}
+
+/// A collider remembers its last-hit enemy only within a frame (FUN_0051fa30 clears +0xa8 on
+/// every tick, hit interval +0xa4 = 1), so piercing charge orbs that stop beside a scoped
+/// spirit hit it every frame and destroy it almost at once (HP 50 + 10 * I0 once quelled).
+#[test]
+fn charge_orbs_hit_an_overlapping_spirit_every_frame() {
+    use th_game::side::SpawnRequest;
+    let Some(mut g) = setup() else { return };
+    g.sides[0].st.request(SpawnRequest { id: 0, difficulty: 0, sub: "GhostPure".into(), pos: [0.0, 300.0],
+        hp: 200, score: 0, item: -1, mirrored: false, ivars: [2, 0, 2, 0], fvars: [0.0; 8] });
+    let mut released = None;
+    let mut hp = vec![];
+    let mut dead_at = None;
+    for f in 0..200usize {
+        g.tick([if f < 60 { input::CHARGE } else { 0 }, 0]);
+        if released.is_none() && g.sides[0].player.as_ref().unwrap().last_charge == Some(Level::Attack) {
+            released = Some(f);
+        }
+        match g.sides[0].enemies.iter().find(|e| e.data.sub == "GhostPure") {
+            Some(e) if released.is_some() => hp.push(e.data.hp),
+            Some(_) => {}
+            None if released.is_some() => { dead_at = Some(f); break; }
+            None => {}
+        }
+    }
+    let released = released.expect("charge released");
+    let dead_at = dead_at.expect("spirit destroyed");
+    assert!(dead_at - released < 20, "released {released}, destroyed {dead_at}");
+    // The two centre orbs overlap it continuously: HP falls on consecutive frames.
+    assert!(hp.windows(2).filter(|w| w[1] < w[0]).count() >= 2, "{hp:?}");
+}
+
+/// Kill explosions are colliders too: an enemy inside one keeps taking damage every frame
+/// for its whole lifetime (GhostPureBlast: 10 damage, 40 frames).
+#[test]
+fn explosions_damage_overlapping_enemies_every_frame() {
+    use th_game::side::SpawnRequest;
+    let Some(mut g) = setup() else { return };
+    let req = |x: f32| SpawnRequest { id: 0, difficulty: 0, sub: "GhostPure".into(), pos: [x, 100.0], hp: 200,
+        score: 0, item: -1, mirrored: false, ivars: [2, 0, 2, 0], fvars: [0.0; 8] };
+    g.sides[1].st.request(req(0.0));
+    g.sides[1].st.request(req(8.0));
+    for _ in 0..80 { g.tick([0; 2]); }
+    let ids: Vec<i32> = g.sides[1].enemies.iter().filter(|e| e.data.sub == "GhostPure").map(|e| e.data.id).collect();
+    assert_eq!(ids.len(), 2);
+    g.sides[1].enemies.iter_mut().find(|e| e.data.id == ids[0]).unwrap().data.killed = true;
+    let mut hp = vec![];
+    for _ in 0..30 {
+        g.tick([0; 2]);
+        hp.push(g.sides[1].enemies.iter().find(|e| e.data.id == ids[1]).unwrap().data.hp);
+    }
+    let falling = hp.windows(2).filter(|w| w[1] < w[0]).count();
+    assert!(falling >= 15, "the neighbour should lose HP on most frames: {hp:?}");
+}

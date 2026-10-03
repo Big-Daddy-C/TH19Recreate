@@ -92,8 +92,11 @@ fn barrier_hit_cancels_pending_charge_and_does_not_recover_barrier() {
     assert_eq!(p.barrier, Barrier::Broken);
 }
 
+/// Colliders forget their last-hit enemy every frame (FUN_0051fa30 clears +0xa8; hit interval
+/// +0xa4 = 1): a piercing charge orb survives each hit and damages an overlapping enemy on
+/// every frame.
 #[test]
-fn charge_shot_pierces_and_skips_its_last_hit_enemy() {
+fn charge_shot_pierces_and_hits_an_overlapping_enemy_every_frame() {
     let Some((mut p, mut world, lib)) = setup() else { return };
     for _ in 0..50 { tick(&mut p, input::CHARGE, &mut [], &mut world, &lib); }
     tick(&mut p, 0, &mut [], &mut world, &lib);
@@ -108,10 +111,8 @@ fn charge_shot_pierces_and_skips_its_last_hit_enemy() {
     assert_eq!(enemies[0].data.hp, 93);
     assert_eq!(p.bullets.len(), 1);
     tick(&mut p, 0, &mut enemies, &mut world, &lib);
-    assert_eq!(enemies[0].data.hp, 93, "must not damage the same last-hit target every frame");
-    enemies[0].data.id = 101;
-    tick(&mut p, 0, &mut enemies, &mut world, &lib);
-    assert_eq!(enemies[0].data.hp, 86, "piercing shot must still damage a different target");
+    assert_eq!(enemies[0].data.hp, 86, "the piercing orb hits the same enemy again next frame");
+    assert_eq!(p.bullets.len(), 1);
 }
 
 #[test]

@@ -126,7 +126,6 @@ pub struct Explosion {
     pub damage: i32,
     radius_interp: th_anm::interp::Interp<1>,
     /// The collider skips the enemy it hit most recently (`+0xa8`).
-    last_enemy: Option<i32>,
     vm: Option<th_anm::VmId>,
 }
 
@@ -291,14 +290,12 @@ impl Side {
                     if d.delete || d.flags & crate::enemy::flag::NO_HURTBOX != 0 || d.hurtbox[0] <= 0.0 {
                         continue;
                     }
-                    if x.last_enemy == Some(d.id) {
-                        continue;
-                    }
+                    // Like every collider, the explosion hits each overlapping enemy once per
+                    // frame for its whole lifetime (FUN_0051fa30 clears the last-hit id).
                     let (hw, hh) = (d.hurtbox[0] / 2.0, d.hurtbox[1] / 2.0);
                     let cx = x.pos[0].clamp(d.pos[0] - hw, d.pos[0] + hw);
                     let cy = x.pos[1].clamp(d.pos[1] - hh, d.pos[1] + hh);
                     if (x.pos[0] - cx).powi(2) + (x.pos[1] - cy).powi(2) <= x.radius * x.radius {
-                        x.last_enemy = Some(d.id);
                         d.damage(x.damage, x.pos);
                     }
                 }
@@ -417,7 +414,6 @@ impl Side {
             radius: 1.0,
             damage: e.rewards.b,
             radius_interp: interp,
-            last_enemy: None,
             vm,
         });
         // Chain: each kill adds its reward (ins_1032) to a timer capped at 60 frames.
