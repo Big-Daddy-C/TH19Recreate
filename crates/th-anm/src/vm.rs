@@ -100,6 +100,23 @@ impl DrawBatch {
     }
 }
 
+impl DrawBatch {
+    /// An untextured disc in canvas space (a triangle fan), clipped to `clip`.
+    pub fn solid_disc(center: [f32; 2], radius: f32, color: [f32; 4], clip: [f32; 4]) -> Self {
+        let v = |px: f32, py: f32| Vertex { pos: [px, py], uv: [0.0; 2], color, w: 1.0, fog: 0.0, depth: 0.0 };
+        let n = 20;
+        let pt = |k: i32| {
+            let t = k as f32 / n as f32 * std::f32::consts::TAU;
+            v(center[0] + t.cos() * radius, center[1] + t.sin() * radius)
+        };
+        let mut vertices = Vec::with_capacity(n as usize * 3);
+        for k in 0..n {
+            vertices.extend([v(center[0], center[1]), pt(k), pt(k + 1)]);
+        }
+        Self { texture: None, blend: BlendMode::Replace, depth: DepthMode::Off, layer: i32::MIN, clip: Some(clip), vertices }
+    }
+}
+
 pub type DrawList = Vec<DrawBatch>;
 
 /// Which group of VMs to draw. A stage frame is drawn as `Backdrop`, then `Stage`, then `Ui`.
@@ -1752,7 +1769,9 @@ fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, camera: Option<&Camera>, out: 
             }
             Primitive::Ring { radius, thickness, segments } => {
                 let n = segments.clamp(3, 256);
-                let (ri, ro) = ((radius - thickness * 0.5) * sx, (radius + thickness * 0.5) * sx);
+                // The radius follows the X scale and the band width the Y scale (the bomb sets
+                // its pair to (radius, band width) and its ring children inherit it).
+                let (ri, ro) = (radius * sx - thickness * sy * 0.5, radius * sx + thickness * sy * 0.5);
                 for k in 0..n {
                     let (a0, a1) = (ring_pt(k, n, ri), ring_pt(k + 1, n, ri));
                     let (b0, b1) = (ring_pt(k, n, ro), ring_pt(k + 1, n, ro));

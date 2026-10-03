@@ -231,6 +231,7 @@ impl Viewer {
                 self.debug_extra_attack();
             }
             self.debug_spawn();
+            if std::env::var_os("TH19_DEBUG_FOCUS").is_some() { self.held.insert(KeyCode::ShiftLeft); }
             if std::env::var("TH19_DEBUG_RAIN").ok().and_then(|v| v.parse::<u64>().ok()) == Some(self.frames) {
                 if let Some(g) = &mut self.game { g.sides[1].start_rain(); }
             }
@@ -342,6 +343,14 @@ impl Viewer {
         if let Some(g) = &self.game {
             for (side, field) in g.sides.iter().zip(FIELDS) {
                 if let Some(p) = &side.player {
+                    // Slow (focus) mode shows the hit point: a red dot with a white rim at the
+                    // player's centre. APPROX: the original's hitbox graphic was not located;
+                    // the radius is the collision radius used by the hit test.
+                    if p.focused && matches!(p.state, th_game::player::State::Normal | th_game::player::State::Entering | th_game::player::State::Knockback) {
+                        let at = th_game::enemy::field_to_canvas(field, p.pos);
+                        list.push(th_anm::DrawBatch::solid_disc(at, 4.5, [1.0, 1.0, 1.0, 1.0], field));
+                        list.push(th_anm::DrawBatch::solid_disc(at, 3.0, [1.0, 0.05, 0.05, 1.0], field));
+                    }
                     // Provisional HUD, outside the playfield. Top row = available meter;
                     // bottom row = held charge. Original front.anm HUD remains to be ported.
                     let [x, _, w, _] = field;
@@ -752,6 +761,17 @@ fn main() {
         viewer.mode = mode;
         viewer.stage_idx = n.saturating_sub(1).min(viewer.stage_files.len().saturating_sub(1));
         viewer.restart();
+    }
+
+    // Development: `--anm FILE.anm [--script N]` shows one ANM script (with --screenshot).
+    if let Some(name) = args.iter().position(|a| a == "--anm").and_then(|i| args.get(i + 1)) {
+        if let Some(i) = viewer.files.iter().position(|f| f == name) {
+            viewer.file_idx = i;
+            viewer.script = args.iter().position(|a| a == "--script").and_then(|i| args.get(i + 1)?.parse().ok()).unwrap_or(0);
+            viewer.centered = true;
+            viewer.mode = Mode::Anm;
+            viewer.restart();
+        }
     }
 
     let screenshot = args.iter().position(|a| a == "--screenshot").and_then(|i| args.get(i + 1)).map(|p| Screenshot {

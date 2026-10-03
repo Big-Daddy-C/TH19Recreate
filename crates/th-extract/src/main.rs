@@ -63,7 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     e.name, e.width, e.height, e.x, e.y, e.lowres_scale,
                     t.map(|t| (t.width, t.height, t.data.len())), e.sprites.len(), e.scripts.len()
                 );
-                for s in e.sprites.iter().take(3) {
+                for s in e.sprites.iter().take(if std::env::var_os("ANM_ALL_SPRITES").is_some() { usize::MAX } else { 3 }) {
                     println!("   sprite {:>4} ({}, {}, {}x{})", s.id, s.x, s.y, s.w, s.h);
                 }
                 for sc in &e.scripts {
