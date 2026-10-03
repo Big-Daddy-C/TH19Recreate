@@ -1598,8 +1598,8 @@ impl Placer<'_> {
     }
 
     fn place_2d(&self, x: f32, y: f32, uv: [f32; 2], color: [f32; 4]) -> Vertex {
-        let (s, c) = self.rot[2].sin_cos();
-        let pos = [self.origin[0] + x * c - y * s, self.origin[1] + x * s + y * c];
+        let p = self.to_world(x, y);
+        let pos = [p[0], p[1]];
         Vertex { pos, uv, color, w: 1.0, fog: 0.0, depth: 0.0 }
     }
 
@@ -1676,6 +1676,10 @@ fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, camera: Option<&Camera>, out: 
         vm.rot
     } else if matches!(vm.render_mode, 0 | 2) {
         [0.0; 3]
+    } else if vm.render_mode == 8 {
+        // Mode 8 uses all three axes even on gameplay layers (FUN_004c6910).
+        // effect.anm script 98 relies on YZX tilt plus continuous Z rotation.
+        [vm.rot[0], vm.rot[1], vm.rot[2] + vm.inherited_rot]
     } else {
         // Drawn at the world rotation: own plus the ancestors' (th19.exe sprite vertex
         // setup, FUN_00404ae0), so child sprites turn with their parent.

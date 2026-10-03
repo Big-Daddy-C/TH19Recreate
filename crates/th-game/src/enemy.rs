@@ -84,6 +84,7 @@ pub struct EnemyData {
     /// that / 7 (FUN_004fecc0 case 0x43, FUN_00509980 +0x5014/+0x5020): cards take 1/7.
     pub spell_hp7: Option<i32>,
     pub movement_limits: Option<[f32;4]>,
+    pub boss_mesh: Option<crate::boss_mesh::BossMesh>,
     pub score: i32,
     pub item: i32,
     pub ivars: [i32; 4],
@@ -153,6 +154,7 @@ impl Enemy {
         }
         let e = &mut self.data;
         e.time += 1;
+        if let Some(mesh) = &mut e.boss_mesh { mesh.tick(); }
 
         e.abs.step();
         e.rel.step();
@@ -878,6 +880,11 @@ impl EnemyHost<'_> {
                 ctx.set_float_var(ins, 0, v, self);
             }
             600..=620 => self.et_op(ctx, ins),
+            621 => {
+                let radius = f!(0);
+                let color = i!(1) as u32;
+                self.e.boss_mesh = (radius > 0.0).then(|| crate::boss_mesh::BossMesh::new(radius, color));
+            }
             1007 | 1034 | 1035 => {
                 let rank=match op {1034=>self.st.incoming_extra_level,1035=>self.st.incoming_boss_level,_=>i!(0).clamp(0,7) as u8};
                 self.e.script_rank=Some(rank); ctx.rank_bit=1<<rank;

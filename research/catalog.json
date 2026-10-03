@@ -273,6 +273,26 @@
     "spell_damage_mode": {
       "address": "0040f7a0",
       "decompile_sha256": "f0aaf6a341822f28007140ce1036f1367f9cb2391488b47569bf4b9d550c0abc"
+    },
+    "anm_mode8_draw": {
+      "address": "004c6910",
+      "decompile_sha256": "e96bb7eaf2946873d52cf41fd042d9aff69bcf508858c19bd86fc3b45047ddde"
+    },
+    "boss_mesh_update": {
+      "address": "005092a0",
+      "decompile_sha256": "84df973380c677b20c1a9d455d073414e7b1fb4c6cb83ab8b2db0c410a7a00f7"
+    },
+    "scene_mesh_grid": {
+      "address": "005063b0",
+      "decompile_sha256": "2df79c1a529503b22f9e16629077a49a08a91f09a170cebfa58b46e94dbe1091"
+    },
+    "scene_mesh_init": {
+      "address": "00506510",
+      "decompile_sha256": "7f322a3247c21e3877c150f894eb87f17fb09d4d6b97823304fb49acce17cba8"
+    },
+    "scene_mesh_spawn": {
+      "address": "00534860",
+      "decompile_sha256": "4c9cb5e9ce918a5ca16aeebd02a8cec8915ad76da9f7433a2ad8361230474cde"
     }
   },
   "features": {
@@ -744,7 +764,7 @@
         "original_game_parity": "not_run"
       },
       "next": [
-        "Audit remaining Reimu boss opcodes 516,520,521,524,525,527,534,621,1036 and global -9888; implement exact move412."
+        "Audit remaining Reimu boss opcodes 516,520,521,524,525,527,534,1036 and global -9888; implement exact move412."
       ]
     },
     "stage": {
@@ -837,6 +857,68 @@
       "next": [
         "Implement ghost/spirit spawning, scope contact states, slowdown/tagging and conversion using0052b250 and004f5130; defer meter rewards.",
         "Port other character-specific scopes alongside their player controllers."
+      ]
+    },
+    "boss_visuals": {
+      "implementation": "partial",
+      "summary": "Boss magic circle retains XYZ tilt and scripted spin; ECL621 adds the growing tinted scene-distortion mesh.",
+      "symbols": [
+        "anm_mode8_draw",
+        "boss_mesh_update",
+        "scene_mesh_grid",
+        "scene_mesh_init",
+        "scene_mesh_spawn",
+        "ecl_host"
+      ],
+      "code": [
+        "crates/th-anm/src/vm.rs",
+        "crates/th-game/src/boss_mesh.rs",
+        "crates/th-game/src/enemy.rs",
+        "crates/th19/src/main.rs"
+      ],
+      "tests": [
+        "crates/th-anm/tests/boss_circle.rs",
+        "crates/th-game/tests/higher_charge.rs"
+      ],
+      "findings": [
+        {
+          "text": "effect.anm script98 selects sprite33, mode8, YZX order3, alpha128, additive blend and angular velocity -0.75 degrees/frame after frame60 stop. Gameplay emission previously discarded X/Y tilt; now retains it. Mode0/2 remain unrotated. Texture contains red/pink glow; no arbitrary tint added to circle.",
+          "sources": [
+            "anm_mode8_draw"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "ECL621 radius160 and raw ARGB RGB0xf00f80 create a17x17 mesh (00504248-00504264). Radius starts16 and grows2/frame. 00509314-0050936e makes square side2r+40 centered at enemy. Inside-circle weight1-distanceSquared/radiusSquared interpolates RGB from white toward script color, opaque inside, clear outside. Position expands32*weight radially and wobbles8*weight*sin(phase); per-vertex phases +pi/32,-pi/64 and per-frame +pi/16,+pi/32.",
+          "sources": [
+            "ecl_host",
+            "boss_mesh_update",
+            "scene_mesh_grid",
+            "scene_mesh_init"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Gameplay XYZ geometry still uses orthographic XY projection. Boss mesh currently samples the existing stage scene before gameplay ANM, with field clip and clamped UVs; exact original capture/layer interaction, boundary geometry and camera projection remain unverified. Do not claim exact color or visual parity from tests.",
+          "sources": [
+            "anm_mode8_draw",
+            "scene_mesh_spawn"
+          ],
+          "evidence": "assumption"
+        },
+        {
+          "text": "User screenshots223550/223602 show boss-centered pink-red tilted circles with changing orientation; compared qualitatively against local fixed-frame captures. Different stage/timing prevents pixel parity.",
+          "sources": [],
+          "evidence": "user_observation"
+        }
+      ],
+      "checks": {
+        "automated": "2026-10-02 working tree based on0bef46d: cargo test --workspace:44 passed with original assets available; cargo build --release -p th19 passed. Real effect98 projected-area and post-stop-spin regression, actual boss slot/621 parameters and center tint/clear edges/animated mesh regressions.",
+        "visual": "Inspected data/reference/boss-circle-before.png, boss-circle-after.png (Lv3/frame650), boss-circle-nonspell-fixed.png (Lv1/frame600); original screenshot223550/223602. Tilt and red surround present; precise colour/camera/capture ordering not established.",
+        "original_game_parity": "not_run"
+      },
+      "next": [
+        "Compare identical original/runtime stage and boss times; audit gameplay camera projection and mesh scene capture ordering."
       ]
     }
   }

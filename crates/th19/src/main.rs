@@ -320,6 +320,15 @@ impl Viewer {
         if let Some(st) = &self.stage {
             list.extend(st.distortion_batches(&FIELDS));
         }
+        if let Some(g) = &self.game {
+            for side in &g.sides {
+                for enemy in &side.enemies {
+                    if let Some(mesh) = &enemy.data.boss_mesh {
+                        list.push(mesh.batch(th_game::enemy::field_to_canvas(side.st.field, enemy.data.pos), side.st.field));
+                    }
+                }
+            }
+        }
         list.extend(self.world.draw_list(&self.lib, th_anm::Pass::Ui));
         if let Some(g) = &self.game {
             for (side, field) in g.sides.iter().zip(FIELDS) {

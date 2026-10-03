@@ -17,6 +17,27 @@ struct Game {
     world: World,
     lib: AnmLibrary,
 }
+
+#[test]
+fn boss_magic_circle_uses_original_tilted_effect_script() {
+    let Some(mut g) = setup() else { return };
+    g.sides[1].player.as_mut().unwrap().godmode = true;
+    g.sides[0].player.as_mut().unwrap().instant_charge(Level::Boss);
+    for _ in 0..200 { g.tick([0; 2]); }
+    let boss = g.sides[1].enemies.iter().find(|e| e.data.boss_slot.is_some()).unwrap();
+    let vm = g.world.get(boss.data.vms[1].expect("magic circle slot")).unwrap();
+    let mesh = boss.data.boss_mesh.as_ref().expect("ECL 621 boss-area mesh");
+    assert_eq!(mesh.target_radius, 160.0);
+    assert_eq!(mesh.color, 0x00f00f80);
+    assert!(!g.sides[1].st.unknown_ops.contains_key(&621));
+    assert_eq!(g.lib.files[vm.file].name, "effect.anm");
+    assert_eq!(vm.sprite, 33);
+    assert_eq!(vm.render_mode, 8);
+    assert!(vm.visible);
+    assert!(vm.rot[0].abs() > 0.1 && vm.rot[1].abs() > 0.1);
+    let texture = g.lib.files[vm.file].sprites[33].texture;
+    assert!(g.world.draw_list(&g.lib, th_anm::Pass::Ui).iter().any(|b| b.texture == Some(texture)));
+}
 fn setup() -> Option<Game> {
     let home = std::env::var_os("USERPROFILE")?;
     let path = std::env::var_os("TH19_DAT")
