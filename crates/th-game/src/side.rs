@@ -498,20 +498,21 @@ pub fn dispatch_charges(sides: &mut [Side]) {
     for (sender,event) in events.into_iter().enumerate() {
         use crate::charge::Level;
         match event {
-            // The release controller (FUN_004e79e0) dispatches the attack, then raises the
-            // sender's level by one (capped at 7: EX inline, boss via FUN_0040b3a0). The
-            // attack's script reads the sender's level later (ECL 1034/1035 via
-            // FUN_0040b620/FUN_0040b660 on the opponent status), so it plays at the raised
-            // level: stored 0 is shown as "Lv.1" (HUD prints level+1) and plays rank 1.
+            // The release controller (FUN_004e79e0) dispatches, then raises the sender's
+            // level by one (capped at 7). The attack plays at the level shown on the gauge
+            // HUD before the release ("Lv N" = rank N-1): the wiki's per-level Reimu tables
+            // (EX Lv1 = 1 wave of 6, Lv2 = 1 of 8; boss Lv1-2 non-spell, Lv3-4 spell, Lv5-8
+            // non-spell + spell) match ExtraAttack's ins_570 tables and Boss00Boss's rank
+            // masks only at rank = pre-raise level.
             Some(Level::Extra) => {
-                let rank=(sides[sender].st.extra_level+1).min(7);
-                sides[sender].st.extra_level=rank;
+                let rank=sides[sender].st.extra_level.min(7);
+                sides[sender].st.extra_level=(rank+1).min(7);
                 sides[1-sender].st.incoming_extra_level=rank;
                 sides[1-sender].st.request(script_request("ExtraAttack",[0.0,0.0]));
             }
             Some(Level::Boss) => {
-                let rank=(sides[sender].st.boss_level+1).min(7);
-                sides[sender].st.boss_level=rank;
+                let rank=sides[sender].st.boss_level.min(7);
+                sides[sender].st.boss_level=(rank+1).min(7);
                 sides[1-sender].st.incoming_boss_level=rank;
                 sides[1-sender].st.request(script_request("BossAttack",[0.0,0.0]));
             }

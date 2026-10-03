@@ -191,7 +191,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if var { format!("${v}") } else { v }
                     };
                     let str_op = matches!(i.opcode, 11 | 15 | 16 | 300..=321);
-                    let a: Vec<String> = match i.arg_str(0).filter(|_| str_op) {
+                    let plausible = |at: usize| {
+                        let len = i.args.get(at..at + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()) as usize)?;
+                        let raw = i.args.get(at + 4..at + 4 + len)?;
+                        (len >= 4 && len % 4 == 0 && raw.contains(&0)
+                            && raw[..raw.iter().position(|&c| c == 0).unwrap()].iter().all(|c| c.is_ascii_graphic()))
+                            .then(|| i.arg_str(at))?
+                    };
+                    let a: Vec<String> = match plausible(0).filter(|_| str_op) {
                         // Calls/spawns: the sub name, then (for calls) 8-byte typed arguments.
                         Some((name, used)) => {
                             let mut out = vec![format!("\"{name}\"")];
@@ -217,7 +224,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         None => (0..i.args.len() / 4).map(|n| word(n, i.is_var(n))).collect(),
                     };
-                    let a = match (i.opcode, i.arg_str(12)) {
+                    let a = match (i.opcode, plausible(12)) {
                         // setInterrupt(slot, hp, time, sub)
                         (514, Some((name, _))) => {
                             let mut v = a[..3].to_vec();

@@ -113,6 +113,43 @@ pub enum Pass<'a> {
     Ui,
 }
 
+/// ANM `effectNew(1)` (effect table 0x5ca6d0 entry 1: init FUN_004d9880, update
+/// FUN_004d9960, interrupt FUN_004da890): particles converging on the VM, as used for a
+/// boss's entrance (`EffChargePoint2`). One group of children (scripts 143 x3 and 144 of
+/// the same file) is spawned per frame while the group timer is below 50; each follows a
+/// Hermite curve from 300 units out along the VM's rotation to 150 units out, then into
+/// the centre, `I0` frames per curve. The effect deletes itself once no child is left.
+#[derive(Clone, Debug, Default)]
+pub struct ChargeIn {
+    /// Group timer (+0x1928 previous / +0x192c current). Interrupt 1 skips it ahead by 300.
+    timer: i32,
+    timer_prev: i32,
+    particles: Vec<ChargeParticle>,
+}
+
+#[derive(Clone, Debug)]
+struct ChargeParticle {
+    id: Option<VmId>,
+    /// 0 new, 1 on the outer curve, 2 on the inner curve.
+    state: u8,
+    /// Frames since the child was created (stands in for the child's own +0x4f8 timer).
+    age: i32,
+    /// End point and end tangent of the outer curve, where the inner one starts.
+    mid: [f32; 3],
+    mid_tangent: [f32; 3],
+}
+
+impl Vm {
+    /// The built-in effect's interrupt callback (+0x604; FUN_004da890 for effect 1:
+    /// interrupt 1 moves the group timer 300 frames on, so no further groups spawn).
+    fn effect_interrupt(&mut self, n: i32) {
+        if let (Some(fx), 1) = (self.charge.as_mut(), n) {
+            fx.timer_prev = fx.timer;
+            fx.timer += 300;
+        }
+    }
+}
+
 /// Built-in ribbon effects created by ANM `effectNew` (508). Each is a strip of points whose
 /// shape is shifted along the ribbon over time, so disturbances travel along it.
 #[derive(Clone, Debug)]
@@ -315,6 +352,8 @@ pub struct Vm {
     pub backdrop: bool,
     /// Built-in effect attached by `effectNew`, drawn instead of the sprite.
     pub effect: Option<Ribbon>,
+    /// Built-in particle effect attached by `effectNew(1)`.
+    pub charge: Option<Box<ChargeIn>>,
     /// STD layer this stage sprite is drawn in (stage quads and sprite slots).
     pub stage_layer: u8,
     /// Scissor rectangle on the canvas (e.g. a playfield), inherited by spawned VMs.
@@ -384,6 +423,7 @@ impl Vm {
             size_override: None,
             backdrop: false,
             effect: None,
+            charge: None,
             stage_layer: 0,
             clip: None,
             sprite_remap: None,
@@ -484,10 +524,12 @@ impl World {
     pub fn interrupt(&mut self, id: VmId, n: i32) {
         if let Some(vm) = self.get_mut(id) {
             vm.pending_interrupt = Some(n);
+            vm.effect_interrupt(n);
         }
         for s in self.slots.iter_mut() {
             if let Some(vm) = s.vm.as_mut().filter(|v| v.parent == Some(id)) {
                 vm.pending_interrupt = Some(n);
+                vm.effect_interrupt(n);
             }
         }
     }
@@ -502,6 +544,7 @@ impl World {
     pub fn interrupt_all(&mut self, n: i32) {
         for vm in self.slots.iter_mut().filter_map(|s| s.vm.as_mut()) {
             vm.pending_interrupt = Some(n);
+            vm.effect_interrupt(n);
         }
     }
 
@@ -646,6 +689,9 @@ impl World {
                 }
             }
             self.rng = rng;
+            if self.get(id).is_some_and(|v| v.charge.is_some() && v.state != RunState::Static) {
+                self.update_charge(lib, id);
+            }
             self.run(lib, id);
         }
         // Children of deleted parents go with them.
@@ -660,6 +706,81 @@ impl World {
             .collect();
         for id in dead {
             self.delete(id);
+        }
+    }
+
+    /// One frame of `effectNew(1)` (FUN_004d9960).
+    fn update_charge(&mut self, lib: &AnmLibrary, id: VmId) {
+        let Some(vm) = self.get_mut(id) else { return };
+        let Some(mut fx) = vm.charge.take() else { return };
+        let (file, clip, duration, rot, spread, color) =
+            (vm.file, vm.clip, vm.ivars[0], vm.rot[2], vm.fvars[6], vm.color);
+        let vm = self.get(id).unwrap();
+        let centre = world_pos(self, vm);
+        let polar = |c: [f32; 3], r: f32, a: f32| [c[0] + a.cos() * r, c[1] + a.sin() * r, c[2]];
+        let far = polar(centre, 300.0, rot);
+        let near = polar(centre, 150.0, spread + rot);
+        // A new group while the timer moved this frame and is below 50 (+0x192c < 0x32).
+        if fx.timer != fx.timer_prev && fx.timer < 50 {
+            for (k, script) in [143, 143, 143, 144].into_iter().enumerate() {
+                let child = self.spawn_inner(lib, file, script, None, [0.0; 3], false);
+                if let Some(c) = self.get_mut(child) {
+                    c.clip = clip;
+                    c.ivars[0] = duration;
+                    // The fourth child's colour bytes are 0x2c - each byte of the parent's.
+                    c.color = if k == 3 { color.map(|v| 0x2cu8.wrapping_sub(v as u8) as f32) } else { color };
+                }
+                fx.particles.push(ChargeParticle { id: Some(child), state: 0, age: 0, mid: [0.0; 3], mid_tangent: [0.0; 3] });
+            }
+        }
+        let mut rng = self.rng;
+        // rand / (RAND_MAX - 1) and rand / (RAND_MAX / 2 - 1) - 1 in the original.
+        let mut r01 = || randf01(&mut rng);
+        let norm = |v: [f32; 3]| {
+            let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+            if l.abs() >= 0.01 { v.map(|x| x / l) } else { v }
+        };
+        let mut alive = 0;
+        for p in &mut fx.particles {
+            let Some(cid) = p.id else { continue };
+            let Some(c) = self.get_mut(cid) else {
+                p.id = None;
+                continue;
+            };
+            if p.state == 0 {
+                let (r, a) = (r01() * 150.0, (r01() * 2.0 - 1.0) * std::f32::consts::PI);
+                let start = polar(far, r, a);
+                let (r, a) = (r01() * 50.0, (r01() * 2.0 - 1.0) * std::f32::consts::PI);
+                let mid = polar(near, r, a);
+                let along = norm([mid[0] - start[0], mid[1] - start[1], mid[2] - start[2]]);
+                let inward = norm([centre[0] - mid[0], centre[1] - mid[1], centre[2] - mid[2]]);
+                let k = r01() * 200.0 + 200.0;
+                let mid_tangent = norm([along[0] + inward[0], along[1] + inward[1], along[2] + inward[2]]).map(|x| x * k);
+                let k = r01() * 100.0 + 100.0;
+                let start_tangent = along.map(|x| x * k);
+                c.pos = start;
+                c.i_pos.start_bezier(start, start_tangent, mid, mid_tangent, duration);
+                p.mid = mid;
+                p.mid_tangent = mid_tangent;
+                p.state = 1;
+            } else if p.state == 1 && p.age >= duration + 1 {
+                let (r, a) = (r01() * 20.0, (r01() * 2.0 - 1.0) * std::f32::consts::PI);
+                let end = polar(centre, r, a);
+                let (r, a) = (r01() * 20.0, (r01() * 2.0 - 1.0) * std::f32::consts::PI);
+                let end_tangent = [a.cos() * r, a.sin() * r, 0.0];
+                c.i_pos.start_bezier(p.mid, p.mid_tangent, end, end_tangent, duration);
+                p.state = 2;
+            }
+            p.age += 1;
+            alive += 1;
+        }
+        self.rng = rng;
+        fx.timer_prev = fx.timer;
+        fx.timer += 1;
+        if alive == 0 {
+            self.delete(id);
+        } else if let Some(vm) = self.get_mut(id) {
+            vm.charge = Some(fx);
         }
     }
 
@@ -976,7 +1097,9 @@ fn write_ivar(vm: &mut Vm, id: i32, v: i32) {
         10000..=10003 => vm.ivars[(id - 10000) as usize] = v,
         10008 | 10009 => vm.ivars[(id - 10004) as usize] = v,
         10029 => vm.ivars[6] = v,
-        _ => write_fvar(vm, id, v as f32),
+        // Any other id resolves to the instruction's own argument (FUN_004c1400), so the
+        // write is lost.
+        _ => {}
     }
 }
 
@@ -985,9 +1108,10 @@ fn write_fvar(vm: &mut Vm, id: i32, v: f32) {
         10004..=10007 => vm.fvars[(id - 10004) as usize] = v,
         10033..=10035 => vm.fvars[(id - 10029) as usize] = v,
         10027 | 10028 => vm.fvars[(id - 10020) as usize] = v,
-        10000..=10003 | 10008 | 10009 | 10029 => write_ivar(vm, id, v as i32),
         10013..=10015 => vm.pos[(id - 10013) as usize] = v,
         10023..=10025 => vm.rot[(id - 10023) as usize] = v,
+        // Int ids (e.g. fset to I0) resolve to the instruction's own argument
+        // (FUN_004c14c0): the write is lost.
         _ => {}
     }
 }
@@ -1310,6 +1434,7 @@ fn exec(
         504 => spawns.push(Spawn::Root { script: i!(0), offset: [0.0; 2] }),
         505 | 510 => spawns.push(Spawn::Child { script: i!(0), offset: [f!(1), f!(2)] }),
         506 => spawns.push(Spawn::Root { script: i!(0), offset: [f!(1), f!(2)] }),
+        508 if i!(0) == 1 => vm.charge = Some(Box::new(ChargeIn { timer_prev: -1, ..Default::default() })),
         508 => match Ribbon::new(i!(0)) {
             Some(r) => vm.effect = Some(r),
             None => *unknown.entry(508).or_default() += 1,

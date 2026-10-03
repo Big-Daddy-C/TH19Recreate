@@ -256,10 +256,10 @@ fn skill_damages_nearby_enemies_without_the_basic_charge_shots() {
     );
 }
 
-/// Level bookkeeping from th19.exe FUN_004e79e0 (+1 after dispatch, cap 7) and the
-/// opponent-status read of ECL 1034/1035: each attack plays at the sender's raised level.
+/// Level bookkeeping from th19.exe FUN_004e79e0 (+1 after dispatch, cap 7). Each attack
+/// plays at the level shown before release: HUD "Lv N" = rank N-1.
 #[test]
-fn ex_levels_advance_per_use_and_attacks_play_at_the_raised_level() {
+fn ex_levels_advance_per_use_and_attacks_play_at_the_shown_level() {
     let Some(mut g) = setup() else { return };
     g.sides[1].player.as_mut().unwrap().godmode = true;
     let mut ranks = Vec::new();
@@ -267,7 +267,7 @@ fn ex_levels_advance_per_use_and_attacks_play_at_the_raised_level() {
         g.charge(0, 170);
         assert_eq!(g.sides[0].player.as_ref().unwrap().last_charge, Some(Level::Extra));
         assert_eq!(g.sides[0].st.extra_level, use_no);
-        assert_eq!(g.sides[1].st.incoming_extra_level, use_no);
+        assert_eq!(g.sides[1].st.incoming_extra_level, use_no - 1);
         g.tick([0; 2]);
         let rank = g.sides[1]
             .enemies
@@ -280,7 +280,7 @@ fn ex_levels_advance_per_use_and_attacks_play_at_the_raised_level() {
             g.tick([0; 2]);
         }
     }
-    assert_eq!(ranks, vec![Some(1), Some(2), Some(3)]);
+    assert_eq!(ranks, vec![Some(0), Some(1), Some(2)]);
     // The other side's levels are independent.
     assert_eq!(g.sides[1].st.extra_level, 0);
 }
@@ -288,7 +288,7 @@ fn ex_levels_advance_per_use_and_attacks_play_at_the_raised_level() {
 #[test]
 fn boss_level_advances_and_caps_at_seven() {
     let Some(mut g) = setup() else { return };
-    g.sides[0].st.boss_level = 6;
+    g.sides[0].st.boss_level = 7;
     g.charge(0, 250);
     assert_eq!(g.sides[0].player.as_ref().unwrap().last_charge, Some(Level::Boss));
     assert_eq!(g.sides[0].st.boss_level, 7);
@@ -334,10 +334,10 @@ fn godmode_ignores_hits_and_death_raises_low_levels() {
 #[test]
 fn extra_attack_pattern_depends_on_level() {
     let mut counts = Vec::new();
-    for rank in [1u8, 4, 7] {
+    for rank in [0u8, 3, 7] {
         let Some(mut g) = setup() else { return };
         g.sides[1].player.as_mut().unwrap().godmode = true;
-        g.sides[0].st.extra_level = rank - 1;
+        g.sides[0].st.extra_level = rank;
         g.charge(0, 170);
         assert_eq!(g.sides[1].st.incoming_extra_level, rank);
         let mut peak = 0;
@@ -353,25 +353,25 @@ fn extra_attack_pattern_depends_on_level() {
     assert!(counts.windows(2).any(|w| w[0] != w[1]), "levels should change the pattern: {counts:?}");
 }
 
-/// Boss00Boss / BossStartInit (pl00.ecl, default.ecl): rank 0-1 one non-spell (5000 HP),
-/// rank 2-3 a spell card (1500 HP), rank 4-7 a non-spell (6500 HP) that becomes a spell at
-/// 1500 HP. Every phase ends in BossDead.
+/// Boss00Boss / BossStartInit (pl00.ecl, default.ecl): Lv1-2 (rank 0-1) one non-spell
+/// (5000 HP), Lv3-4 a spell card (1500 HP), Lv5-8 a non-spell (6500 HP) that becomes a
+/// spell at 1500 HP. Every phase ends in BossDead.
 #[test]
 fn boss_hp_and_phases_follow_the_rank() {
-    for (stored, hp, first) in [(0, 5000, "BossDead"), (1, 1500, "BossDead"), (2, 1500, "BossDead"),
-        (3, 6500, "Boss00BossCard1H"), (6, 6500, "Boss00BossCard1H")] {
+    for (stored, hp, first) in [(0, 5000, "BossDead"), (1, 5000, "BossDead"), (2, 1500, "BossDead"),
+        (3, 1500, "BossDead"), (4, 6500, "Boss00BossCard1H"), (7, 6500, "Boss00BossCard1H")] {
         let Some(mut g) = setup() else { return };
         g.sides[1].player.as_mut().unwrap().godmode = true;
         g.sides[0].st.boss_level = stored;
         g.sides[0].player.as_mut().unwrap().instant_charge(Level::Boss);
         g.tick([0; 2]);
-        assert_eq!(g.sides[1].st.incoming_boss_level, stored + 1);
+        assert_eq!(g.sides[1].st.incoming_boss_level, stored);
         for _ in 0..119 {
             g.tick([0; 2]);
         }
         let boss = || g.sides[1].enemies.iter().find(|e| e.data.boss_slot.is_some()).map(|e| &e.data);
         let b = boss().expect("boss present");
-        assert_eq!((b.hp, b.max_hp), (hp, hp), "rank {}", stored + 1);
+        assert_eq!((b.hp, b.max_hp), (hp, hp), "Lv {}", stored + 1);
         assert_eq!(b.phase_interrupt.as_ref().map(|p| p.2.as_str()), Some(first));
         if first != "BossDead" {
             for e in &mut g.sides[1].enemies {
@@ -416,4 +416,24 @@ fn instant_charge_keys_release_each_tier_and_clear_empties_fields() {
     g.sides[0].player.as_mut().unwrap().instant_charge(Level::Boss);
     g.tick([0; 2]);
     assert_eq!(g.sides[0].player.as_ref().unwrap().last_charge, Some(Level::Boss));
+}
+
+/// BossStartInit plays EffChargePoint2 twice: effect.anm scripts 147/148/152/151, each an
+/// ANM effectNew(1) that spawns converging particles (scripts 143/144) and removes itself.
+#[test]
+fn boss_entrance_spawns_converging_particles() {
+    let Some(mut g) = setup() else { return };
+    let before = g.world.len();
+    g.sides[0].player.as_mut().unwrap().instant_charge(Level::Boss);
+    let mut peak = 0;
+    for _ in 0..60 {
+        g.tick([0; 2]);
+        peak = peak.max(g.world.len());
+    }
+    assert!(peak >= before + 4 * 4 * 40, "expected the entrance particles, peak {peak} from {before}");
+    assert!(!g.world.unknown_ops.contains_key(&508));
+    for _ in 0..400 {
+        g.tick([0; 2]);
+    }
+    assert!(g.world.len() < peak / 2, "particles must expire");
 }
