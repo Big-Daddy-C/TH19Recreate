@@ -18,13 +18,16 @@ pub struct Audio {
     /// ends the previous copy instead of layering a second one. Each play bumps the id's counter;
     /// a playing copy stops when the counter has moved on.
     latest: Vec<Arc<AtomicU32>>,
-    /// Sound volume 0..1, changed with `-` / `+`. APPROX: the game's own volume setting
-    /// (`th19.cfg`) is not read yet.
+    /// Extra volume 0..1 on top of the game's own level, changed with `-` / `+` (1.0 = the
+    /// original's loudness).
     volume: f32,
 }
 
 impl Audio {
-    pub fn new(exe: &Exe, dat: &mut Archive) -> Option<Self> {
+    /// `cfg` is th19.cfg: its byte 0xcb is the sound-effect volume setting (0..100, the game's
+    /// `DAT_0062ad10`; 80 in the shipped file), 0xca the music volume.
+    pub fn new(exe: &Exe, dat: &mut Archive, cfg: &std::path::Path) -> Option<Self> {
+        let setting = std::fs::read(cfg).ok().and_then(|b| b.get(0xcb).copied()).unwrap_or(80).min(100) as f32;
         let sink = DeviceSinkBuilder::open_default_sink().map_err(|e| log::warn!("audio disabled: {e}")).ok()?;
         let sounds: Vec<Option<(Pcm, f32)>> = th_formats::exe::sound_table(exe)
             .into_iter()
@@ -32,12 +35,15 @@ impl Audio {
                 let info = info?;
                 let bytes = dat.read(&info.file).map_err(|e| log::warn!("sound: {e}")).ok()?;
                 let pcm = th_formats::wav::parse(&bytes).map_err(|e| log::warn!("sound: {e}")).ok()?;
-                // The table volume is DirectSound hundredths of a decibel (full sound setting).
-                Some((pcm, 10f32.powf(info.volume as f32 / 2000.0)))
+                // FUN_004bae70: DirectSound volume (hundredths of a dB) =
+                // (table volume + 5000) * (1 - (1 - setting / 100)^3) - 5000, silent at setting 0.
+                let curve = 1.0 - (1.0 - setting / 100.0).powi(3);
+                let db100 = if setting == 0.0 { -10000.0 } else { (info.volume as f32 + 5000.0) * curve - 5000.0 };
+                Some((pcm, 10f32.powf(db100 / 2000.0)))
             })
             .collect();
         let latest = sounds.iter().map(|_| Arc::new(AtomicU32::new(0))).collect();
-        Some(Self { sink, sounds, latest, volume: 0.5 })
+        Some(Self { sink, sounds, latest, volume: 1.0 })
     }
 
     pub fn volume(&self) -> f32 {

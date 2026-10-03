@@ -848,7 +848,7 @@ fn main() {
         Ok(exe) => {
             viewer.bullet_types = std::rc::Rc::new(th_formats::exe::bullet_types(&exe));
             if !std::env::args().any(|a| a == "--no-audio") {
-                viewer.audio = audio::Audio::new(&exe, &mut viewer.dat);
+                viewer.audio = audio::Audio::new(&exe, &mut viewer.dat, &exe_path.with_file_name("th19.cfg"));
             }
         }
         Err(e) => log::warn!("{}: {e} (enemy bullets disabled)", exe_path.display()),

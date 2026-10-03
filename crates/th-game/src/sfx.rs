@@ -29,7 +29,8 @@ pub enum Cat {
 }
 
 /// Groups currently audible.
-pub const ENABLED: &[Cat] = &[Cat::PlayerShot, Cat::EnemyHit, Cat::EnemyDeath, Cat::Bomb];
+pub const ENABLED: &[Cat] =
+    &[Cat::PlayerShot, Cat::EnemyHit, Cat::EnemyDeath, Cat::Bomb, Cat::Graze, Cat::PlayerHit, Cat::Barrier, Cat::Item];
 
 pub fn on(c: Cat) -> bool {
     ENABLED.contains(&c)
