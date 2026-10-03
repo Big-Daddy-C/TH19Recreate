@@ -139,6 +139,7 @@ pub struct Player {
     charge_timer: Option<i32>,
     pub aura_anm: Option<usize>,
     charge_vm: Option<VmId>,
+    focus_vm: Option<VmId>,
     prev_vx: i32,
     body: Option<VmId>,
     options: Vec<PlayerOption>,
@@ -201,6 +202,7 @@ impl Player {
             charge_timer: None,
             aura_anm: None,
             charge_vm: None,
+            focus_vm: None,
             prev_vx: 0,
             body: None,
             options: Vec::new(),
@@ -406,6 +408,7 @@ impl Player {
             self.update_shots(keys, world, lib, field, enemies);
         }
         self.update_charge(keys, world, lib, field);
+        self.update_focus_marker(world, lib, field);
         self.scope.update(self.charge.value > 0 && keys & input::CHARGE != 0
             && self.state == State::Normal, self.pos, self.anm_file, world, lib, field);
         self.cancel_circles.clear();
@@ -487,6 +490,22 @@ impl Player {
             Level::Extra => s.extra,
             Level::Boss => s.boss,
         });
+    }
+
+    /// `FUN_00546ed0`: while focus is held (and the player is alive) effect.anm script 19 (the
+    /// spiked ring and red/white hit dot, spawning script 18) follows the player; releasing
+    /// sends it interrupt 1.
+    fn update_focus_marker(&mut self, world: &mut World, lib: &AnmLibrary, field: [f32; 4]) {
+        let shown = self.focused && matches!(self.state, State::Normal | State::Entering | State::Knockback);
+        let at = field_to_canvas(field, self.pos);
+        if shown && self.focus_vm.is_none() {
+            self.focus_vm = self.effect_anm.map(|file| world.spawn_clipped(lib, file, 19, at, field));
+        } else if !shown {
+            if let Some(id) = self.focus_vm.take() { world.interrupt(id, 1); }
+        }
+        if let Some(vm) = self.focus_vm.and_then(|id| world.get_mut(id)) {
+            vm.origin = [at[0], at[1], 0.0];
+        }
     }
 
     /// AuraCtrl release dispatch. Free-charge practice bypasses only the resource economy.

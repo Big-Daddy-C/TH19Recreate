@@ -352,14 +352,6 @@ impl Viewer {
         if let Some(g) = &self.game {
             for (side, field) in g.sides.iter().zip(FIELDS) {
                 if let Some(p) = &side.player {
-                    // Slow (focus) mode shows the hit point: a red dot with a white rim at the
-                    // player's centre. APPROX: the original's hitbox graphic was not located;
-                    // the radius is the collision radius used by the hit test.
-                    if p.focused && matches!(p.state, th_game::player::State::Normal | th_game::player::State::Entering | th_game::player::State::Knockback) {
-                        let at = th_game::enemy::field_to_canvas(field, p.pos);
-                        list.push(th_anm::DrawBatch::solid_disc(at, 4.5, [1.0, 1.0, 1.0, 1.0], field));
-                        list.push(th_anm::DrawBatch::solid_disc(at, 3.0, [1.0, 0.05, 0.05, 1.0], field));
-                    }
                     // Provisional HUD, outside the playfield. Top row = available meter;
                     // bottom row = held charge. Original front.anm HUD remains to be ported.
                     let [x, _, w, _] = field;

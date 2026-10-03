@@ -1002,3 +1002,16 @@ fn dot_types_follow_the_round_time() {
     assert_eq!([special_time_bonus(0), special_time_bonus(4000), special_time_bonus(8000), special_time_bonus(11000)], [0, 20, 40, 100]);
     assert_eq!([special_limit(0), special_limit(4000), special_limit(8000), special_limit(11000)], [20, 40, 80, 999]);
 }
+
+/// Holding focus shows effect.anm script 19 (the ring and hit dot) at the player; releasing it
+/// interrupts the script away (FUN_00546ed0).
+#[test]
+fn focus_shows_the_effect_anm_hit_marker_and_releases_it() {
+    let Some(mut g) = setup() else { return };
+    for _ in 0..30 { g.tick([0; 2]); }
+    let base = g.world.len();
+    for _ in 0..10 { g.tick([input::FOCUS, 0]); }
+    assert!(g.world.len() > base, "marker VM spawned");
+    for _ in 0..120 { g.tick([0; 2]); }
+    assert!(g.world.len() <= base + 2, "marker removed after release");
+}

@@ -541,6 +541,10 @@
     "onmyo_update": {
       "address": "0053bc50",
       "decompile_sha256": "8f5ee6d96e02829b27ee59d65ced586ab7102344588e03918226b3ef11dfb63a"
+    },
+    "focus_marker_spawn": {
+      "address": "00546ed0",
+      "decompile_sha256": "5d3cb41b2266eeac6faaa73c56c952fc097a5f6dd13e14437131af3c61b1ae21"
     }
   },
   "features": {
@@ -1052,12 +1056,20 @@
             "bullet_fire_et"
           ],
           "evidence": "code_checked"
+        },
+        {
+          "text": "Slow-mode hit marker: FUN_00546ed0 spawns effect.anm script 19 (0x13) at the player while focus is held (scale 1.0), following the player each frame, and sends interrupt 1 on release. Script 19 spawns child script 18; the sprites are effect.anm sprite 23 (64x64 spiked ring with the white/red centre dot) and sprite 24 (green glow). Ported by running those scripts (user screenshot Screenshot 2026-10-03 112457.png as the visual reference); the earlier drawn red disc was a guess and was removed.",
+          "sources": [
+            "focus_marker_spawn"
+          ],
+          "evidence": "code_checked"
         }
       ],
       "checks": {
         "original_game_parity": "not_run",
         "boss_scope_audit": "2026-10-02: original-asset Reimu health all8levels and rank-specific first attack-cycle counts passed; final cargo test --release --workspace passed41tests; cargo build --release -p th19 passed.",
-        "automated_cancel": "2026-10-03: workspace 58 tests: explosion cancel eligibility (type<4, invulnerable included, type 5 immune), chain hits, conversion arrives on the other field; script vs player cancel invulnerability."
+        "automated_cancel": "2026-10-03: workspace 58 tests: explosion cancel eligibility (type<4, invulnerable included, type 5 immune), chain hits, conversion arrives on the other field; script vs player cancel invulnerability.",
+        "automated_focus_marker": "2026-10-03: focus_shows_the_effect_anm_hit_marker_and_releases_it"
       },
       "next": [
         "Trace reward recipients and pending item/graze systems before enabling meter gain."
@@ -1470,6 +1482,11 @@
         },
         {
           "text": "User screenshot (Screenshot 2026-10-03 021435.png) shows red yin-yang orbs arriving on the player's field like ordinary sent bullets; they are bullet type 44 colour 1 (table 0x5c6650, script 327, radius 10). Fixed spirit kill credit: a spirit kill adds the special time bonus + 5 to the pure spirit credit (previously + 5 only).",
+          "sources": [],
+          "evidence": "user_observation"
+        },
+        {
+          "text": "Project rule from the user (2026-10-03): later characters' special-bullet spawning mechanics and the thresholds/rates are difficulty-dependent in the original; implement with Normal assumed everywhere and add difficulty selection last.",
           "sources": [],
           "evidence": "user_observation"
         }
