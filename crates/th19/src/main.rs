@@ -700,6 +700,7 @@ fn main() {
         if let Some(n) = args.iter().position(|a| a == "--boss-level").and_then(|i| args.get(i + 1)?.parse::<u8>().ok()) {
             viewer.start_boss_level = n.clamp(1, 8) - 1;
         }
+        viewer.godmode = args.iter().any(|a| a == "--godmode");
         viewer.mode = mode;
         viewer.stage_idx = n.saturating_sub(1).min(viewer.stage_files.len().saturating_sub(1));
         viewer.restart();

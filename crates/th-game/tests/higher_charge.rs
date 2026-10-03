@@ -461,3 +461,18 @@ fn spell_cards_take_a_seventh_of_damage_and_show_their_background() {
     assert!(g.sides[1].st.spell_background.is_none(), "BossDead ends the card");
 }
 
+/// The bullet manager draws enemy bullets at draw-chain priority 0x29, above the layer-4
+/// spell background, whatever layer their script sets.
+#[test]
+fn enemy_bullets_draw_above_the_spell_background() {
+    let Some(mut g) = setup() else { return };
+    g.sides[1].player.as_mut().unwrap().godmode = true;
+    g.sides[0].st.boss_level = 2;
+    g.sides[0].player.as_mut().unwrap().instant_charge(Level::Boss);
+    for _ in 0..400 {
+        g.tick([0; 2]);
+    }
+    let orb = g.sides[1].st.bullets.iter().find(|b| b.kind == 44).and_then(|b| b.vm).expect("card orbs");
+    assert_eq!(g.world.get(orb).unwrap().draw_priority, Some(th_game::bullet::BULLET_DRAW_PRIORITY));
+    assert!(g.sides[1].st.spell_background.is_some());
+}

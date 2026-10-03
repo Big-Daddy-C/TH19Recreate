@@ -302,6 +302,9 @@ fn make_bullet(et: &Et, origin: [f32; 2], i: i32, j: i32, aim: f32, ctx: &mut Ct
     Some(b)
 }
 
+/// Draw-chain priority of the enemy bullet manager's draw callback (FUN_004f6470).
+pub const BULLET_DRAW_PRIORITY: i32 = 0x29;
+
 impl Bullet {
     fn set_sprite(&mut self, kind: i32, color: i32, ctx: &mut Ctx) {
         if let Some(id) = self.vm.take() {
@@ -314,6 +317,9 @@ impl Bullet {
         let remap = ty.colours[(color.clamp(0, 15)) as usize];
         let at = field_to_canvas(ctx.field, self.pos);
         let id = ctx.world.spawn_remapped(ctx.lib, ctx.anm, ty.script as usize, at, ctx.field, remap);
+        // The bullet manager draws its bullets itself, at draw-chain priority 0x29 (between
+        // ANM layers 17 and 18; FUN_004f6470), whatever layer their script sets.
+        ctx.world.set_draw_priority(id, BULLET_DRAW_PRIORITY);
         self.vm = Some(id);
     }
 

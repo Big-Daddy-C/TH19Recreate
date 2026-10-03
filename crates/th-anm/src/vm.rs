@@ -352,6 +352,9 @@ pub struct Vm {
     pub backdrop: bool,
     /// Built-in effect attached by `effectNew`, drawn instead of the sprite.
     pub effect: Option<Ribbon>,
+    /// Draw-chain priority overriding the layer's (e.g. 41 for enemy bullets, which the
+    /// bullet manager draws itself: FUN_004f6470 registers its draw at 0x29).
+    pub draw_priority: Option<i32>,
     /// Built-in particle effect attached by `effectNew(1)`.
     pub charge: Option<Box<ChargeIn>>,
     /// STD layer this stage sprite is drawn in (stage quads and sprite slots).
@@ -424,6 +427,7 @@ impl Vm {
             backdrop: false,
             effect: None,
             charge: None,
+            draw_priority: None,
             stage_layer: 0,
             clip: None,
             sprite_remap: None,
@@ -530,6 +534,19 @@ impl World {
             if let Some(vm) = s.vm.as_mut().filter(|v| v.parent == Some(id)) {
                 vm.pending_interrupt = Some(n);
                 vm.effect_interrupt(n);
+            }
+        }
+    }
+
+    /// Draw a VM and its current children at a fixed draw-chain priority (later children
+    /// inherit it when spawned).
+    pub fn set_draw_priority(&mut self, id: VmId, priority: i32) {
+        if let Some(vm) = self.get_mut(id) {
+            vm.draw_priority = Some(priority);
+        }
+        for s in self.slots.iter_mut() {
+            if let Some(vm) = s.vm.as_mut().filter(|v| v.parent == Some(id)) {
+                vm.draw_priority = Some(priority);
             }
         }
     }
@@ -857,9 +874,9 @@ impl World {
             delete
         };
 
-        let (file, base, is_3d, backdrop, stage_layer, clip) = {
+        let (file, base, is_3d, backdrop, stage_layer, clip, draw_priority) = {
             let vm = self.slots[id.index as usize].vm.as_ref().unwrap();
-            (vm.file, world_pos(self, vm), vm.space_3d, vm.backdrop, vm.stage_layer, vm.clip)
+            (vm.file, world_pos(self, vm), vm.space_3d, vm.backdrop, vm.stage_layer, vm.clip, vm.draw_priority)
         };
         for s in spawns {
             match s {
@@ -867,6 +884,7 @@ impl World {
                     let o = [offset[0], offset[1], 0.0];
                     let child = self.spawn_inner(lib, file, script as usize, Some(id), o, is_3d);
                     if let Some(c) = self.get_mut(child) {
+                        c.draw_priority = draw_priority;
                         c.backdrop = backdrop;
                         c.stage_layer = stage_layer;
                         c.clip = clip;
@@ -923,7 +941,8 @@ impl World {
         out
     }
 
-    /// Build triangles for the VMs in `pass`, sorted by layer then creation order.
+    /// Build triangles for the VMs in `pass`, in the game's draw-chain order (layer
+    /// priority, or a manager's own priority), then creation order.
     pub fn draw_list(&self, lib: &AnmLibrary, pass: Pass) -> DrawList {
         let camera = match pass {
             Pass::Stage(c) => Some(c),
@@ -942,7 +961,7 @@ impl World {
         // The stage loop draws its sprites in spawn order regardless of their ANM layer.
         match pass {
             Pass::Stage(_) => vms.sort_by_key(|v| v.order),
-            _ => vms.sort_by_key(|v| (v.layer, v.order)),
+            _ => vms.sort_by_key(|v| (v.draw_priority.unwrap_or_else(|| layer_priority(v.layer)), v.order)),
         }
 
         let mut out: DrawList = Vec::new();
@@ -983,6 +1002,23 @@ impl World {
             }
         }
         out
+    }
+}
+
+/// Draw-chain priority of each 2D ANM layer, as registered by th19.exe's ANM manager
+/// (FUN_004d0da0: one callback per layer, `FUN_004d5bb0(callback, priority)`). Layers are
+/// not drawn in numeric order (e.g. 43 sits between 23 and 24).
+fn layer_priority(layer: i32) -> i32 {
+    const TABLE: [i32; 52] = [
+        5, 7, 9, 10, 11, 13, 16, 18, 20, 21, 22, 24, 27, 28, 33, 34, 37, 40, 43, 46, // 0-19
+        49, 50, 58, 60, 62, 63, 70, 66, 67, 71, 74, 76, 79, 81, 96, 98, 101, // 20-36
+        -1, -1, -1, -1, -1, -1, // 37-42: no callback found
+        61, 72, 75, 77, 78, 80, 97, 99, 102, // 43-51
+    ];
+    match usize::try_from(layer).ok().and_then(|l| TABLE.get(l)) {
+        Some(&p) if p >= 0 => p,
+        // APPROX: unregistered layers keep their numeric order after the known ones.
+        _ => 200 + layer,
     }
 }
 

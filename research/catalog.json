@@ -217,6 +217,14 @@
     "ecl_anm_files_load": {
       "address": "0050b940",
       "decompile_sha256": "1afff3b0e9f03aa848d0fe0705c90f43f1c786bf2d0865043796f7cb40d6a406"
+    },
+    "anm_manager_init": {
+      "address": "004d0da0",
+      "decompile_sha256": "7a7e3c18c8b8b2148f6d6ebc2b13789eb21cfd685d24c50e9418dc611d45549f"
+    },
+    "bullet_manager_init": {
+      "address": "004f6470",
+      "decompile_sha256": "f161e5f915e44fbe6d0f62cb664f3d1c97b17e2289f5d7b9658bddee890183c2"
     }
   },
   "features": {
@@ -547,7 +555,9 @@
         "death_chain",
         "chain_timer",
         "enemy_damage",
-        "shot_collider_hits"
+        "shot_collider_hits",
+        "anm_manager_init",
+        "bullet_manager_init"
       ],
       "code": [
         "crates/th-game/src/side.rs",
@@ -573,6 +583,14 @@
             "collider_shape_test",
             "rect_circle_test",
             "shot_collider_create"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Draw order: the ANM manager (FUN_004d0da0) registers one draw callback per 2D layer at draw-chain priorities L0..L36 = 5,7,9,10,11,13,16,18,20,21,22,24,27,28,33,34,37,40,43,46,49,50,58,60,62,63,70,66,67,71,74,76,79,81,96,98,101 and L43..L51 = 61,72,75,77,78,80,97,99,102 (37-42 not found). The bullet manager (FUN_004f6470) draws enemy bullets itself at 0x29 (41), between layers 17 and 18. Previously bullets used their script layer (0) and were hidden under the layer-4 spell background, so spell cards looked like they fired nothing; the visible green clusters were spawn effects.",
+          "sources": [
+            "anm_manager_init",
+            "bullet_manager_init"
           ],
           "evidence": "code_checked"
         }
