@@ -359,7 +359,8 @@ fn extra_attack_pattern_depends_on_level() {
 #[test]
 fn boss_hp_and_phases_follow_the_rank() {
     for (stored, hp, first) in [(0, 5000, "BossDead"), (1, 5000, "BossDead"), (2, 1500, "BossDead"),
-        (3, 1500, "BossDead"), (4, 6500, "Boss00BossCard1H"), (7, 6500, "Boss00BossCard1H")] {
+        (3, 1500, "BossDead"), (4, 6500, "Boss00BossCard1H"), (5, 6500, "Boss00BossCard1H"),
+        (6, 6500, "Boss00BossCard1H"), (7, 6500, "Boss00BossCard1H")] {
         let Some(mut g) = setup() else { return };
         g.sides[1].player.as_mut().unwrap().godmode = true;
         g.sides[0].st.boss_level = stored;
@@ -459,6 +460,9 @@ fn spell_cards_take_a_seventh_of_damage_and_show_their_background() {
         g.tick([0; 2]);
     }
     assert!(g.sides[1].st.spell_background.is_none(), "BossDead ends the card");
+    if let Some(boss)=g.sides[1].enemies.iter().find(|e|e.data.boss_slot.is_some()) {
+        assert!(boss.data.spell_hp7.is_none(),"523 clears spell damage mode when BossDead ends the card");
+    }
 }
 
 /// The bullet manager draws enemy bullets at draw-chain priority 0x29, above the layer-4
@@ -540,9 +544,94 @@ fn spell_card_orbs_cover_the_scripted_angular_spread() {
             if ids.insert(b.vm.unwrap()) {angles.push(b.angle);}
         }
     }
-    assert!(angles.len()>=14,"First Card1_at volley emits thirteen decrements plus the zero iteration");
-    let first=&angles[..14];
+    assert!(angles.len()>=13,"First Card1_at call emits thirteen shots");
+    let first=&angles[..13];
     let minimum=first.iter().copied().fold(f32::INFINITY,f32::min);
     let maximum=first.iter().copied().fold(f32::NEG_INFINITY,f32::max);
     assert!(maximum-minimum>5.0,"Card1_at's +/-TAU argument must survive its call frame: {first:?}");
+}
+
+#[test]
+fn scope_expands_follows_releases_and_restarts_from_original_anm() {
+    let Some(mut g) = setup() else {return};
+    g.tick([input::FOCUS,0]);
+    assert!(!g.sides[0].player.as_ref().unwrap().scope.active(), "Focus alone does not charge");
+    g.tick([input::CHARGE,0]);
+    let p=g.sides[0].player.as_ref().unwrap();
+    let id=p.scope.vm.unwrap();
+    assert!((p.scope.radius-7.1425).abs()<0.001);
+    assert_eq!(g.world.get(id).unwrap().script,15);
+    for _ in 1..10 {g.tick([input::CHARGE|input::RIGHT,0]);}
+    let p=g.sides[0].player.as_ref().unwrap();
+    assert!((p.scope.radius-48.25).abs()<0.001);
+    assert_eq!(p.scope.pos,p.pos);
+    let at=th_game::enemy::field_to_canvas(FIELDS[0],p.pos);
+    assert_eq!(g.world.get(id).unwrap().origin,[at[0],at[1],0.0]);
+    for _ in 10..20 {g.tick([input::CHARGE,0]);}
+    let p=g.sides[0].player.as_ref().unwrap();
+    assert_eq!(p.scope.radius,64.0);
+    assert!(p.scope.contains_circle([p.pos[0]+63.0,p.pos[1]],0.0));
+    assert!(!p.scope.contains_circle([p.pos[0]+65.0,p.pos[1]],2.0), "Squared radii, not sum of radii");
+    assert!(p.scope.intersects_rect([p.pos[0]+66.0,p.pos[1]],[8.0,4.0],0.0));
+    assert!(!p.scope.intersects_rect([p.pos[0]+70.0,p.pos[1]],[8.0,4.0],0.0));
+    assert!(!g.sides[1].player.as_ref().unwrap().scope.active());
+    g.tick([0;2]);
+    assert!(g.world.get(id).is_none());
+    assert!(!g.sides[0].player.as_ref().unwrap().scope.active());
+    for _ in 0..11 {g.tick([input::CHARGE,0]);}
+    assert!((g.sides[0].player.as_ref().unwrap().scope.radius-7.1425).abs()<0.001);
+    g.sides[0].player.as_mut().unwrap().state=State::Knockback;
+    g.tick([input::CHARGE,0]);
+    assert!(!g.sides[0].player.as_ref().unwrap().scope.active());
+}
+
+#[test]
+fn all_reimu_boss_levels_produce_the_scripted_first_spell_volley() {
+    // Initial jumps land on decrement BEFORE the body: Card1 emits 3*13/14;
+    // Card1H emits 2*(2*18/20/26/30). Counts come from the source rank tables.
+    for (rank,expected) in [(2,39),(3,42),(4,72),(5,80),(6,104),(7,120)] {
+        let Some(mut g)=setup() else {return};
+        g.sides[1].player.as_mut().unwrap().godmode=true;
+        g.sides[0].st.boss_level=rank;
+        g.sides[0].player.as_mut().unwrap().instant_charge(Level::Boss);
+        for _ in 0..120 {g.tick([0;2]);}
+        if rank>=4 {
+            let boss=g.sides[1].enemies.iter_mut().find(|e|e.data.boss_slot.is_some()).unwrap();
+            boss.data.hp=1500;
+        }
+        let mut ids=std::collections::HashSet::new();
+        let mut started=false;let mut quiet=0;
+        for _ in 0..400 {
+            g.tick([0;2]);
+            let before=ids.len();
+            for b in g.sides[1].st.bullets.iter().filter(|b|b.kind==44||b.kind==1) {
+                if let Some(id)=b.vm {ids.insert(id);}
+            }
+            if ids.len()>before {started=true;quiet=0;} else if started {quiet+=1;}
+            if quiet>10 {break;}
+        }
+        assert_eq!(ids.len(),expected,"Reimu boss level {} first spell volley",rank+1);
+        println!("Reimu level {} first spell volley: {}",rank+1,ids.len());
+    }
+}
+
+#[test]
+fn lower_reimu_nonspells_fire_ranked_five_way_fans() {
+    // Boss00Boss1_at: two simultaneous shooters, five ways, rank table 4/5 volleys.
+    for (rank,expected) in [(0,40),(1,50)] {
+        let Some(mut g)=setup() else {return};
+        g.sides[1].player.as_mut().unwrap().godmode=true;
+        g.sides[0].st.boss_level=rank;
+        g.sides[0].player.as_mut().unwrap().instant_charge(Level::Boss);
+        let mut ids=std::collections::HashSet::new();let mut started=false;let mut quiet=0;
+        for _ in 0..400 {
+            g.tick([0;2]);let before=ids.len();
+            for b in g.sides[1].st.bullets.iter().filter(|b|b.kind==11) {
+                if let Some(id)=b.vm {ids.insert(id);}
+            }
+            if ids.len()>before {started=true;quiet=0;} else if started {quiet+=1;}
+            if quiet>25 {break;}
+        }
+        assert_eq!(ids.len(),expected,"Reimu level {} fan volley",rank+1);
+    }
 }

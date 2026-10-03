@@ -175,3 +175,25 @@ The declaration beam anchor and specialized ANM600 drawing still need verificati
 spell name/HUD effects and boss distortion remain incomplete. Original boss footage is
 needed for a direct visual parity comparison. Free charging and development controls
 remain available.
+
+
+### Reimu scope and boss audit (2026-10-02)
+
+Hold **X** to show Reimu's original blue scope (`pl00.anm` script 15). It follows her
+and expands from radius 1 to 64 over 20 frames with quadratic ease-out, then disappears
+on release. Shift remains focus. Scope presentation and original collision queries are
+implemented; spirit spawning/capture/conversion and scope bullet-contact states remain
+pending. The circle currently does not cancel bullets or convert spirits.
+
+Reimu boss health is verified at all eight levels: Lv1-2 use 5,000 HP, Lv3-4 use
+1,500 spell HP backed by a 10,500 raw damage counter, and Lv5-8 use 6,500 HP with a
+spell transition at 1,500. First scripted attack-cycle counts match the original rank
+tables (40/50 nonspell bullets; 39/42/72/80/104/120 spell bullets). Player shots and
+skill damage now share the original per-frame damage cap (90 for Reimu), and spell-end
+clears the spell damage mode. Other characters, complete trajectories, the unknown
+speed global, boss movement approximations and original-game visual comparison remain
+unverified. Free charging remains enabled; meter gain remains deferred.
+
+Validation: `cargo test --release --workspace` (41 tests), release viewer build, and
+`data/reference/reimu-scope.png` inspected locally. Source findings and remaining gaps
+are recorded in `research/catalog.json`.

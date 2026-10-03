@@ -804,6 +804,8 @@ impl EnemyHost<'_> {
             }
             // Spell card end (FUN_004f6730): the background goes away.
             523 => {
+                // 005030f6 calls 0040f7a0(enemy+5008, 0): clear spell damage mode.
+                self.e.spell_hp7=None;
                 if let Some(id)=self.st.spell_background.take() {self.world.delete(id);}
                 if let Some(id)=self.st.spell_start_effect.take() {self.world.delete(id);}
             },

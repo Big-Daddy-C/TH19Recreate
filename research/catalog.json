@@ -237,6 +237,42 @@
     "bullet_bounce": {
       "address": "004efb70",
       "decompile_sha256": "4a9d1591c5be3a62bf6dfe85ee74eb72e761168b27daf8233cff9c70aa291a13"
+    },
+    "reimu_scope_start": {
+      "address": "00416d50",
+      "decompile_sha256": "b05052e371bd5f9b11ed29000d5b53a91218edad8a3c0735acfb0cfd20982ff8"
+    },
+    "reimu_scope_update": {
+      "address": "00416e80",
+      "decompile_sha256": "1699b098b67d685be5f55b51ba080cef9f9122b6f82da55a762fd4dd28c8a5de"
+    },
+    "reimu_scope_circle": {
+      "address": "00416f10",
+      "decompile_sha256": "4a11f38d8349d9509218c45e412e8fce64b0ec62827c70b3608edb44b2bc426b"
+    },
+    "reimu_scope_rectangle": {
+      "address": "00416f60",
+      "decompile_sha256": "2dd6a46f725487afaae33418cc72ec90701a8318c993a4b94ea43bb1cc30995f"
+    },
+    "scope_query_circle": {
+      "address": "004e78e0",
+      "decompile_sha256": "781348b211cabc0dde4d2236479cece2a5f311b2d72b9e6f23d9bd4371a860c6"
+    },
+    "scope_query_rectangle": {
+      "address": "004e7870",
+      "decompile_sha256": "3c847b4b211f44b4b372d5e21a28fe361ba8e1f6ed5a66a369a2acae13c95275"
+    },
+    "scope_bullet_contact": {
+      "address": "004f5130",
+      "decompile_sha256": "d55e4eec8c3e4009696c811852135557341b2a6bac3b3f7bf8178c743b17ea1b"
+    },
+    "scope_spirit_contact": {
+      "address": "0052b250",
+      "decompile_sha256": "77a7ce604634049c487048be36ffc22d54b92f3d9ba1910c9de31006daece3d2"
+    },
+    "spell_damage_mode": {
+      "address": "0040f7a0",
+      "decompile_sha256": "f0aaf6a341822f28007140ce1036f1367f9cb2391488b47569bf4b9d550c0abc"
     }
   },
   "features": {
@@ -502,6 +538,15 @@
             "spell_end"
           ],
           "evidence": "code_checked"
+        },
+        {
+          "text": "2026-10-02 audit: all eight Reimu boss ranks read HP correctly from BossStartInit: Lv1-2=5000; Lv3-4=1500 spell HP; Lv5-8=6500 nonspell transitioning at1500 into spell. Spell counter initially1500*7=10500 (displayedHP integer division means final fractional7-unit remainder can end the phase). First complete attack cycles verified against ECL rank tables: Lv1-2 two5-way shooters*4/5 volleys =>40/50 type11 bullets; Lv3-4 three Card1_at calls*13/14 =>39/42; Lv5-8 two Card1H_at calls*(2*18/20/26/30)=>72/80/104/120. Initial jumps land on decrement before body, so no extra zero iteration. ECL523 assembly005030f6 calls0040f7a0(enemy+5008,0), clearing enemy spell damage mode; now implemented. This verifies Reimu script mechanics, not other characters, full trajectories, missing speed global-9888, approximate412movement or visual parity.",
+          "sources": [
+            "ecl_host",
+            "enemy_damage",
+            "spell_damage_mode"
+          ],
+          "evidence": "code_checked"
         }
       ],
       "checks": {
@@ -539,7 +584,8 @@
             "automated": "Asset-backed charge and viewer-input tests passed at 92b07ae; see test files. Not rerun merely to write this catalog.",
             "visual": "Provisional HUD screenshot inspected at data/reference/charge-hud.png; charge-vs-original footage comparison not run."
           }
-        ]
+        ],
+        "boss_scope_audit": "2026-10-02: original-asset Reimu health all8levels and rank-specific first attack-cycle counts passed; final cargo test --release --workspace passed41tests; cargo build --release -p th19 passed."
       },
       "next": [
         "Port spell-card name banner, FrontInf interrupts2/3, ECL621 distortion; verify new declaration beams against original footage (ANM600 and anchor incomplete).",
@@ -644,10 +690,19 @@
             "bullet_manager_init"
           ],
           "evidence": "code_checked"
+        },
+        {
+          "text": "2026-10-02: local player shot and skill collider damage now accumulated per enemy per tick and capped at SHT+28 (Reimu90), then divided by5 in Entering/Dead states before subtracting normal HP or raw spell counter. Original00520450 cap and00509980 state division verified; simultaneous120damage regression yields90normal or90raw spell damage, entering yields18. Chain explosions still processed separately; ability damage multipliers/48pxbonus/special spellflags remain incomplete.",
+          "sources": [
+            "shot_collider_hits",
+            "enemy_damage"
+          ],
+          "evidence": "code_checked"
         }
       ],
       "checks": {
-        "original_game_parity": "not_run"
+        "original_game_parity": "not_run",
+        "boss_scope_audit": "2026-10-02: original-asset Reimu health all8levels and rank-specific first attack-cycle counts passed; final cargo test --release --workspace passed41tests; cargo build --release -p th19 passed."
       },
       "next": [
         "Trace reward recipients and pending item/graze systems before enabling meter gain."
@@ -726,6 +781,62 @@
       },
       "next": [
         "Use fixed-frame comparison for reported defects; avoid global render hacks."
+      ]
+    },
+    "scope": {
+      "implementation": "partial",
+      "summary": "Reimu scope presentation, charge lifecycle and collision queries implemented. Spirit capture/conversion and scope bullet-contact states are not connected.",
+      "symbols": [
+        "reimu_scope_start",
+        "reimu_scope_update",
+        "reimu_scope_circle",
+        "reimu_scope_rectangle",
+        "charge_controller",
+        "scope_query_circle",
+        "scope_query_rectangle",
+        "scope_bullet_contact",
+        "scope_spirit_contact"
+      ],
+      "code": [
+        "crates/th-game/src/scope.rs",
+        "crates/th-game/src/player.rs"
+      ],
+      "tests": [
+        "crates/th-game/tests/higher_charge.rs"
+      ],
+      "findings": [
+        {
+          "text": "AuraReimu vtable005a8af0 selects 00416d50 start and00416e80 update. Assembly confirms source ANM is player+44, script15 (pl00.anm blue circle); interpolation1 to64*(clamped status+8c/100),20 ticks,mode4 quadratic ease-out. Update writes interpolated radius to VM scale54/58 and scope9c and follows player68c. Default100% modifier is used until ability settings exist. Charge controller004e79e0 activates on input bit2/charge; release or invalid player state deletes the VM through vtable+18. Focus bit8 alone does not activate scope.",
+          "sources": [
+            "reimu_scope_start",
+            "reimu_scope_update",
+            "reimu_scope_circle",
+            "reimu_scope_rectangle",
+            "charge_controller",
+            "scope_query_circle",
+            "scope_query_rectangle"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "00416f10 circle test uses distance squared < scope radius squared + target radius squared. 00416f60 forwards oriented rectangular spirit shape to004d44e0. Consumers004f5130 and0052b250 have additional capture/timer/reward states absent from current runtime. Scope does NOT blindly cancel enemy bullets or damage fairies; no invented gameplay replacement is connected. These consumers need a separate complete implementation, while meter rewards remain deferred by user.",
+          "sources": [
+            "reimu_scope_circle",
+            "reimu_scope_rectangle",
+            "scope_bullet_contact",
+            "scope_spirit_contact"
+          ],
+          "evidence": "code_checked"
+        }
+      ],
+      "checks": {
+        "original_game_parity": "not_run",
+        "automated": "2026-10-02: scope growth10/20frames, charge/focus gating, player tracking, side isolation, release/recharge/invalid-state cleanup and circle/rectangle boundaries passed using original pl00.anm.",
+        "visual": "data/reference/reimu-scope.png frame90 inspected: blue64-radius circle around charging left Reimu; original-game footage comparison unrun."
+      },
+      "next": [
+        "Implement ghost/spirit spawning, scope contact states, slowdown/tagging and conversion using0052b250 and004f5130; defer meter rewards.",
+        "Port other character-specific scopes alongside their player controllers."
       ]
     }
   }

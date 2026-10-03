@@ -110,6 +110,7 @@ pub struct Player {
     pub state: State,
     pub state_time: i32,
     pub focused: bool,
+    pub scope: crate::scope::Scope,
     pub power: i32,
     pub charge_settings: crate::charge::Settings,
     pub charge: crate::charge::Gauge,
@@ -179,6 +180,7 @@ impl Player {
             state: State::Entering,
             state_time: 0,
             focused: false,
+            scope: crate::scope::Scope::default(),
             power,
             charge_settings,
             charge: crate::charge::Gauge::default(),
@@ -393,22 +395,35 @@ impl Player {
             self.update_shots(keys, world, lib, field, enemies);
         }
         self.update_charge(keys, world, lib, field);
+        self.scope.update(self.charge.value > 0 && keys & input::CHARGE != 0
+            && self.state == State::Normal, self.pos, self.anm_file, world, lib, field);
         self.cancel_circles.clear();
         self.skills.retain_mut(|s| s.tick(world, field, &mut self.cancel_circles, &mut self.damage_circles));
+        let mut damage = vec![(0i32, self.pos); enemies.len()];
         for circle in &mut self.damage_circles {
-            for enemy in enemies.iter_mut() {
+            for (index, enemy) in enemies.iter_mut().enumerate() {
                 let d = &mut enemy.data;
                 if d.delete || d.flags & flag::NO_HURTBOX != 0 || d.hurtbox[0] <= 0.0 || circle.last_enemy == Some(d.id) { continue; }
                 let x = circle.pos[0].clamp(d.pos[0]-d.hurtbox[0]/2.0,d.pos[0]+d.hurtbox[0]/2.0);
                 let y = circle.pos[1].clamp(d.pos[1]-d.hurtbox[1]/2.0,d.pos[1]+d.hurtbox[1]/2.0);
                 if dist2(circle.pos,[x,y]) <= circle.radius.powi(2) {
-                    d.damage(circle.damage,circle.pos); circle.last_enemy=Some(d.id);
+                    damage[index].0 += circle.damage;
+                    damage[index].1 = circle.pos;
+                    circle.last_enemy=Some(d.id);
                 }
             }
             circle.radius += circle.growth; circle.remaining -= 1;
         }
         self.damage_circles.retain(|c| c.remaining > 0);
-        self.update_bullets(enemies, world, field);
+        self.update_bullets(enemies, world, field, &mut damage);
+        // FUN00520450 caps the sum of colliders at player+2274, loaded from SHT+28.
+        let cap = i32::from_le_bytes(self.sht.params_raw[8..12].try_into().unwrap()).max(0);
+        for (enemy, (amount, from)) in enemies.iter_mut().zip(damage) {
+            let amount = amount.min(cap);
+            // FUN00509980: shooter states 0 (entering) and 2 (dead) divide damage by five.
+            let amount = if matches!(self.state, State::Entering | State::Dead) {amount/5} else {amount};
+            if amount > 0 { enemy.data.damage(amount, from); }
+        }
 
         let at = field_to_canvas(field, self.pos);
         if let Some(vm) = self.body.and_then(|id| world.get_mut(id)) {
@@ -614,7 +629,7 @@ impl Player {
         });
     }
 
-    fn update_bullets(&mut self, enemies: &mut [Enemy], world: &mut World, field: [f32; 4]) {
+    fn update_bullets(&mut self, enemies: &mut [Enemy], world: &mut World, field: [f32; 4], damage: &mut [(i32, [f32; 2])]) {
         let mut i = 0;
         while i < self.bullets.len() {
             let b = &mut self.bullets[i];
@@ -644,7 +659,7 @@ impl Player {
 
             let mut dead = b.pos[0].abs() > 148.0 + 32.0 || b.pos[1] < -32.0 || b.pos[1] > 448.0 + 32.0;
             if !dead {
-                for e in enemies.iter_mut() {
+                for (index, e) in enemies.iter_mut().enumerate() {
                     let d = &mut e.data;
                     if d.flags & flag::NO_HURTBOX != 0 || d.hurtbox[0] <= 0.0 || d.delete {
                         continue;
@@ -654,7 +669,8 @@ impl Player {
                         // The collider skips its most recently hit enemy (+0xa8,
                         // FUN_00520450). Callback 7 preserves piercing shots (0054fba0).
                         if b.charge_shot && b.last_enemy == Some(d.id) { continue; }
-                        d.damage(b.damage, b.pos);
+                        damage[index].0 += b.damage;
+                        damage[index].1 = b.pos;
                         b.last_enemy = Some(d.id);
                         if !b.charge_shot { dead = true; break; }
                     }
@@ -699,4 +715,47 @@ fn shot_hits(pos: [f32; 2], size: [f32; 2], angle: f32, d: &crate::enemy::EnemyD
 
 fn dist2(a: [f32; 2], b: [f32; 2]) -> f32 {
     (a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)
+}
+
+#[cfg(test)]
+mod tests {
+use super::*;
+#[test]
+fn combined_player_colliders_obey_original_damage_cap() {
+    let path=std::path::PathBuf::from(std::env::var_os("TH19_DAT").unwrap_or_else(||
+        std::path::PathBuf::from(std::env::var_os("USERPROFILE").unwrap()).join("Downloads/th19/th19/th19.dat").into_os_string()));
+    if !path.is_file() {return;}
+    let mut dat=th_formats::dat::Archive::open(path).unwrap();
+    let mut lib=AnmLibrary::default();
+    let file=lib.load("pl00.anm",&dat.read("pl00.anm").unwrap()).unwrap();
+    let mut world=World::default();
+    let sht=ShtFile::parse(&dat.read("pl00.sht").unwrap()).unwrap();
+    let mut p=Player::new(sht,file);p.state=State::Normal;
+    assert_eq!(i32::from_le_bytes(p.sht.params_raw[8..12].try_into().unwrap()),90);
+    // Three skill colliders total 120 this frame; the original caps their sum at 90.
+    p.damage_circles=(0..3).map(|_|crate::skill::DamageCircle {
+        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1,last_enemy:None
+    }).collect();
+    let mut enemies=[crate::Enemy {
+        threads:th_ecl::Threads::new(th_ecl::Context::new(th_ecl::SubRef{file:0,sub:0})),
+        data:crate::EnemyData {id:100,pos:p.pos,hurtbox:[10.0;2],hp:5000,..Default::default()}
+    }];
+    p.update(0,&mut enemies,&mut world,&lib,crate::FIELDS[0]);
+    assert_eq!(enemies[0].data.hp,4910);
+    enemies[0].data.hp=1500; enemies[0].data.spell_hp7=Some(10500);
+    p.damage_circles=(0..3).map(|_|crate::skill::DamageCircle {
+        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1,last_enemy:None
+    }).collect();
+    p.update(0,&mut enemies,&mut world,&lib,crate::FIELDS[0]);
+    assert_eq!(enemies[0].data.spell_hp7,Some(10410));
+    assert_eq!(enemies[0].data.hp,1487);
+    p.state=State::Entering;
+    enemies[0].data.hp=5000;enemies[0].data.spell_hp7=None;
+    p.damage_circles=(0..3).map(|_|crate::skill::DamageCircle {
+        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1,last_enemy:None
+    }).collect();
+    p.update(0,&mut enemies,&mut world,&lib,crate::FIELDS[0]);
+    assert_eq!(enemies[0].data.hp,4982,"Entering divides the capped 90 damage by five");
+}
+
 }
