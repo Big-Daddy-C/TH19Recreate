@@ -88,6 +88,8 @@ pub struct SideState {
     pub chain_timer: i32,
     pub chain: i32,
     pub chain_max: i32,
+    /// Automatic EX / boss send counters of the EX attack manager (`FUN_0050df40`).
+    pub auto: AutoSend,
     /// Enemy bullets on this field.
     pub bullets: Vec<Bullet>,
     /// Bullet sprite types from th19.exe.
@@ -133,6 +135,69 @@ pub struct Explosion {
     radius_interp: th_anm::interp::Interp<1>,
     /// The collider skips the enemy it hit most recently (`+0xa8`).
     vm: Option<th_anm::VmId>,
+}
+
+/// The counters behind the automatic EX ("C3") and boss ("C4") attacks that chains send to the
+/// opponent (ExtraAttackInf, `FUN_0050df40`, fields +0x20/+0x24/+0x28/+0x30/+0x34).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AutoSend {
+    /// EX counter: sends at more than 99, then restarts at minus the penalty.
+    pub ex: i32,
+    /// Boss counter: sends at more than 199.
+    pub boss: i32,
+    /// Grows by 100 per automatic EX and drains by 1 per frame.
+    pub ex_penalty: i32,
+    /// After a send the counter cannot gain for this many frames (60 EX, 240 boss).
+    pub ex_cooldown: i32,
+    pub boss_cooldown: i32,
+}
+
+/// What one frame of [`AutoSend`] asks for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AutoSends {
+    pub ex: bool,
+    /// A boss attack; an EX attack instead while the opponent already has a boss.
+    pub boss: bool,
+}
+
+impl AutoSend {
+    /// Both counters gain together, each only while its own cooldown is over
+    /// (`FUN_0051d4e0`: +15 for a spirit kill at chain > 4; `FUN_0051c8c0`: +1 per
+    /// cancelled bullet at chain > 9).
+    pub fn gain(&mut self, amount: i32) {
+        if self.ex_cooldown == 0 { self.ex += amount; }
+        if self.boss_cooldown == 0 { self.boss += amount; }
+    }
+
+    /// One frame (`FUN_0050df40`); `frame` is the round's frame counter, which makes the
+    /// counters drain by one every fourth frame.
+    pub fn tick(&mut self, frame: i32) -> AutoSends {
+        let mut out = AutoSends::default();
+        if self.ex < 0 {
+            self.ex += 1;
+        } else if self.ex > 0 {
+            if self.ex > 99 {
+                out.ex = true;
+                self.ex = -self.ex_penalty;
+                self.ex_cooldown = 60;
+                self.ex_penalty += 100;
+            }
+            if frame & 3 == 0 { self.ex -= 1; }
+        }
+        if self.ex_penalty > 0 { self.ex_penalty -= 1; }
+        if self.ex_cooldown != 0 { self.ex_cooldown -= 1; }
+        if self.boss > 0 {
+            if self.boss > 199 {
+                out.boss = true;
+                self.boss = 0;
+                self.boss_cooldown = 240;
+            }
+            if frame & 3 == 0 { self.boss -= 1; }
+            if self.boss < 0 { self.boss = 0; }
+        }
+        if self.boss_cooldown != 0 { self.boss_cooldown -= 1; }
+        out
+    }
 }
 
 impl SideState {
@@ -259,6 +324,7 @@ impl Side {
                 chain_timer: 0,
                 chain: 0,
                 chain_max: 0,
+                auto: AutoSend::default(),
                 bullets: Vec::new(),
                 bullet_types: Rc::new(Vec::new()),
                 cancel_bullets: false,
@@ -325,6 +391,7 @@ impl Side {
             let kind = crate::reflect::converted_kind(kind, st.spirit_frames, roll);
             st.outgoing_reflects.push(crate::reflect::Request { kind, color, speed, origin });
             // FUN_00549780(0): one more chain hit, no extra chain time.
+            if st.chain > 9 { st.auto.gain(1); }
             st.chain += 1;
             st.chain_max = st.chain_max.max(st.chain);
         }
@@ -414,6 +481,7 @@ impl Side {
             st.outgoing_spirits.push(crate::spirit::Request {
                 kind:crate::spirit::Kind::from_distance(distance), origin:e.pos,level:e.ivars[2] });
             st.spirit_credit = (st.spirit_credit+5).min(700);
+            if st.chain > 4 { st.auto.gain(15); }
         } else if st.chain > 9 {
             st.spirit_credit = (st.spirit_credit+30).min(700);
         }
@@ -587,6 +655,25 @@ pub fn dispatch_charges(sides: &mut [Side]) {
             }
         }
     }
+    // Chains build the automatic EX / boss counters (FUN_0050df40); crossing a threshold
+    // sends the attack without raising the sender's level (only the release controller does).
+    for sender in 0..2 {
+        let frame = sides[sender].st.spirit_frames;
+        let sends = sides[sender].st.auto.tick(frame);
+        // The boss counter falls back to an EX attack while the opponent has a boss (as a
+        // held charge does).
+        let boss_as_ex = sends.boss && sides[1 - sender].has_boss();
+        if sends.ex || boss_as_ex {
+            let rank = sides[sender].st.extra_level.min(7);
+            sides[1 - sender].st.incoming_extra_level = rank;
+            sides[1 - sender].st.request(script_request("ExtraAttack", [0.0, 0.0]));
+        }
+        if sends.boss && !boss_as_ex {
+            let rank = sides[sender].st.boss_level.min(7);
+            sides[1 - sender].st.incoming_boss_level = rank;
+            sides[1 - sender].st.request(script_request("BossAttack", [0.0, 0.0]));
+        }
+    }
     // Bullets cancelled by a kill explosion fly to the opponent's field and fire there.
     for sender in 0..2 {
         let field = sides[sender].st.field;
@@ -679,6 +766,38 @@ fn script_request(sub: &str,pos: [f32;2]) -> SpawnRequest {
 
 #[cfg(test)]
 mod spirit_tests {
+    #[test]
+    fn automatic_ex_and_boss_counters_follow_the_native_rules() {
+        use super::AutoSend;
+        // Twelve chained spirit kills: the first five only build the chain, the next seven
+        // add 15 each (105) and the EX counter passes 99 on the twelfth.
+        let mut a = AutoSend::default();
+        let mut chain = 0;
+        let mut sent = None;
+        for kill in 1..=12 {
+            if chain > 4 { a.gain(15); }
+            chain += 1;
+            if a.ex > 99 && sent.is_none() { sent = Some(kill); }
+        }
+        assert_eq!(sent, Some(12));
+        assert!(a.tick(1).ex);
+        // The send restarts the counter at minus the (still zero) penalty, grows the penalty by
+        // 100 (draining one that frame), and blocks gains for 60 frames.
+        assert_eq!((a.ex, a.ex_penalty, a.ex_cooldown), (0, 99, 59));
+        a.gain(15);
+        assert_eq!(a.ex, 0, "no gain during the cooldown");
+        // The boss counter needs more than 199.
+        let mut b = AutoSend::default();
+        b.boss = 200;
+        assert!(b.tick(1).boss);
+        assert_eq!((b.boss, b.boss_cooldown), (0, 239));
+        // Counters drain by one every fourth frame.
+        let mut c = AutoSend::default();
+        c.ex = 10;
+        for frame in 0..8 { c.tick(frame); }
+        assert_eq!(c.ex, 8);
+    }
+
     use super::*;
     #[test]
     fn chain_deaths_earn_pure_spirits_and_spirit_deaths_send_distance_selected_animals() {

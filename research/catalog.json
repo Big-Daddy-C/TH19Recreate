@@ -449,6 +449,26 @@
     "chain_hit": {
       "address": "00549780",
       "decompile_sha256": "516342de187a86bc1224b45dc6b817f22b746b7e733763a6613ddd118dd7665f"
+    },
+    "extra_attack_manager_init": {
+      "address": "0050e150",
+      "decompile_sha256": "26fa757a89896d1f9df0c370130f6738cb2f912c6c92303513550a524256ce47"
+    },
+    "extra_attack_update": {
+      "address": "0050df40",
+      "decompile_sha256": "dda20018089ddd240a901bb2656b5f081ec6ab810b562595a1608508144ca697"
+    },
+    "extra_send": {
+      "address": "0050e820",
+      "decompile_sha256": "5d901dd5bd05f6c684b61682cd9336e46e9b7420e17ba71acd906a69bd0872a4"
+    },
+    "boss_send": {
+      "address": "0050e7d0",
+      "decompile_sha256": "b1b204e09b6aa35359c0df6da3206e74245bb459b23746d203c40740bafd63c9"
+    },
+    "item_create": {
+      "address": "00521d60",
+      "decompile_sha256": "810d56878025b4cb206c94349feee0f232ea425a4fdb61da3e1b1d6f95287c92"
     }
   },
   "features": {
@@ -1244,7 +1264,16 @@
         "scope_spirit_contact",
         "scope_disable_register",
         "enemy_vm_sync",
-        "shot_update_native"
+        "shot_update_native",
+        "extra_attack_manager_init",
+        "extra_attack_update",
+        "extra_send",
+        "boss_send",
+        "kill_explosion_create",
+        "explosion_update",
+        "item_drop_counter",
+        "item_create",
+        "bullet_cancel_drop"
       ],
       "code": [
         "crates/th-game/src/spirit.rs",
@@ -1280,12 +1309,35 @@
             "shot_update_native"
           ],
           "evidence": "code_checked"
+        },
+        {
+          "text": "Automatic EX/boss attacks ('C3'/'C4') belong to the EX attack manager (ExtraAttackInf, global DAT_005d1a98[side], init 0050e150, update 0050df40): EX counter +0x20, boss counter +0x24, EX penalty +0x28, cooldowns +0x34 (EX) and +0x30 (boss). Gains: a spirit-type kill (explosion kinds 1/3/4) when the status chain count (+0x22bc) is above 4 adds 15 to both counters, and each bullet cancelled by a kill explosion adds 1 to both when the chain is above 9, each only while its cooldown is 0 (0051d4e0, 0051c8c0). Per frame: EX counter below 0 climbs 1; above 99 it calls 0050e820 (the EX send, no level raise), restarts at minus the penalty, penalty += 100, cooldown 60; boss counter above 199 calls 0050e7d0 (boss send) or 0050e820 when the opponent has a boss (player vtable +0x24), resets to 0 with cooldown 240; both drain 1 every 4th frame (round frame counter +0x1e4), the penalty and cooldowns 1 per frame. Matches the wiki's 'automatic berserk' text (12 simultaneous spirit kills trigger C3: five to build the chain, seven x15 > 100). Ported in side.rs AutoSend; the +0x38 doubling at 3600/7200 and the per-send statistics (+0x4c/+0x50) are not.",
+          "sources": [
+            "extra_attack_manager_init",
+            "extra_attack_update",
+            "extra_send",
+            "boss_send",
+            "spirit_credit_add",
+            "kill_explosion_create",
+            "explosion_update"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Terminology resolution (assumption, partly secondary evidence): 'special bullets' sent by the opponent are not a separate bullet class in the executable; Reimu's EX/boss attacks are already pl00.ecl subs routed by dispatch_charges, and the other cross-field attacks are (a) animal and pure spirits (GhostCtrl, credit counter +0x54 via 00548c60), (b) bullets cancelled by kill explosions, converted and re-fired on the other field (own type early, type 4 later) and (c) the automatic EX/boss sends above. The wiki's 'white dot' counters (cancel +15/30/36/45 by difficulty, kill formula A+min(3*hits,60)+E, minus 150+rank/2 per reflected dot) resemble the item accumulator of 00521c60 (+0xff8e8 rate added to +0xff8ec, an item of type 9/2 per 100) which creates collectible items through 00521d60, i.e. the item/meter economy the user deferred; that mapping was not verified and the wiki page was only read through a browser capture.",
+          "sources": [
+            "item_drop_counter",
+            "item_create",
+            "bullet_cancel_drop"
+          ],
+          "evidence": "assumption"
         }
       ],
       "checks": {
         "automated": "2026-10-03: workspace tests pass (56) incl. animal travel-direction rotation, charge-vs-quelled-spirit kill within 20 frames, explosion per-frame damage. Original-game parity not assessed.",
         "original_game_parity": "not_run",
-        "visual": "data/reference/spirits-and-impacts.png frame1600 inspected: naturally chain-earned pure spirit visible on opponent field. Four-type behavior checked with original ECL assets; full footage comparison unrun."
+        "visual": "data/reference/spirits-and-impacts.png frame1600 inspected: naturally chain-earned pure spirit visible on opponent field. Four-type behavior checked with original ECL assets; full footage comparison unrun.",
+        "automated_auto": "2026-10-03: workspace 60 tests incl. 12-spirit chain trigger arithmetic, cooldown/penalty/drain rules, automatic EX/boss send routing without level raise."
       },
       "next": [
         "Port match-config pressure initial value/cap/interval and its escalation, ability/reward modifiers and replay RNG.",

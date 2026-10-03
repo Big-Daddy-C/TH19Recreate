@@ -862,3 +862,31 @@ fn script_cancel_ignores_invulnerability_but_player_cancel_respects_it() {
     let ty = &g.sides[1].st.bullet_types[0];
     assert_eq!(b[1].cancel_script(ty), Some(ty.colours[1][3]));
 }
+
+/// Chains send attacks by themselves (FUN_0050df40): the EX counter above 99 sends an EX
+/// attack, the boss counter above 199 a boss attack (an EX one while the opponent has a boss),
+/// neither raising the sender's level.
+#[test]
+fn chain_counters_send_automatic_ex_and_boss_attacks() {
+    let Some(mut g) = setup() else { return };
+    g.sides[0].st.auto.ex = 100;
+    g.tick([0; 2]);
+    g.tick([0; 2]);
+    assert!(g.sides[1].enemies.iter().any(|e| e.data.sub == "ExtraAttack")
+        || g.sides[1].st.spawn.iter().any(|r| r.sub == "ExtraAttack"), "automatic EX attack");
+    assert_eq!(g.sides[0].st.extra_level, 0, "an automatic send does not raise the level");
+    g.sides[0].st.auto.boss = 200;
+    g.tick([0; 2]);
+    g.tick([0; 2]);
+    assert!(g.sides[1].has_boss(), "automatic boss attack");
+    assert_eq!(g.sides[0].st.boss_level, 0);
+    // With the boss up, the next boss send turns into an EX attack.
+    g.sides[1].st.spawn.clear();
+    g.sides[1].enemies.retain(|e| e.data.sub != "ExtraAttack");
+    g.sides[0].st.auto.boss_cooldown = 0;
+    g.sides[0].st.auto.boss = 200;
+    g.tick([0; 2]);
+    g.tick([0; 2]);
+    assert!(g.sides[1].enemies.iter().any(|e| e.data.sub == "ExtraAttack")
+        || g.sides[1].st.spawn.iter().any(|r| r.sub == "ExtraAttack"));
+}
