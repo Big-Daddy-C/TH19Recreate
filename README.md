@@ -22,6 +22,7 @@ Right now the `th19` binary is an **ANM + stage viewer** used to validate the pi
 | Game mode | arrows = move, Z = shot, X = hold/release charge (all four tiers), C = bomb (practice: the meter counts as full, no stock used; a press during the 8-frame hit window cancels the death), Shift = focus, PgUp/PgDn = stage (`--game N` starts here) |
 | G (game mode) | development godmode: neither player can be hit |
 | K (game mode) | player 2 plays like the game's bot (Normal difficulty, Reimu) / just holds the shot button |
+| M (game mode) | development full-charge mode: every tier available and free (off by default; otherwise the meter fills from blue orbs) |
 | `--godmode`, `--boss-level N` | start with godmode on / player 1's boss level at N (development) |
 | 1–4 (game mode) | development: release player 1's charge instantly at tier 1 shot / 2 skill / 3 EX / 4 boss (falls back to EX while the opponent has a boss); Shift+1–4 makes player 2 release it, so EX/boss attacks land on player 1's field |
 | T (game mode) | development: rain bullets and spirits for 10 s on the opponent's field; Shift+T rains on your own |

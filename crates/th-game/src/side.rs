@@ -110,6 +110,9 @@ pub struct SideState {
     pub combo_shown: i32,
     pub combo_age: i32,
     pub combo_vms: Vec<th_anm::VmId>,
+    /// Meter orbs and the other items (`ItemInf`), and the graze count (status +0x80).
+    pub items: crate::item::Items,
+    pub graze: i32,
     /// Kill explosions in progress.
     pub explosions: Vec<Explosion>,
     pub scope_circle: Option<([f32; 2], f32)>,
@@ -362,6 +365,8 @@ impl Side {
                 combo_shown: 0,
                 combo_age: 0,
                 combo_vms: Vec::new(),
+                items: crate::item::Items::new(),
+                graze: 0,
                 explosions: Vec::new(),
                 scope_circle: None,
                 spirit_credit: 0, spirit_origin: [0.0;2], spirit_pressure: 0, spirit_frames: 0,
@@ -452,6 +457,7 @@ impl Side {
         let mut ctx =
             bullet::Ctx { world, lib, types: &types, anm, field: st.field, player: st.player_pos, rand: &mut rand };
         let mut hit: Option<[f32; 2]> = None;
+        let mut grazes: Vec<[f32; 2]> = Vec::new();
         let player_r = self.player.as_ref().map_or(0.0, |p| p.hitbox_radius());
         let cancel = self.player.as_ref().and_then(|p| p.cancel_radius);
         for b in st.bullets.iter_mut() {
@@ -473,7 +479,25 @@ impl Side {
             // FUN_00549e00: hit when d^2 < player_r^2 + bullet_r^2.
             if b.state == 1 && !b.delete && player_r > 0.0 && d2 < player_r * player_r + b.hitbox * b.hitbox {
                 hit = Some(b.pos);
+            } else if b.state == 1 && !b.delete && !b.grazed && b.hitbox > 0.0 && self.player.is_some() {
+                // Otherwise inside the graze ring (radius 3 + max(40, r / 2.5), plus r): one
+                // graze per bullet (FUN_00549fb0 throws an orb at the bullet).
+                let reach = 3.0 + 40.0f32.max(b.hitbox / 2.5);
+                if d2 < reach * reach + b.hitbox * b.hitbox {
+                    b.grazed = true;
+                    grazes.push(b.pos);
+                }
             }
+        }
+        for at in grazes {
+            st.graze += 1;
+            let mut seed = st.rand() | 1;
+            st.items.drop_orbs(at, || {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                (seed >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0
+            });
         }
         let field = st.field;
         st.bullets.retain(|b| {
@@ -572,6 +596,23 @@ impl Side {
         st.chain_timer = (st.chain_timer + e.rewards.e).min(60);
         st.chain += 1;
         st.chain_max = st.chain_max.max(st.chain);
+        // FUN_0050c1f0: the enemy's own item, then orbs for a chain beyond 5: 1 for 6..11,
+        // 2 for 12..23 and 3 from 24.
+        if (9..=14).contains(&e.item) {
+            st.items.spawn(e.item, e.pos, -std::f32::consts::FRAC_PI_2, 2.2);
+        }
+        if st.chain > 5 {
+            let orbs = (st.chain / 12 + 1).min(3);
+            for _ in 0..orbs {
+                let mut seed = st.rand() | 1;
+                st.items.drop_orbs(e.pos, || {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 17;
+                    seed ^= seed << 5;
+                    (seed >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0
+                });
+            }
+        }
         e.delete = true;
     }
 
@@ -672,6 +713,41 @@ impl Side {
         }
         crate::spirit::send_earned(&mut self.st);
         self.update_combo(world, lib);
+        // FUN_00509980: a body with flag 0x200 that is not touching the player but is inside
+        // its graze ring throws an orb at the player every 6th frame of its own time.
+        if let Some(p) = self.player.as_ref().filter(|p| !matches!(p.state, crate::player::State::Dead)) {
+            let mut at = None;
+            for e in &self.enemies {
+                let d = &e.data;
+                if d.flags & 0x200 == 0 || d.flags & (crate::enemy::flag::NO_HITBOX | crate::enemy::flag::HIDDEN) != 0 || d.time % 6 != 0 {
+                    continue;
+                }
+                let r = d.hitbox[0] / 2.0;
+                let d2 = (p.pos[0] - d.pos[0]).powi(2) + (p.pos[1] - d.pos[1]).powi(2);
+                let reach = 3.0 + 40.0f32.max(r / 2.5);
+                if d2 >= 9.0 + r * r && d2 < reach * reach + r * r {
+                    at = Some(p.pos);
+                }
+            }
+            if let Some(at) = at {
+                self.st.graze += 1;
+                let mut seed = self.st.rand() | 1;
+                self.st.items.drop_orbs(at, || {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 17;
+                    seed ^= seed << 5;
+                    (seed >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0
+                });
+            }
+        }
+        let mut items = std::mem::take(&mut self.st.items);
+        let orbs = items.update(self.player.as_ref(), &self.st, world, lib);
+        self.st.items = items;
+        if orbs > 0 {
+            if let Some(p) = self.player.as_mut() {
+                p.meter = (p.meter + crate::item::meter_for(orbs)).clamp(0, 2500);
+            }
+        }
         let mut k = 0;
         while k < self.enemies.len() {
             if self.enemies[k].data.delete {

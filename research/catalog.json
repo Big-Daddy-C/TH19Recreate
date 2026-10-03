@@ -597,6 +597,46 @@
     "ascii_text_queue": {
       "address": "004e7610",
       "decompile_sha256": "97eb28a73c3aeafbd727c49c42dd46d8e3216b648f0fdb0a2b87bb539e8412a0"
+    },
+    "item_spawn": {
+      "address": "00521d60",
+      "decompile_sha256": "810d56878025b4cb206c94349feee0f232ea425a4fdb61da3e1b1d6f95287c92"
+    },
+    "item_update": {
+      "address": "00520d40",
+      "decompile_sha256": "9c8362f333ab3f6a3bf81d4e8bc4e0c1623e28fde3e05bc753b7df9a3dec7f30"
+    },
+    "orb_drop": {
+      "address": "00521c60",
+      "decompile_sha256": "86b2c4b1467e96ce21e973f5e3c528a8c9741cf12d9eeab0fad2840524136ba4"
+    },
+    "graze_orb": {
+      "address": "00549fb0",
+      "decompile_sha256": "c3824c3eebf88bc26c44283a8f1ecf3ee9fca3d420fc59b832266993dfa8e2b6"
+    },
+    "bullet_collide": {
+      "address": "004f5130",
+      "decompile_sha256": "d55e4eec8c3e4009696c811852135557341b2a6bac3b3f7bf8178c743b17ea1b"
+    },
+    "circle_hit_graze": {
+      "address": "00549e00",
+      "decompile_sha256": "fb0b3011c4fa3e4e126f3e83833a877252c7d5a4e85abd5d4ff0f6be67b427f0"
+    },
+    "enemy_death_drops": {
+      "address": "0050c1f0",
+      "decompile_sha256": "049d952ce78ef12f492f673283fcc611f112682a5f790dd3eef232a5000727b9"
+    },
+    "item_defaults": {
+      "address": "00549250",
+      "decompile_sha256": "a4e99408787a910af287c0cedd3f2f98d09e657d473fe31782279cf4dc79fe4b"
+    },
+    "chain_tick": {
+      "address": "00549780",
+      "decompile_sha256": "516342de187a86bc1224b45dc6b817f22b746b7e733763a6613ddd118dd7665f"
+    },
+    "enemy_body_graze": {
+      "address": "00509980",
+      "decompile_sha256": "109f74133fe7e3e0fc7a1926c73dd511b844c815be1c28d1e38024fea216d511"
     }
   },
   "features": {
@@ -1633,6 +1673,65 @@
       },
       "next": [
         "Port the other characters' bot rules with their characters; add difficulty; add laser hazards and item chasing when those exist; compare against recorded bot footage."
+      ]
+    },
+    "meter": {
+      "implementation": "partial",
+      "summary": "The charge meter fills from blue orbs (item types 9..14): graze, chain kills and enemy drops. M toggles the development full-charge mode.",
+      "symbols": [
+        "item_spawn",
+        "item_update",
+        "orb_drop",
+        "graze_orb",
+        "bullet_collide",
+        "circle_hit_graze",
+        "enemy_death_drops",
+        "item_defaults",
+        "chain_tick",
+        "enemy_body_graze"
+      ],
+      "code": [
+        "crates/th-game/src/item.rs",
+        "crates/th-game/src/side.rs",
+        "crates/th19/src/main.rs"
+      ],
+      "tests": [
+        "crates/th-game/tests/higher_charge.rs"
+      ],
+      "findings": [
+        {
+          "text": "Meter orbs are item types 9..14 (ItemInf, FUN_00521d60 spawns, FUN_00520d40 updates). Collecting one adds (rate * 15) / 100 to the meter (status +0x24, clamped 0..2500), rate = status +0x98 (100 assumed; the story-mode CPU gets 10/15/50/100). Item life: spawn delay (spawn counter mod 4), thrown up at speed 2 (2.2 for an enemy's own item) and slowed by 0.03 per frame until it falls (vy capped at 2), deleted below y 472 or beyond |x| 156. The player pulls it in: pickup radius 30, attraction radius 70 (speed 5/3 growing 0.2 per frame to 12), every item homes at speed 5 while the player is above y 128 (player defaults in FUN_00549250). Types 9..14 use bullet.anm scripts 123..128 (sprite 517).",
+          "sources": [
+            "item_spawn",
+            "item_update",
+            "item_defaults"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Orb sources: (1) graze: FUN_004f5130 / FUN_00549e00 return a graze when a live bullet is outside the hit circle (3 + bullet radius) but inside radius (3 + max(40, r/2.5)) with the same bullet radius term; FUN_00549fb0 adds 1 to the graze count (status +0x80) and calls FUN_00521c60 at the bullet's position. Each bullet is grazed once (its graze timer only advances at graze events; assumed). (2) Enemy death (FUN_0050c1f0): after the chain is extended (FUN_00549780) an enemy with an item type drops it, and for a chain above 5 min(3, chain/12 + 1) orbs drop. (3) Enemy bodies with public flag 0x200 that are inside the graze ring and not touching the player throw an orb at the player every 6th frame of their own time (FUN_00509980). FUN_00521c60 accumulates the drop rate (+0xff8e8, 100 default) and throws one orb per 100 in a +-10 degree fan around up at speed 2.",
+          "sources": [
+            "bullet_collide",
+            "circle_hit_graze",
+            "graze_orb",
+            "orb_drop",
+            "enemy_death_drops",
+            "chain_tick",
+            "enemy_body_graze"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Not found / not ported: orbs dropped by focusing spirits (no focus-dependent drop was found; the player's focus flag only scales the hit circle in FUN_00549e00), ECL-controlled orb rate ops (FUN_0040f1e0 callers), cancel-to-orb conversion (ECL op 1000 passes mode 1 to FUN_004ee0d0; all other cancels pass 0), item types other than 9..14, and the status meter's starting value (the code keeps the earlier starting meter = attack threshold).",
+          "sources": [],
+          "evidence": "assumption"
+        }
+      ],
+      "checks": {
+        "automated_meter": "2026-10-03: grazing_throws_orbs_and_collecting_them_charges_the_meter, orbs_home_in_when_the_player_is_above_the_collect_line"
+      },
+      "next": [
+        "Look for the focus-spirit orb source again once other characters are ported; the meter's starting value; item types 1..8 and the 0x14 counter item."
       ]
     }
   }

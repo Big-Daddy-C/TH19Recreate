@@ -23,4 +23,5 @@ pub mod scope;
 pub mod spirit;
 pub mod reflect;
 pub mod bot;
+pub mod item;
 pub mod text;

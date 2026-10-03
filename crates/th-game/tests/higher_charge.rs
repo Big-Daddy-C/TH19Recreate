@@ -1090,3 +1090,49 @@ fn combo_counter_shows_the_best_chain_and_blinks_after_it_ends() {
     g.tick([0; 2]);
     assert_eq!(g.sides[0].st.combo_shown, 20);
 }
+
+/// Bullets passing within the graze ring give one orb each; collecting an orb adds 15 meter.
+#[test]
+fn grazing_throws_orbs_and_collecting_them_charges_the_meter() {
+    let Some(mut g) = setup() else { return };
+    for _ in 0..20 { g.tick([0; 2]); }
+    {
+        let p = g.sides[0].player.as_mut().unwrap();
+        p.free_charge = false;
+        p.meter = 0;
+    }
+    let pos = g.sides[0].player.as_ref().unwrap().pos;
+    put_bullet(&mut g, 0, 0, 1, [pos[0] + 30.0, pos[1] - 20.0], false);
+    g.tick([0; 2]);
+    assert_eq!(g.sides[0].st.graze, 1, "inside the graze ring (about 43 px)");
+    assert_eq!(g.sides[0].st.items.list.len(), 1);
+    g.tick([0; 2]);
+    assert_eq!(g.sides[0].st.graze, 1, "a bullet is grazed once");
+    // The orb rises, falls and is picked up when it reaches the player's 30 px radius.
+    for _ in 0..200 { g.tick([0; 2]); }
+    assert!(g.sides[0].st.items.list.is_empty());
+    assert_eq!(g.sides[0].player.as_ref().unwrap().meter, 15);
+    // Far bullets do not graze.
+    put_bullet(&mut g, 0, 0, 1, [pos[0] + 120.0, pos[1] - 100.0], false);
+    g.tick([0; 2]);
+    assert_eq!(g.sides[0].st.graze, 1);
+}
+
+/// A player above y = 128 pulls in every orb (FUN_00520d40).
+#[test]
+fn orbs_home_in_when_the_player_is_above_the_collect_line() {
+    let Some(mut g) = setup() else { return };
+    {
+        let p = g.sides[0].player.as_mut().unwrap();
+        p.free_charge = false;
+        p.meter = 0;
+    }
+    for _ in 0..120 { g.tick([input::UP, 0]); }
+    assert!(g.sides[0].player.as_ref().unwrap().pos[1] <= 128.0);
+    let pos = g.sides[0].player.as_ref().unwrap().pos;
+    for x in [-120.0, 120.0] {
+        g.sides[0].st.items.spawn(9, [x, pos[1] + 150.0], -std::f32::consts::FRAC_PI_2, 2.0);
+    }
+    for _ in 0..150 { g.tick([0; 2]); }
+    assert_eq!(g.sides[0].player.as_ref().unwrap().meter, 30, "both collected");
+}

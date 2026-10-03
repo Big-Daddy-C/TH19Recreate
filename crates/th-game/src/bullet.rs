@@ -148,6 +148,8 @@ pub struct Bullet {
     /// Removed by a cancel (not by its own script or by leaving the field): plays the
     /// type's cancel effect when it goes (`FUN_004eeb30`).
     pub cancelled: bool,
+    /// Already grazed (each bullet is grazed once).
+    pub grazed: bool,
     pub scope_time_scale: f32,
     timer_fraction: f32,
 }
@@ -294,6 +296,7 @@ fn make_bullet(et: &Et, origin: [f32; 2], i: i32, j: i32, aim: f32, ctx: &mut Ct
         vm: None,
         delete: false,
         cancelled: false,
+        grazed: false,
         scope_time_scale: 1.0,
         timer_fraction: 0.0,
     };

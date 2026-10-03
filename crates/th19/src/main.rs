@@ -84,6 +84,8 @@ struct Viewer {
     godmode: bool,
     /// Player 2 is run by the game's bot (K) instead of just holding the shot button.
     bot_ai: bool,
+    /// Development full-charge mode (M): every tier is always available and costs nothing.
+    full_charge: bool,
     bot: th_game::bot::Bot,
     /// Development: player 1's starting boss level (`--boss-level N`, 1-8 as on the HUD).
     start_boss_level: u8,
@@ -122,6 +124,7 @@ impl Viewer {
             held: Default::default(),
             godmode: false,
             bot_ai: true,
+            full_charge: false,
             bot: th_game::bot::Bot::new(),
             start_boss_level: 0,
             bullet_types: Default::default(),
@@ -222,7 +225,7 @@ impl Viewer {
             s.start(&prog);
             if let (Some(sht), Some(anm)) = (&sht, pl_anm) {
                 let mut p = th_game::player::Player::new(sht.clone(), anm);
-                p.free_charge = true;
+                p.free_charge = self.full_charge;
                 p.aura_anm = aura;
                 p.effect_anm = s.st.anm_files[1];
                 s.player = Some(p);
@@ -274,6 +277,7 @@ impl Viewer {
                     let k = if i == 0 { keys } else if self.bot_ai { self.bot.think(s) } else { th_game::player::input::SHOT };
                     if let Some(p) = &mut s.player {
                         p.godmode = self.godmode;
+                        p.free_charge = self.full_charge;
                     }
                     s.tick(&g.prog, k, &mut self.world, &self.lib);
                 }
@@ -412,7 +416,7 @@ impl Viewer {
                     .collect();
                 return format!(
                     "th19-rs - {name}{} - {} - {} VMs{}{} - points {}:{} {:?}",
-                    format!("{}{}", if self.godmode { " - GODMODE" } else { "" }, if self.bot_ai { " - BOT" } else { " - DUMMY" }),
+                    format!("{}{}{}", if self.godmode { " - GODMODE" } else { "" }, if self.full_charge { " - FULLCHARGE" } else { "" }, if self.bot_ai { " - BOT" } else { " - DUMMY" }),
                     n.join(" | "),
                     self.world.len(),
                     if self.fast { " - x8" } else { "" },
@@ -498,6 +502,11 @@ impl Viewer {
                 self.bot_ai = !self.bot_ai;
                 self.bot = th_game::bot::Bot::new();
                 log::info!("bot ai {}", if self.bot_ai { "on" } else { "off (holds shot)" });
+            }
+            // Development full-charge mode: all tiers always available, no meter cost.
+            KeyCode::KeyM if self.mode == Mode::Game => {
+                self.full_charge = !self.full_charge;
+                log::info!("full charge mode {}", if self.full_charge { "on" } else { "off (meter from orbs)" });
             }
             KeyCode::KeyV => self.show_fields = !self.show_fields,
             KeyCode::ArrowRight | KeyCode::ArrowLeft if self.mode != Mode::Anm => {
