@@ -545,6 +545,46 @@
     "focus_marker_spawn": {
       "address": "00546ed0",
       "decompile_sha256": "5d3cb41b2266eeac6faaa73c56c952fc097a5f6dd13e14437131af3c61b1ae21"
+    },
+    "bot_update": {
+      "address": "004fa2a0",
+      "decompile_sha256": "1282430e2c31775cbc6588225db38924614246dc3a66b0f03cb2d2e82f448e08"
+    },
+    "bot_brain": {
+      "address": "004fa3e0",
+      "decompile_sha256": "4b3fb91d714910ae36a37d2746a7163dc89a20c3484fc7d6e39a66b80deccea7"
+    },
+    "bot_danger_mask": {
+      "address": "004f8f60",
+      "decompile_sha256": "7857de0b74a98d21cc8e8eaaaa84d5d53d0db18d13674656bd4735584d81937f"
+    },
+    "bot_collect": {
+      "address": "004f9ac0",
+      "decompile_sha256": "fda92003927096715e9b7a21e9a7c9f39587f3d71e1fcbd7e5c70eb6c9ef1156"
+    },
+    "bot_threat": {
+      "address": "004f9530",
+      "decompile_sha256": "a3377ace7c93a587de911ae1f86eeccad04ab1e8c73d3cf0cf41bcc834347f9c"
+    },
+    "bot_reimu_target": {
+      "address": "004f8930",
+      "decompile_sha256": "0b3b78792dc5ebf4c93231dca5c5396f0f35b2f9229caced0bf2ae8061d63c53"
+    },
+    "bot_reimu_approach": {
+      "address": "004f8c50",
+      "decompile_sha256": "bf2681d1e121482e57524b26a79485acf6785d7e741f8d76c5fa7dfab251019b"
+    },
+    "bot_approach_move": {
+      "address": "004f8dd0",
+      "decompile_sha256": "23d96fac06d0b632839237c0b3fce5aaf84c65182121a54f485251cb0ab3147c"
+    },
+    "bot_create": {
+      "address": "004fb6f0",
+      "decompile_sha256": "29d1536634451defc5195962b7ae9194f0b4e294a84f322f363897248c09e277"
+    },
+    "bot_ray_test": {
+      "address": "004d3720",
+      "decompile_sha256": "24570792a04b1af41fb4428a1e6f8a6fe1b8c4ea88ccf9b05aa4600c62b99474"
     }
   },
   "features": {
@@ -1502,6 +1542,73 @@
         "Port the other characters' special bullets (FUN_0053cbe0 etc.), difficulty-dependent thresholds/rates and the pressure term; compare dot colours and special flight against footage.",
         "Port match-config pressure initial value/cap/interval and its escalation, ability/reward modifiers and replay RNG.",
         "Port remaining spirit-specific ECL318 and verify chain explosion visuals and warnings against original footage."
+      ]
+    },
+    "bot": {
+      "implementation": "partial",
+      "summary": "Player 2 can be driven by the game's computer player (CPUInf / CPUHitReimuInf) at Normal difficulty, or just hold the shot button (K toggles).",
+      "symbols": [
+        "bot_update",
+        "bot_brain",
+        "bot_danger_mask",
+        "bot_collect",
+        "bot_threat",
+        "bot_reimu_target",
+        "bot_reimu_approach",
+        "bot_approach_move",
+        "bot_create",
+        "bot_ray_test"
+      ],
+      "code": [
+        "crates/th-game/src/bot.rs",
+        "crates/th19/src/main.rs"
+      ],
+      "tests": [
+        "crates/th-game/tests/higher_charge.rs",
+        "crates/th-game/src/bot.rs"
+      ],
+      "findings": [
+        {
+          "text": "Structure: CPUInf (FUN_004fb6f0) makes a CPUHitReimuInf / CPUHitMarisaInf object (vtable 0x5a8430 / 0x5a8444: +0 pick target, +4 brain FUN_004fa3e0, +8 approach rule). Each frame FUN_004fa2a0 ramps the mistake chance, FUN_004f9ac0 collects hazards (enemy bullets, laser objects, enemy bodies) and shootable enemies, and the brain returns the same input byte the player state machine reads (bit 0 shot, 1 charge, 2 bomb, 3 focus, 4..7 up/down/left/right).",
+          "sources": [
+            "bot_update",
+            "bot_brain",
+            "bot_collect",
+            "bot_create"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Dodging: FUN_004f8f60 builds an 18-bit danger mask for the 9 directions x (normal, focused) speeds (from the sht), positions clamped to x +-140, y 32..432; a candidate is dangerous when its distance squared to a circular hazard is below radius^2 + margin^2, with margin 10x, 5x then 1x the hit radius (3) while every candidate is hit. All 18 hit at the smallest margin: the bot presses bomb only. If the chosen candidate is hit, with probability level% (10 at Normal, +1 per 600 frames after frame 0x708, to 100) it ignores it; otherwise the first free alternative from the 16-entry table at 0x598f70 is taken and held 8 frames. FUN_004f9530 picks the hazard heading at the player (distance^2 - radius^2*speed < 128^2, within 30 degrees of its heading and the straight path passing within radius+16, or nearer than 32 and ahead); the bot flees perpendicular to the bullet's heading, bent away from walls, quantised to 8 directions; a bullet not heading at it makes the bot stand still. Walls: x < -136 / > 136 push inward, y > 400 pushes up, held 4 frames.",
+          "sources": [
+            "bot_danger_mask",
+            "bot_threat",
+            "bot_brain",
+            "bot_ray_test"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Reimu targeting: FUN_004f8930 picks the nearest enemy not hidden/invincible/unhurtable that is within 48 px and at least 16 above, or within |x| < 100 and 32 below..256 above (spirits within 64 px horizontally count a third of their distance; disabled spirits and ones on the 10-frame reversal cooldown are skipped; a second pass ignores those rules). FUN_004f8c50 / FUN_004f8dd0 move to within 12 px horizontally (8 for spirits) and 160 (80 for spirits when below y 128) to 256 px below the target, and focus within 64 px horizontally. Meeting a spirit also holds charge for 20 frames (15 while dodging), at most 50 times. Shot is held whenever any enemy qualifies. With no target the bot returns to x +-80, y 320..416. Charging: with meter >= a tier and the gauge below it, hold charge towards skill (mode 2), EX (3) or boss (4, always checked), re-rolling the mode.",
+          "sources": [
+            "bot_reimu_target",
+            "bot_reimu_approach",
+            "bot_approach_move",
+            "bot_brain"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Not ported: laser hazards (no lasers yet), rectangular enemy hit boxes, the item-chasing branch (no items yet), story-mode CPU helpers (CPUStageNStoryInf, which also release charge), the other characters' targeting rules (CPUHitMarisaInf etc.), and difficulty (Normal assumed; Easy starts at 40%, Hard and Lunatic at 0%, ramp every 240 / 600 / 1200 / never). Hazard speed for enemy bodies is the per-frame displacement (assumed); the bullet's own speed is used for bullets.",
+          "sources": [],
+          "evidence": "assumption"
+        }
+      ],
+      "checks": {
+        "automated_bot": "2026-10-03: bot unit tests (danger mask, target choice, approach, steering, home) and integration tests (bot plays 900 frames; bombs when every move is hit)."
+      },
+      "next": [
+        "Port the other characters' bot rules with their characters; add difficulty; add laser hazards and item chasing when those exist; compare against recorded bot footage."
       ]
     }
   }

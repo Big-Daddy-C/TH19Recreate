@@ -110,6 +110,8 @@ pub struct EnemyData {
     /// Internal flags 0x700000, separate from ECL's public flags.
     pub spirit_kind: u8,
     pub spirit_disabled: bool,
+    /// Frames the bot skips this enemy as a target (+0x63ac, set to 10 when it reverses).
+    pub bot_cooldown: i32,
     pub scope_disable_sub: Option<String>,
 }
 

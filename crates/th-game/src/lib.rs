@@ -22,3 +22,4 @@ pub mod bomb;
 pub mod scope;
 pub mod spirit;
 pub mod reflect;
+pub mod bot;

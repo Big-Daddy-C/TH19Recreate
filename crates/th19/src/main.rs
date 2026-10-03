@@ -82,6 +82,9 @@ struct Viewer {
     held: std::collections::HashSet<KeyCode>,
     /// Development godmode (G): neither player can be hit.
     godmode: bool,
+    /// Player 2 is run by the game's bot (K) instead of just holding the shot button.
+    bot_ai: bool,
+    bot: th_game::bot::Bot,
     /// Development: player 1's starting boss level (`--boss-level N`, 1-8 as on the HUD).
     start_boss_level: u8,
     /// Bullet sprite table read from th19.exe.
@@ -118,6 +121,8 @@ impl Viewer {
             game: None,
             held: Default::default(),
             godmode: false,
+            bot_ai: true,
+            bot: th_game::bot::Bot::new(),
             start_boss_level: 0,
             bullet_types: Default::default(),
             frames: 0,
@@ -142,6 +147,7 @@ impl Viewer {
     fn load_stage(&mut self) {
         self.world.clear();
         self.stage = None;
+        self.bot = th_game::bot::Bot::new();
         let Some(name) = self.stage_files.get(self.stage_idx).cloned() else { return };
         let std = match self.dat.read(&name).map(|b| th_formats::stage::StdFile::parse(&b)) {
             Ok(Ok(s)) => s,
@@ -253,8 +259,8 @@ impl Viewer {
             if let Some(g) = &mut self.game {
                 th_game::side::prepare_charge_targets(&mut g.sides);
                 for (i, s) in g.sides.iter_mut().enumerate().filter(|_| g.round.outcome.is_none()) {
-                    // Side 2 has no controller yet: it just holds the shot button.
-                    let k = if i == 0 { keys } else { th_game::player::input::SHOT };
+                    // Side 2 is the game's bot, or (K) just holds the shot button.
+                    let k = if i == 0 { keys } else if self.bot_ai { self.bot.think(s) } else { th_game::player::input::SHOT };
                     if let Some(p) = &mut s.player {
                         p.godmode = self.godmode;
                     }
@@ -395,7 +401,7 @@ impl Viewer {
                     .collect();
                 return format!(
                     "th19-rs - {name}{} - {} - {} VMs{}{} - points {}:{} {:?}",
-                    if self.godmode { " - GODMODE" } else { "" },
+                    format!("{}{}", if self.godmode { " - GODMODE" } else { "" }, if self.bot_ai { " - BOT" } else { " - DUMMY" }),
                     n.join(" | "),
                     self.world.len(),
                     if self.fast { " - x8" } else { "" },
@@ -475,6 +481,12 @@ impl Viewer {
             KeyCode::KeyG if self.mode == Mode::Game => {
                 self.godmode = !self.godmode;
                 log::info!("godmode {}", if self.godmode { "on" } else { "off" });
+            }
+            // Toggle player 2 between the game's bot and a dummy that holds the shot button.
+            KeyCode::KeyK if self.mode == Mode::Game => {
+                self.bot_ai = !self.bot_ai;
+                self.bot = th_game::bot::Bot::new();
+                log::info!("bot ai {}", if self.bot_ai { "on" } else { "off (holds shot)" });
             }
             KeyCode::KeyV => self.show_fields = !self.show_fields,
             KeyCode::ArrowRight | KeyCode::ArrowLeft if self.mode != Mode::Anm => {

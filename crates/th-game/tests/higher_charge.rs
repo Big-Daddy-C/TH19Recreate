@@ -1015,3 +1015,48 @@ fn focus_shows_the_effect_anm_hit_marker_and_releases_it() {
     for _ in 0..120 { g.tick([0; 2]); }
     assert!(g.world.len() <= base + 2, "marker removed after release");
 }
+
+/// The game's bot drives side 2: it shoots when there are enemies, moves, charges and releases,
+/// and survives a stretch of the opening waves.
+#[test]
+fn bot_plays_the_opening_waves() {
+    let Some(mut g) = setup() else { return };
+    use th_game::side::SpawnRequest;
+    for x in [-60.0, 0.0, 60.0] {
+        g.sides[1].st.request(SpawnRequest { id: 0, difficulty: 0, sub: "GhostPure".into(), pos: [x, 120.0], hp: 200,
+            score: 0, item: -1, mirrored: false, ivars: [2, 0, 2, 0], fvars: [0.0; 8] });
+    }
+    let mut bot = th_game::bot::Bot::new();
+    let (mut shot, mut moved, mut charged, mut lowest_x, mut highest_x) = (0, 0, 0, 0.0f32, 0.0f32);
+    for _ in 0..900 {
+        let keys = bot.think(&mut g.sides[1]);
+        shot += (keys & input::SHOT != 0) as i32;
+        moved += (keys & (input::LEFT | input::RIGHT | input::UP | input::DOWN) != 0) as i32;
+        charged += (keys & input::CHARGE != 0) as i32;
+        g.tick([0, keys]);
+        if let Some(p) = &g.sides[1].player {
+            lowest_x = lowest_x.min(p.pos[0]);
+            highest_x = highest_x.max(p.pos[0]);
+        }
+    }
+    assert!(shot > 100, "shoots while enemies are up: {shot}");
+    assert!(moved > 50 && highest_x - lowest_x > 20.0, "moves around: {moved} {lowest_x} {highest_x}");
+    assert!(charged > 0, "charges at least once: {charged}");
+    assert!(g.sides[1].player.as_ref().is_some_and(|p| p.state != State::GameOver));
+}
+
+/// Surrounded by bullets on every candidate cell, the bot presses the bomb.
+#[test]
+fn bot_bombs_when_every_move_is_hit() {
+    let Some(mut g) = setup() else { return };
+    for _ in 0..20 { g.tick([0; 2]); }
+    let pos = g.sides[1].player.as_ref().unwrap().pos;
+    for dx in -3..=3 {
+        for dy in -3..=3 {
+            put_bullet(&mut g, 1, 0, 1, [pos[0] + dx as f32 * 4.0, pos[1] + dy as f32 * 4.0], false);
+        }
+    }
+    let mut bot = th_game::bot::Bot::new();
+    assert_eq!(bot.think(&mut g.sides[1]), input::BOMB);
+}
+
