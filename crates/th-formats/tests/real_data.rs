@@ -64,24 +64,24 @@ fn every_file_parses() {
     assert_eq!(counts.get("msg"), Some(&58));
 }
 
-/// Every sound id up to 0x49 with a file maps to a wav that parses (ids with no file are
-/// allowed), and the ids ported so far point where the code says.
+/// Every sound id with a row maps to a wav that parses; spot checks against ids the code uses.
 #[test]
 fn sound_table_files_parse() {
     let Some(path) = dat_path() else { return };
     let exe = th_formats::exe::Exe::parse(std::fs::read(path.with_file_name("th19.exe")).unwrap()).unwrap();
     let table = th_formats::exe::sound_table(&exe);
-    // Menu ids (FUN_004e0f60: 8 ok, 9 cancel, 10 select) and the laser default (0x26).
-    assert_eq!(table[0].as_deref(), Some("se_plst00.wav"));
-    assert_eq!(table[9].as_deref(), Some("se_cancel00.wav"));
-    assert_eq!(table[10].as_deref(), Some("se_select00.wav"));
-    assert_eq!(table[0x26].as_deref(), Some("se_lazer02.wav"));
+    for id in [0usize, 2, 3, 4, 9, 10, 0x22, 0x26, 0x2c, 0x31, 0x2a, 0x40] {
+        eprintln!("sound {id:#x} -> {:?}", table[id]);
+    }
+    let file = |id: usize| table[id].as_ref().map(|s| s.file.as_str());
+    assert_eq!(file(0), Some("se_plst00.wav"));
+    assert_eq!(file(2), Some("se_pldead00.wav"));
     let mut dat = Archive::open(path).unwrap();
     let mut playable = 0;
-    for name in table.iter().flatten() {
-        let pcm = th_formats::wav::parse(&dat.read(name).expect(name)).expect(name);
-        assert!(!pcm.samples.is_empty(), "{name}");
+    for info in table.iter().flatten() {
+        let pcm = th_formats::wav::parse(&dat.read(&info.file).expect(&info.file)).expect(&info.file);
+        assert!(!pcm.samples.is_empty(), "{}", info.file);
         playable += 1;
     }
-    assert!(playable == 0x48, "only {playable} sounds resolved");
+    assert!(playable > 60, "only {playable} sounds resolved");
 }

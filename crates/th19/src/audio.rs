@@ -2,8 +2,6 @@
 //! `FUN_004bb8d0(id, pan)` does); this plays them. Sound ids and files come from th19.exe
 //! (`th_formats::exe::sound_table`), the audio from th19.dat.
 
-use std::collections::HashSet;
-
 use std::num::NonZero;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
@@ -14,8 +12,8 @@ use th_formats::{dat::Archive, exe::Exe, wav::Pcm};
 pub struct Audio {
     /// Kept alive for as long as sound should play.
     sink: MixerDeviceSink,
-    /// PCM by sound id (`None` for ids without a file).
-    sounds: Vec<Option<Pcm>>,
+    /// PCM and the sound's own gain (from its table volume) by sound id; `None` without a file.
+    sounds: Vec<Option<(Pcm, f32)>>,
     /// One voice per sound id, as the game has one DirectSound buffer per id: playing an id again
     /// ends the previous copy instead of layering a second one. Each play bumps the id's counter;
     /// a playing copy stops when the counter has moved on.
@@ -28,15 +26,18 @@ pub struct Audio {
 impl Audio {
     pub fn new(exe: &Exe, dat: &mut Archive) -> Option<Self> {
         let sink = DeviceSinkBuilder::open_default_sink().map_err(|e| log::warn!("audio disabled: {e}")).ok()?;
-        let sounds: Vec<Option<Pcm>> = th_formats::exe::sound_table(exe)
+        let sounds: Vec<Option<(Pcm, f32)>> = th_formats::exe::sound_table(exe)
             .into_iter()
-            .map(|name| {
-                let bytes = dat.read(&name?).map_err(|e| log::warn!("sound: {e}")).ok()?;
-                th_formats::wav::parse(&bytes).map_err(|e| log::warn!("sound: {e}")).ok()
+            .map(|info| {
+                let info = info?;
+                let bytes = dat.read(&info.file).map_err(|e| log::warn!("sound: {e}")).ok()?;
+                let pcm = th_formats::wav::parse(&bytes).map_err(|e| log::warn!("sound: {e}")).ok()?;
+                // The table volume is DirectSound hundredths of a decibel (full sound setting).
+                Some((pcm, 10f32.powf(info.volume as f32 / 2000.0)))
             })
             .collect();
         let latest = sounds.iter().map(|_| Arc::new(AtomicU32::new(0))).collect();
-        Some(Self { sink, sounds, latest, volume: 0.1 })
+        Some(Self { sink, sounds, latest, volume: 0.5 })
     }
 
     pub fn volume(&self) -> f32 {
@@ -47,21 +48,26 @@ impl Audio {
         self.volume = ((self.volume + delta) * 20.0).round().clamp(0.0, 20.0) / 20.0;
     }
 
-    /// Play every distinct sound once (the game queues each id at most once per frame, with
-    /// one pan per request; the first is used here).
+    /// Play each requested id once, at the average of its pans (`FUN_004bae70` sums the queued
+    /// pans and divides by their count). The game queues at most 12 distinct ids per frame.
     pub fn play_all(&mut self, events: &[(u32, i32)]) {
-        // FUN_004bb8d0 keeps at most 12 distinct ids per frame.
-        let mut seen = HashSet::new();
+        let mut ids: Vec<(u32, i64, i64)> = Vec::new();
         for &(id, pan) in events {
-            if seen.len() < 12 && seen.insert(id) {
-                self.play(id, pan);
+            if let Some(e) = ids.iter_mut().find(|e| e.0 == id) {
+                e.1 += pan as i64;
+                e.2 += 1;
+            } else if ids.len() < 12 {
+                ids.push((id, pan as i64, 1));
             }
+        }
+        for (id, sum, count) in ids {
+            self.play(id, (sum / count) as i32);
         }
     }
 
     /// `pan` is DirectSound's, in hundredths of a decibel: positive attenuates the left channel.
     pub fn play(&mut self, id: u32, pan: i32) {
-        let Some(Some(pcm)) = self.sounds.get(id as usize) else { return };
+        let Some(Some((pcm, own_gain))) = self.sounds.get(id as usize) else { return };
         if self.latest.len() <= id as usize { return; }
         let pan = pan.clamp(-10000, 10000) as f32;
         let gain = |attenuation: f32| 10f32.powf(-attenuation.max(0.0) / 2000.0);
@@ -77,7 +83,7 @@ impl Audio {
         let counter = &self.latest[id as usize];
         let mine = counter.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
         for x in &mut data {
-            *x *= self.volume;
+            *x *= self.volume * own_gain;
         }
         self.sink.mixer().add(Voice { data, pos: 0, latest: counter.clone(), mine, rate });
     }

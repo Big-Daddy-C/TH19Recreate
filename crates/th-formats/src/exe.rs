@@ -106,18 +106,42 @@ pub fn bullet_types(exe: &Exe) -> Vec<BulletType> {
     out
 }
 
-/// Sound-effect file names by sound id. `FUN_004bc050` loads the 0x48 files named by the pointers
-/// at 0x596210 into buffer slots 0..0x48 in order, and `FUN_004bb8d0(id, pan)` indexes the same
-/// slots, so sound id N plays file N (menu ids: 9 cancel00, 10 select00). The table at
-/// 0x5c4e00 is per-id metadata keyed by its first dword, not a file map. Ids from 0x48 up have no
-/// file in th19.dat.
-pub fn sound_table(exe: &Exe) -> Vec<Option<String>> {
+/// What the game knows about one sound id.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SoundInfo {
+    /// The wav in th19.dat.
+    pub file: String,
+    /// DirectSound volume in hundredths of a decibel (0 = full, negative = quieter) at the game's
+    /// full sound-effect setting.
+    pub volume: i16,
+    /// Plays looped (DSBPLAY_LOOPING).
+    pub looped: bool,
+}
+
+/// The sound table by sound id (`None` when an id has no file).
+///
+/// `FUN_004bc050` loads the 0x48 wavs named by the pointers at 0x596210 into buffers 0..0x48 and
+/// the init after it (0x004bd... loop at decompile line 163814) gives every sound id N the
+/// buffer `row.field1` of the first row of the 0x14-byte table at 0x5c4e00 whose first dword is
+/// N. The row also holds the volume (`short` at +8, used by `FUN_004bae70` as
+/// `(volume + 5000) * curve - 5000`) and the loop flag (+0xc). Only some ids equal their row's
+/// file index (menu ids 9 and 10 are cancel00 and select00).
+pub fn sound_table(exe: &Exe) -> Vec<Option<SoundInfo>> {
     const FILES: u32 = 0x596210;
-    (0..0x48u32)
+    const ROWS: u32 = 0x5c4e00;
+    let names: Vec<Option<String>> = (0..0x48u32)
         .map(|i| {
             let ptr = exe.i32_at(FILES + i * 4)? as u32;
             let raw = exe.bytes(ptr, 32)?;
             Some(String::from_utf8_lossy(raw.split(|&b| b == 0).next()?).into_owned())
+        })
+        .collect();
+    (0..0x5au32)
+        .map(|id| {
+            let row = (0..0x60u32).map(|r| ROWS + r * 0x14).find(|&a| exe.i32_at(a) == Some(id as i32))?;
+            let file = names.get(exe.i32_at(row + 4)? as usize)?.clone()?;
+            let volume = exe.bytes(row + 8, 2).map(|b| i16::from_le_bytes([b[0], b[1]]))?;
+            Some(SoundInfo { file, volume, looped: exe.i32_at(row + 0xc)? != 0 })
         })
         .collect()
 }

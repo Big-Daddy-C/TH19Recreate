@@ -2600,6 +2600,13 @@
             "sound_request"
           ],
           "evidence": "code_checked"
+        },
+        {
+          "text": "CORRECTED sound mapping (the id=file-index reading above is also wrong, found by ear: enemy hit played nep00). The init after the wav load loop (decompile line ~163814) gives sound id N the DirectSound buffer file index row.field1 of the FIRST row of the 0x14-byte table at 0x5c4e00 whose first dword equals N (rows are not in id order). Row +8 (int16) is the volume in hundredths of a dB used by FUN_004bae70 as (v+5000)*(1-(1-s/100)^3)-5000 with the sound setting s (s=0 -> -10000); row +0xc is the DSBPLAY_LOOPING flag (only ids 0x58/0x59 are looped). FUN_004bae70 plays each queued id once per frame at the AVERAGE of its queued pans, restarting the buffer (SetCurrentPosition 0, stop first). Checked: 0 plst00, 2 pldead00, 3/4 enep00, 9 cancel00, 10 select00, 0x22 damage00 (enemy hit), 0x2a graze, 0x31 nep00 (bomb start), 0x2c slash (bomb end). Rust: th_formats::exe::sound_table returns file, volume and loop flag; the viewer applies the table volume times a master volume (- and +).",
+          "sources": [
+            "sound_request"
+          ],
+          "evidence": "code_checked"
         }
       ],
       "checks": {
