@@ -103,6 +103,14 @@ pub struct SideState {
     pub ghost_anm: Option<usize>,
     /// Kill explosions in progress.
     pub explosions: Vec<Explosion>,
+    pub scope_circle: Option<([f32; 2], f32)>,
+    pub spirit_credit: i32,
+    pub spirit_origin: [f32;2],
+    pub spirit_pressure: i32,
+    pub spirit_frames: i32,
+    pub outgoing_spirits: Vec<crate::spirit::Request>,
+    pub pending_spirits: Vec<crate::spirit::Pending>,
+    pub sent_spirits_pending: usize,
 }
 
 /// The explosion a destroyed enemy leaves (GhostCtrl, th19.exe `FUN_0051d4e0` /
@@ -123,6 +131,10 @@ pub struct Explosion {
 }
 
 impl SideState {
+    pub fn scope_contains(&self, pos: [f32;2], radius: f32) -> bool {
+        self.scope_circle.is_some_and(|(centre,r)|
+            (pos[0]-centre[0]).powi(2)+(pos[1]-centre[1]).powi(2) < r*r+radius*radius)
+    }
     pub fn rand(&mut self) -> u32 {
         // APPROX: the game uses its own replay RNG; any uniform generator plays the same.
         let mut x = self.rng;
@@ -249,6 +261,10 @@ impl Side {
                 clear_enemies: false,
                 ghost_anm: None,
                 explosions: Vec::new(),
+                scope_circle: None,
+                spirit_credit: 0, spirit_origin: [0.0;2], spirit_pressure: 0, spirit_frames: 0,
+                outgoing_spirits: Vec::new(), pending_spirits: Vec::new(),
+                sent_spirits_pending: 0,
             },
             enemies: Vec::new(),
             stage: None,
@@ -323,7 +339,11 @@ impl Side {
         let player_r = self.player.as_ref().map_or(0.0, |p| p.hitbox_radius());
         let cancel = self.player.as_ref().and_then(|p| p.cancel_radius);
         for b in st.bullets.iter_mut() {
-            b.update(&mut ctx);
+            // Original contact callback applies its factor to the following movement tick.
+            let dt = b.scope_time_scale;
+            b.update_scaled(&mut ctx, dt);
+            b.scope_time_scale = if b.state == 1 && b.hitbox > 0.0 && st.scope_circle.is_some_and(|(pos,r)|
+                (b.pos[0]-pos[0]).powi(2)+(b.pos[1]-pos[1]).powi(2) < r*r+b.hitbox*b.hitbox) { 0.5 } else { 1.0 };
             let (dx, dy) = (b.pos[0] - st.player_pos[0], b.pos[1] - st.player_pos[1]);
             let d2 = dx * dx + dy * dy;
             if let Some(r) = cancel {
@@ -356,6 +376,17 @@ impl Side {
 
     /// The enemy death routine (`FUN_0050c1f0`): death effect, chain, removal.
     fn kill(st: &mut SideState, e: &mut crate::enemy::EnemyData, world: &mut World, lib: &AnmLibrary) {
+        // FUN_0051d4e0 case0 earns spirit credit at chains>9; case1 dispatches an
+        // animal selected by distance, and earns5 further credit (default modifiers).
+        st.spirit_origin = e.pos;
+        if (1..=4).contains(&e.spirit_kind) {
+            let distance = (e.pos[0]-st.player_pos[0]).powi(2)+(e.pos[1]-st.player_pos[1]).powi(2);
+            st.outgoing_spirits.push(crate::spirit::Request {
+                kind:crate::spirit::Kind::from_distance(distance), origin:e.pos,level:e.ivars[2] });
+            st.spirit_credit = (st.spirit_credit+5).min(700);
+        } else if st.chain > 9 {
+            st.spirit_credit = (st.spirit_credit+30).min(700);
+        }
         // The effect is turned to face away from the shot that landed the kill.
         let angle = match e.last_hit {
             Some(h) if (e.pos[0] - h[0]).powi(2) + (e.pos[1] - h[1]).powi(2) >= 0.04 => {
@@ -425,6 +456,12 @@ impl Side {
 
     /// One frame. `keys` are the player's input bits ([`crate::player::input`]).
     pub fn tick(&mut self, prog: &Program, keys: u32, world: &mut World, lib: &AnmLibrary) {
+        self.st.scope_circle = self.player.as_ref().filter(|p| p.scope.active()).map(|p| (p.scope.pos,p.scope.radius));
+        let mut requests = Vec::new();
+        self.st.pending_spirits.retain_mut(|p| {
+            if let Some(req) = p.tick(self.st.ghost_anm,world,lib) { requests.push(req); false } else { true }
+        });
+        for req in requests { self.st.request(req); }
         if let Some(stage) = &mut self.stage {
             stage.update(prog, &mut self.st, world, lib);
         }
@@ -462,6 +499,7 @@ impl Side {
                 if let Some(sub) = sub { self.st.request(script_request(sub,p.pos)); }
             }
         }
+        self.st.scope_circle = self.player.as_ref().filter(|p| p.scope.active()).map(|p| (p.scope.pos,p.scope.radius));
         self.update_bullets(world, lib);
         self.update_explosions(world);
         for e in &mut self.enemies {
@@ -475,6 +513,7 @@ impl Side {
                 self.st.chain = 0;
             }
         }
+        crate::spirit::send_earned(&mut self.st);
         let mut k = 0;
         while k < self.enemies.len() {
             if self.enemies[k].data.delete {
@@ -498,6 +537,21 @@ pub fn prepare_charge_targets(sides: &mut [Side]) {
 }
 pub fn dispatch_charges(sides: &mut [Side]) {
     if sides.len()!=2 { return; }
+    // GhostCtrl's attacks cross to the opponent independently of charge releases.
+    for sender in 0..2 {
+        let field = sides[sender].st.field;
+        let requests = std::mem::take(&mut sides[sender].st.outgoing_spirits);
+        for req in requests {
+            let receiver = &mut sides[1-sender].st;
+            let limit = match receiver.spirit_frames {0..3600=>40,3600..7200=>60,7200..10800=>80,_=>999};
+            if receiver.pending_spirits.len() < limit {
+                let pending = crate::spirit::Pending::new(req,field,receiver);
+                receiver.pending_spirits.push(pending);
+            }
+        }
+    }
+    sides[0].st.sent_spirits_pending = sides[1].st.pending_spirits.len();
+    sides[1].st.sent_spirits_pending = sides[0].st.pending_spirits.len();
     let events: [Option<crate::charge::Level>;2] = std::array::from_fn(|i| sides[i].player.as_mut().and_then(|p| p.charge_event.take()));
     for (sender,event) in events.into_iter().enumerate() {
         use crate::charge::Level;
@@ -544,6 +598,10 @@ impl Side {
             e.remove_sprites(world);
         }
         self.st.spawn.clear();
+        self.st.outgoing_spirits.clear();
+        for spirit in self.st.pending_spirits.drain(..) { spirit.delete(world); }
+        self.st.sent_spirits_pending = 0;
+        self.st.spirit_credit = 0;
         self.st.alive.clear();
         if let Some(id) = self.st.spell_background.take() {
             world.delete(id);
@@ -568,4 +626,32 @@ impl Side {
 }
 fn script_request(sub: &str,pos: [f32;2]) -> SpawnRequest {
     SpawnRequest { id:0,difficulty:0,sub:sub.into(),pos,hp:200,score:0,item:-1,mirrored:false,ivars:[0;4],fvars:[0.0;8] }
+}
+
+#[cfg(test)]
+mod spirit_tests {
+    use super::*;
+    #[test]
+    fn chain_deaths_earn_pure_spirits_and_spirit_deaths_send_distance_selected_animals() {
+        let mut side=Side::new(crate::FIELDS[0],77,[0;256],[None;8]);
+        let mut world=World::default(); let lib=AnmLibrary::default();
+        side.st.chain=9;
+        let mut enemy=crate::EnemyData::default();
+        Side::kill(&mut side.st,&mut enemy,&mut world,&lib);
+        assert_eq!(side.st.spirit_credit,0,"chain9 does not earn spirit credit");
+        for _ in 0..4 {
+            let mut enemy=crate::EnemyData::default();
+            Side::kill(&mut side.st,&mut enemy,&mut world,&lib);
+        }
+        assert_eq!(side.st.spirit_credit,120);
+        crate::spirit::send_earned(&mut side.st);
+        assert_eq!(side.st.outgoing_spirits[0].kind,crate::spirit::Kind::Pure);
+        side.st.outgoing_spirits.clear();
+        for (distance,kind) in [(60.0,crate::spirit::Kind::Wolf),(100.0,crate::spirit::Kind::Otter),(140.0,crate::spirit::Kind::Eagle)] {
+            let mut enemy=crate::EnemyData {pos:[distance,400.0],spirit_kind:1,ivars:[2,0,2,0],..Default::default()};
+            Side::kill(&mut side.st,&mut enemy,&mut world,&lib);
+            let req=side.st.outgoing_spirits.last().unwrap();
+            assert_eq!(req.kind,kind); assert_eq!(req.level,2);
+        }
+    }
 }

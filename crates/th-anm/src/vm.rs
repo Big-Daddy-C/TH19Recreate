@@ -874,9 +874,9 @@ impl World {
             delete
         };
 
-        let (file, base, is_3d, backdrop, stage_layer, clip, draw_priority) = {
+        let (file, base, is_3d, backdrop, stage_layer, clip, draw_priority, rotation) = {
             let vm = self.slots[id.index as usize].vm.as_ref().unwrap();
-            (vm.file, world_pos(self, vm), vm.space_3d, vm.backdrop, vm.stage_layer, vm.clip, vm.draw_priority)
+            (vm.file, world_pos(self, vm), vm.space_3d, vm.backdrop, vm.stage_layer, vm.clip, vm.draw_priority, vm.rot)
         };
         for s in spawns {
             match s {
@@ -892,7 +892,13 @@ impl World {
                 }
                 Spawn::Root { script, offset } if script >= 0 => {
                     let o = [base[0] + offset[0], base[1] + offset[1], base[2]];
-                    let root = self.spawn_inner(lib, file, script as usize, None, o, is_3d);
+                    // FUN_004d09b0 (504): copy parent's XYZ rotation before executing
+                    // the new script. Trails retain that angle after the shot moves on.
+                    let mut vm = Vm::new(file, script as usize, self.next_order);
+                    self.next_order += 1;
+                    vm.origin = o; vm.space_3d = is_3d; vm.rot = rotation;
+                    let root = self.insert(vm);
+                    self.run(lib, root);
                     if let Some(c) = self.get_mut(root) {
                         c.backdrop = backdrop;
                         c.stage_layer = stage_layer;
@@ -1889,6 +1895,24 @@ mod tests {
 
     fn v(w: f32) -> Clipped {
         Clipped { clip: [0.0, 0.0, 0.0, w], uv: [w, 0.0], color: [1.0; 4] }
+    }
+
+    #[test]
+    fn original_homing_trail_copies_rotation_and_keeps_asset_colours() {
+        let path=std::path::PathBuf::from(std::env::var_os("TH19_DAT").unwrap_or_else(||
+            std::path::PathBuf::from(std::env::var_os("USERPROFILE").unwrap()).join("Downloads/th19/th19/th19.dat").into_os_string()));
+        if !path.is_file() {return;}
+        let mut dat=th_formats::dat::Archive::open(path).unwrap();
+        let mut lib=AnmLibrary::default();
+        let file=lib.load("pl00.anm",&dat.read("pl00.anm").unwrap()).unwrap();
+        let mut world=World::default();
+        world.spawn_rotated(&lib,file,8,[164.0,200.0],[16.0,16.0,296.0,448.0],1.2);
+        world.tick(&lib);
+        let trail=world.slots.iter().filter_map(|s| s.vm.as_ref()).find(|v| v.script==11).unwrap();
+        assert!((trail.rot[2]-1.2).abs()<0.0001);
+        assert_eq!(trail.color,[255.0,64.0,128.0]);
+        assert_eq!(trail.sprite,34);
+        assert_eq!(trail.alpha,128.0);
     }
 
     #[test]

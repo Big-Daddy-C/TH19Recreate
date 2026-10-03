@@ -107,6 +107,10 @@ pub struct EnemyData {
     pub damaged: bool,
     /// Frames the hit flash stays off after flashing.
     pub flash_hold: i32,
+    /// Internal flags 0x700000, separate from ECL's public flags.
+    pub spirit_kind: u8,
+    pub spirit_disabled: bool,
+    pub scope_disable_sub: Option<String>,
 }
 
 pub struct Enemy {
@@ -138,6 +142,23 @@ impl Enemy {
 
     /// One frame: script, movement, sprites, off-field check.
     pub fn update(&mut self, prog: &Program, st: &mut SideState, world: &mut World, lib: &AnmLibrary) {
+        // FUN_00509030: ordinary enemies get movement drag; spirits switch once to
+        // the disable sub registered by ECL 514. Their ECL handles HP and movement.
+        if self.data.spirit_kind == 0 {
+            let drag = if self.data.flags & flag::HIDDEN == 0 && st.scope_contains(self.data.pos, self.data.hitbox[0] * 0.5) { 0.5 } else { 0.0 };
+            self.data.abs.pv.drag = drag;
+            self.data.rel.pv.drag = drag;
+        } else if !self.data.spirit_disabled && st.scope_contains(self.data.pos, self.data.hitbox[0] * 0.5) {
+            if let Some(name) = self.data.scope_disable_sub.clone() {
+                if let Some(sub) = prog.sub(&name) {
+                    let mut ctx = Context::new(sub);
+                    ctx.rank_bit = 1 << self.data.script_rank.unwrap_or(st.difficulty).min(7);
+                    self.threads = Threads::new(ctx);
+                    self.data.spirit_disabled = true;
+                    self.data.phase_time = 0;
+                }
+            }
+        }
         if self.data.phase_interrupt.as_ref().is_some_and(|(hp,time,_)|
             self.data.hp<=*hp || (*time>=0 && self.data.phase_time>=*time)) {
             let (_,_,name)=self.data.phase_interrupt.take().unwrap();
@@ -167,7 +188,7 @@ impl Enemy {
         e.delta = [e.pos[0] - e.prev[0], e.pos[1] - e.prev[1]];
 
         // Directional sprite: switch scripts when the horizontal direction changes.
-        if let Some(m) = &mut e.main {
+        if let Some(m) = e.main.as_mut().filter(|m| m.dir != i32::MIN) {
             let dir = if e.delta[0] < -0.03 {
                 -1
             } else {
@@ -367,6 +388,8 @@ impl EnemyHost<'_> {
             RANDF2 => self.st.randf2(),
             -9985..=-9982 => e.ivars[(id - I0) as usize] as f32,
             -9981..=-9978 => e.fvars[(id - F0) as usize],
+            // FUN_004fc530 case d918: status escalation /200, consumed by Ghost*At.
+            -9960 => self.st.spirit_pressure as f32 / 200.0,
             DX => e.delta[0],
             DY => e.delta[1],
             ABS_ANGLE => e.abs.pv.angle,
@@ -626,9 +649,9 @@ impl EnemyHost<'_> {
                     return Flow::Next;
                 }
                 set_vm(self.e, self.world, self.lib, self.st.field, slot, file, script as usize);
-                if op == 306 {
+                if op == 306 || slot == 0 {
                     let anm_slot = self.e.anm_slot;
-                    self.e.main = Some(MainAnm { anm_slot, file, base_script: script as usize, slot, dir: 0 });
+                    self.e.main = Some(MainAnm { anm_slot, file, base_script: script as usize, slot, dir: if op == 306 {0} else {i32::MIN} });
                 }
             }
             // Detached ANM effect, using the selected file (307).
@@ -830,6 +853,12 @@ impl EnemyHost<'_> {
                 self.e.phase_interrupt=Some((hp,time,sub));
             }
             515 => self.e.invuln_time=i!(0),
+            // 00502d5d /0050d0f0: scope interrupt sub, separate from HP/time interrupt.
+            521 => {
+                let slot = i!(0);
+                if slot == 0 { self.e.scope_disable_sub = ins.arg_str(4).map(|(name,_)| name); }
+                else { *self.st.unknown_ops.entry(op).or_default() += 1; }
+            },
             // Audio, score/spell presentation and item-drop metadata. Gameplay mechanics
             // are handled separately; these unsupported presentation ops stay counted.
             // setHurtbox(w, h) / setHitbox(w, h)
@@ -890,6 +919,8 @@ impl EnemyHost<'_> {
                 self.e.script_rank=Some(rank); ctx.rank_bit=1<<rank;
             }
             1023 => self.st.wave_param = i!(0),
+            // FUN_004fecc0 case b4: set internal type, clear disabled bit 0x80000.
+            1027 => { self.e.spirit_kind = (i!(0) & 7) as u8; self.e.spirit_disabled = false; },
             1028 => self.e.rewards.a = f!(0),
             1029 => self.e.rewards.b = i!(0),
             1030 => self.e.rewards.c = i!(0),

@@ -181,9 +181,9 @@ remain available.
 
 Hold **X** to show Reimu's original blue scope (`pl00.anm` script 15). It follows her
 and expands from radius 1 to 64 over 20 frames with quadratic ease-out, then disappears
-on release. Shift remains focus. Scope presentation and original collision queries are
-implemented; spirit spawning/capture/conversion and scope bullet-contact states remain
-pending. The circle currently does not cancel bullets or convert spirits.
+on release. Shift remains focus. The scope halves ordinary enemy movement and live
+enemy bullet time. Spirits entering it switch to their original disabled ECL scripts,
+which set their HP and movement; this does not blanket-cancel bullets.
 
 Reimu boss health is verified at all eight levels: Lv1-2 use 5,000 HP, Lv3-4 use
 1,500 spell HP backed by a 10,500 raw damage counter, and Lv5-8 use 6,500 HP with a
@@ -197,3 +197,18 @@ unverified. Free charging remains enabled; meter gain remains deferred.
 Validation: `cargo test --release --workspace` (41 tests), release viewer build, and
 `data/reference/reimu-scope.png` inspected locally. Source findings and remaining gaps
 are recorded in `research/catalog.json`.
+
+### Spirits and shot impacts (2026-10-03)
+
+Chain rewards now send pure spirits to the opponent. Destroying a spirit sends a wolf,
+otter or eagle according to the original distance thresholds. Delayed warning rings
+and the spirit NPCs use `ghost.anm`, `enemy.anm` and `default.ecl`. Their HP, movement
+and attacks come from those scripts. Practice currently holds the pressure parameter
+at zero; match settings/escalation, ability modifiers and exact replay RNG remain
+unported. Spirit credit is separate from charge meter gain, which is still deferred.
+
+Reimu's normal and homing shots now play their own ANM hit interrupts, drift at
+one-eighth speed, and stop dealing damage during the impact. Detached trails inherit
+the shot's original rotation. The homing sprite and pink trail retain their asset
+colours. Remaining scope contact visuals, lasers and spirit-specific ECL318 still
+need work. Automated checks pass; matched original-game footage parity is unverified.

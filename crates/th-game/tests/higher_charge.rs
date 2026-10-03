@@ -19,6 +19,60 @@ struct Game {
 }
 
 #[test]
+fn spirit_types_cross_fields_run_original_scripts_and_scope_disables_them() {
+    use th_game::spirit::{Kind,Request};
+    let Some(mut g)=setup() else {return};
+    for kind in [Kind::Pure,Kind::Wolf,Kind::Otter,Kind::Eagle] {
+        g.sides[0].st.outgoing_spirits.push(Request {kind,origin:[0.0,200.0],level:0});
+    }
+    dispatch_charges(&mut g.sides);
+    assert_eq!(g.sides[1].st.pending_spirits.len(),4);
+    assert!(g.sides[0].st.pending_spirits.is_empty());
+    for p in &g.sides[1].st.pending_spirits { assert!((60..=179).contains(&p.delay)); }
+    for _ in 0..182 {g.tick([0;2]);}
+    for kind in 1..=4 {
+        let e=g.sides[1].enemies.iter().find(|e| e.data.spirit_kind==kind).expect("original spirit script");
+        assert!(e.data.hp>0); assert!(e.data.vms[0].is_some());
+        assert!(e.data.scope_disable_sub.as_ref().unwrap().starts_with("Ghost"));
+    }
+    assert!(!g.sides[1].st.unknown_ops.contains_key(&1027));
+    // Place each spirit at the active scope centre; the original sub determines HP/speed.
+    for _ in 0..20 {g.tick([0,input::CHARGE]);}
+    let pos=g.sides[1].player.as_ref().unwrap().pos;
+    for e in &mut g.sides[1].enemies {e.data.pos=pos;e.data.abs.pv.pos=pos;}
+    g.tick([0,input::CHARGE]);
+    for e in g.sides[1].enemies.iter().filter(|e| e.data.spirit_kind!=0) {
+        assert!(e.data.spirit_disabled);
+        let (base,per_level)=match e.data.spirit_kind {1=>(50,10),2=>(200,30),_=>(150,30)};
+        assert_eq!(e.data.hp,base+per_level*e.data.ivars[0],"original Ghost*HP_D");
+        assert!((e.data.abs.pv.speed-0.02).abs()<0.001);
+    }
+    assert_eq!(Kind::from_distance(68.0*68.0),Kind::Wolf);
+    assert_eq!(Kind::from_distance(128.0*128.0),Kind::Otter);
+    assert_eq!(Kind::from_distance(128.0*128.0+1.0),Kind::Eagle);
+}
+
+#[test]
+fn scope_slows_live_bullet_motion_and_acceleration_without_canceling_it() {
+    let Some(mut g)=setup() else {return};
+    for _ in 0..20 {g.tick([input::CHARGE,0]);}
+    let pos=g.sides[0].player.as_ref().unwrap().pos;
+    let mut et=th_game::bullet::Et {sprite:0,aim:1,angle:[0.0;2],count:[1,1],speed:[2.0;2],..Default::default()};
+    et.ex[0]=th_game::bullet::Ex {kind:th_game::bullet::ex::ACCEL,a:100,r:0.2,s:0.0,..Default::default()};
+    g.sides[0].st.fire(&et,[pos[0],pos[1]-30.0],&mut g.world,&g.lib);
+    g.tick([input::CHARGE,0]);
+    let b=&g.sides[0].st.bullets[0]; assert_eq!(b.scope_time_scale,0.5);
+    let before=b.pos; let speed=b.speed;
+    g.tick([input::CHARGE,0]);
+    let b=&g.sides[0].st.bullets[0];
+    assert!((b.speed-speed-0.1).abs()<0.001);
+    assert!((b.pos[0]-before[0]-b.vel[0]*0.5).abs()<0.001);
+    assert!(!b.delete);
+    g.tick([0;2]);
+    assert_eq!(g.sides[0].st.bullets[0].scope_time_scale,1.0);
+}
+
+#[test]
 fn boss_magic_circle_uses_original_tilted_effect_script() {
     let Some(mut g) = setup() else { return };
     g.sides[1].player.as_mut().unwrap().godmode = true;

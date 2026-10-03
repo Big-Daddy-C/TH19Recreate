@@ -266,10 +266,6 @@
       "address": "004f5130",
       "decompile_sha256": "d55e4eec8c3e4009696c811852135557341b2a6bac3b3f7bf8178c743b17ea1b"
     },
-    "scope_spirit_contact": {
-      "address": "0052b250",
-      "decompile_sha256": "77a7ce604634049c487048be36ffc22d54b92f3d9ba1910c9de31006daece3d2"
-    },
     "spell_damage_mode": {
       "address": "0040f7a0",
       "decompile_sha256": "f0aaf6a341822f28007140ce1036f1367f9cb2391488b47569bf4b9d550c0abc"
@@ -312,6 +308,50 @@
     },
     "homing_init": {
       "address": "0054def0",
+      "decompile_sha256": null
+    },
+    "scope_laser_contact": {
+      "address": "0052b250",
+      "decompile_sha256": "77a7ce604634049c487048be36ffc22d54b92f3d9ba1910c9de31006daece3d2"
+    },
+    "scope_spirit_contact": {
+      "address": "00509030",
+      "decompile_sha256": "a448279bbebd68cbe5e9cae3ce2cf1a625d51604cd70a97b634401770083b11c"
+    },
+    "reimu_focused_shot_hit": {
+      "address": "0054da60",
+      "decompile_sha256": "7a75cd64aa6e80dc977408721db0b67ff949d48ca9bda7fe0c9edfefbd8e6e95"
+    },
+    "anm_root_spawn": {
+      "address": "004d09b0",
+      "decompile_sha256": "a3e1ac2d5abad072672059dcf774aeacd2356b78e0a9790f9c3664a8f20f1475"
+    },
+    "spirit_dispatch": {
+      "address": "0051b480",
+      "decompile_sha256": "ae91b14006aff54f7e2b9aa4778615680ad3a8174d1ee6c2b4068b99e27f6b0d"
+    },
+    "spirit_pending_init": {
+      "address": "0051b6c0",
+      "decompile_sha256": "4946f8f3ba11854024a73ab8f2ccc3c465b32fc03ae35241aa297ccf363f0a2a"
+    },
+    "spirit_credit_update": {
+      "address": "005450e0",
+      "decompile_sha256": "9a4eb8c30dfc04306fce1ffe566ad4d17601433d177a8aa0a022060764551cf1"
+    },
+    "spirit_credit_add": {
+      "address": "00548c60",
+      "decompile_sha256": "558c23507c72415b233c68de3e387cb7e45c6c1da5cb347ed87caaa3dc2c0338"
+    },
+    "spirit_death_dispatch": {
+      "address": "0051d4e0",
+      "decompile_sha256": "687b785f491a92339c05ebcc48aed7f93565227399c66ca3928297790058deb5"
+    },
+    "scope_disable_register": {
+      "address": "0050d0f0",
+      "decompile_sha256": "afa4ebaeb57574fc67dd5596fb0bfbbb39048f0d2a7ea0aa26dace43b4cfd825"
+    },
+    "scope_disable_instruction": {
+      "address": "00502d5d",
       "decompile_sha256": null
     }
   },
@@ -825,7 +865,7 @@
     },
     "scope": {
       "implementation": "partial",
-      "summary": "Reimu scope presentation, charge lifecycle and collision queries implemented. Spirit capture/conversion and scope bullet-contact states are not connected.",
+      "summary": "Reimu scope presentation plus half-speed ordinary enemy movement and live bullet time; typed spirits switch to their registered disable sub.",
       "symbols": [
         "reimu_scope_start",
         "reimu_scope_update",
@@ -835,11 +875,16 @@
         "scope_query_circle",
         "scope_query_rectangle",
         "scope_bullet_contact",
-        "scope_spirit_contact"
+        "scope_spirit_contact",
+        "scope_laser_contact",
+        "scope_disable_register"
       ],
       "code": [
         "crates/th-game/src/scope.rs",
-        "crates/th-game/src/player.rs"
+        "crates/th-game/src/player.rs",
+        "crates/th-game/src/enemy.rs",
+        "crates/th-game/src/bullet.rs",
+        "crates/th-game/src/side.rs"
       ],
       "tests": [
         "crates/th-game/tests/higher_charge.rs"
@@ -859,12 +904,12 @@
           "evidence": "code_checked"
         },
         {
-          "text": "00416f10 circle test uses distance squared < scope radius squared + target radius squared. 00416f60 forwards oriented rectangular spirit shape to004d44e0. Consumers004f5130 and0052b250 have additional capture/timer/reward states absent from current runtime. Scope does NOT blindly cancel enemy bullets or damage fairies; no invented gameplay replacement is connected. These consumers need a separate complete implementation, while meter rewards remain deferred by user.",
+          "text": "Correction to prior catalog:0052b250 is laser contact, not spirit contact. Actual00509030 writes ordinary enemy PosVel drag0.5 and switches typed spirits once to scope sub atdata+51d0. That name is installed byECL521/0050d0f0, distinct from514 HP/time conditions. Live bullets004f5219 write0.5 fromconstant005a7320 to timer1024;004f5680 multiplies movement/time by it on the next update. No blanket slowdown of player shots or arbitrary VMs is inferred. Bullet appearance/colour contact states and scope-laser interactions remain unported.",
           "sources": [
-            "reimu_scope_circle",
-            "reimu_scope_rectangle",
-            "scope_bullet_contact",
-            "scope_spirit_contact"
+            "scope_spirit_contact",
+            "scope_laser_contact",
+            "scope_disable_register",
+            "scope_bullet_contact"
           ],
           "evidence": "code_checked"
         }
@@ -872,11 +917,12 @@
       "checks": {
         "original_game_parity": "not_run",
         "automated": "2026-10-02: scope growth10/20frames, charge/focus gating, player tracking, side isolation, release/recharge/invalid-state cleanup and circle/rectangle boundaries passed using original pl00.anm.",
-        "visual": "data/reference/reimu-scope.png frame90 inspected: blue64-radius circle around charging left Reimu; original-game footage comparison unrun."
+        "visual": "data/reference/reimu-scope.png frame90 inspected: blue64-radius circle around charging left Reimu; original-game footage comparison unrun.",
+        "automated_2026_10_03": "cargo test --workspace passed53 tests: scope bullet movement+acceleration/release, all four Ghost scripts with source disabled HP and movement; existing scope/charge/boss tests retained."
       },
       "next": [
-        "Implement ghost/spirit spawning, scope contact states, slowdown/tagging and conversion using0052b250 and004f5130; defer meter rewards.",
-        "Port other character-specific scopes alongside their player controllers."
+        "Port remaining bullet scope contact visuals and laser paths.",
+        "Port pressure progression and ability/settings modifiers, then compare matched footage."
       ]
     },
     "boss_visuals": {
@@ -943,7 +989,7 @@
     },
     "player_shots": {
       "implementation": "partial",
-      "summary": "Reimu homing uses original acceleration, target lock, acquisition radius and steering lifetime; shared SHT angular/speed increments are applied.",
+      "summary": "Reimu homing uses original acceleration, target lock, acquisition radius and steering lifetime; shared SHT angular/speed increments are applied. Original ANM interrupt1 now plays impacts;504 root trails copy XYZ rotation before initial script execution.",
       "symbols": [
         "homing_update",
         "homing_target_query",
@@ -951,11 +997,15 @@
         "homing_angle_difference",
         "homing_init",
         "shot_spawn",
-        "shot_update"
+        "shot_update",
+        "shot_hit",
+        "reimu_focused_shot_hit",
+        "anm_root_spawn"
       ],
       "code": [
         "crates/th-game/src/player.rs",
-        "crates/th-formats/src/sht.rs"
+        "crates/th-formats/src/sht.rs",
+        "crates/th-anm/src/vm.rs"
       ],
       "tests": [
         "crates/th-game/tests/charge_gameplay.rs"
@@ -999,16 +1049,78 @@
             "homing_target_valid"
           ],
           "evidence": "assumption"
+        },
+        {
+          "text": "0054fba0 sets state2, speed/8, z0.1, ANM interrupt1, and removes collider. Runtime retains impact VM until original script deletes it and stops homing/SHT increments. Focused callback1 adds effect142 with original angle/ranges (local RNG remains approximate). Actual pl00 scripts6/7/8 provide distinct impacts; script8 disables direction-following during its hit animation. Sprite34 uses original blue/white atlas artwork;trail11 is additiveRGB255,64,128 alpha128 fade8.004d09b0 copies XYZ rotation before new root execution; omitted rotation made the trail face the wrong way. No new colour tint or replacement graphics invented.",
+          "sources": [
+            "shot_hit",
+            "reimu_focused_shot_hit",
+            "shot_update",
+            "anm_root_spawn"
+          ],
+          "evidence": "code_checked"
         }
       ],
       "checks": {
         "automated": "2026-10-03 working tree based onf1c4e64: cargo test --workspace:48 tests passed with original assets; cargo build --release -p th19 passed. Regression cases: no-target acceleration using original SHT/input path, turn-dependent speeds, proportional steering, retained target/target loss/reacquisition, strict radius, tick60 cutoff and late acceleration.",
         "visual": "Inspected data/reference/reimu-homing-fixed.png atframe350: right-side automatic normal shots render and bend toward enemies. Static capture does not establish speed/timing parity; no matched original footage comparison.",
-        "original_game_parity": "not_run"
+        "original_game_parity": "not_run",
+        "automated_2026_10_03": "cargo test --workspace passed53 tests, including original scripts6/7/8 impact sprites/non-repeated damage/lifetime and trail11 rotation/colour.",
+        "visual_2026_10_03": "Release capture data/reference/spirits-and-impacts.png frame1600 inspected: original rectangular shot impacts and rotated coloured trails render on right field; pure spirit present on left. No matched original capture comparison performed."
       },
       "next": [
-        "Connect scope to original spirit contact/conversion while keeping meter gain deferred.",
-        "Map remaining internal target states and compare normal shots against matched original frames."
+        "Compare shot/trail colours and impact appearance against matched original gameplay footage.",
+        "Map remaining internal target/collider states."
+      ]
+    },
+    "spirits": {
+      "implementation": "partial",
+      "summary": "Chain-earned pure spirits and distance-selected wolf/otter/eagle attacks dispatch across fields, with delayed warning rings and original default.ecl behavior.",
+      "symbols": [
+        "spirit_dispatch",
+        "spirit_pending_init",
+        "spirit_credit_update",
+        "spirit_credit_add",
+        "spirit_death_dispatch",
+        "scope_spirit_contact",
+        "scope_disable_register"
+      ],
+      "code": [
+        "crates/th-game/src/spirit.rs",
+        "crates/th-game/src/side.rs",
+        "crates/th-game/src/enemy.rs"
+      ],
+      "tests": [
+        "crates/th-game/tests/higher_charge.rs",
+        "crates/th-game/src/side.rs"
+      ],
+      "findings": [
+        {
+          "text": "0051d4e0 case0 earns30 spirit credit when pre-kill chain>9;case1 earns5 and sends animal selected by squared distance<=68^2 wolf,<=128^2 otter,else eagle.005450e0 uses120-trunc(40*pressure/200) and pending count<5+7*pressure/200. Counter is separate from charge meter, which remains deferred. Practice pressure is explicitly held at0 pending match settings/escalation port; ability reward modifiers are not supported.",
+          "sources": [
+            "spirit_death_dispatch",
+            "spirit_credit_update",
+            "spirit_credit_add"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "0051b6c0 delays60..179 ticks, warning ANM19/22/25/28 follows Hermite with tangents[+/-100,-400] and[+/-100,120]. Wolf target is opponent x+/-48 clamped+/-140;otter targets side edge+/-140 andy16..272.0051b480 spawns aftertime>delay,200 initialHP; I0 andI2 carry incoming level+1,I1 carries ability modifier (currently0). default.ecl supplies GhostPure/GhostWolf/GhostOtterL/R/GhostEagle animations, HP, motion and attacks. RNG uses existing approximate local generator; delayed warning start/order requires footage comparison.",
+          "sources": [
+            "spirit_pending_init",
+            "spirit_dispatch"
+          ],
+          "evidence": "code_checked"
+        }
+      ],
+      "checks": {
+        "automated": "2026-10-03: workspace53 tests passed; chain threshold and three distance ranges checked; all four delayed types create original scripts, scope switch checks disabled HP and0.02 speed.",
+        "original_game_parity": "not_run",
+        "visual": "data/reference/spirits-and-impacts.png frame1600 inspected: naturally chain-earned pure spirit visible on opponent field. Four-type behavior checked with original ECL assets; full footage comparison unrun."
+      },
+      "next": [
+        "Port match-config pressure initial value/cap/interval and its escalation, ability/reward modifiers and replay RNG.",
+        "Port remaining spirit-specific ECL318 and verify chain explosion visuals and warnings against original footage."
       ]
     }
   }

@@ -33,6 +33,8 @@ pub struct PosVel {
     /// Velocity in [`Mode::Velocity`], circle centre otherwise (the game stores both here).
     pub vel_or_center: [f32; 2],
     pub mode: Mode,
+    /// PosVel +0x34, applied by FUN_004d4dc0; scope writes 0.5.
+    pub drag: f32,
 }
 
 pub fn wrap_angle(mut a: f32) -> f32 {
@@ -88,11 +90,11 @@ impl Motion {
             match pv.mode {
                 Mode::Velocity => {
                     let (s, c) = pv.angle.sin_cos();
-                    pv.vel_or_center = [c * pv.speed, s * pv.speed];
+                    pv.vel_or_center = [c * pv.speed * (1.0-pv.drag), s * pv.speed * (1.0-pv.drag)];
                 }
                 Mode::Circle | Mode::Ellipse => {
-                    pv.radius += pv.radius_delta;
-                    pv.angle = wrap_angle(pv.angle + pv.speed);
+                    pv.radius += pv.radius_delta * (1.0-pv.drag);
+                    pv.angle = wrap_angle(pv.angle + pv.speed * (1.0-pv.drag));
                 }
             }
         }

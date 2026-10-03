@@ -93,8 +93,8 @@ impl Default for Et {
 
 #[derive(Clone, Copy, Debug, Default)]
 struct Timed {
-    t: i32,
-    end: i32,
+    t: f32,
+    end: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -120,8 +120,8 @@ struct ExState {
     bounce_flags: i32,
     bounce_box: [f32; 2],
     bounce_speed: f32,
-    offscreen: i32,
-    wait: i32,
+    offscreen: f32,
+    wait: f32,
 }
 
 pub struct Bullet {
@@ -145,6 +145,8 @@ pub struct Bullet {
     st: ExState,
     pub vm: Option<VmId>,
     pub delete: bool,
+    pub scope_time_scale: f32,
+    timer_fraction: f32,
 }
 
 /// What a bullet needs from the world around it.
@@ -288,6 +290,8 @@ fn make_bullet(et: &Et, origin: [f32; 2], i: i32, j: i32, aim: f32, ctx: &mut Ct
         st: ExState::default(),
         vm: None,
         delete: false,
+        scope_time_scale: 1.0,
+        timer_fraction: 0.0,
     };
     b.set_sprite(et.sprite, et.color, ctx);
     // A leading spawn-animation ex is applied at creation; otherwise the bullet appears at once.
@@ -369,18 +373,18 @@ impl Bullet {
                 k if k == ex::COMMAND | 1 => {
                     if e.a > 0 {
                         self.waiting = true;
-                        self.st.wait = e.a;
+                        self.st.wait = e.a as f32;
                     }
                 }
                 ex::SPEEDUP => {
                     self.active |= ex::SPEEDUP;
-                    self.st.speedup = Timed { t: 0, end: 17 };
+                    self.st.speedup = Timed { t: 0.0, end: 17.0 };
                 }
                 ex::SPAWN_ANIM => self.start_spawn_anim(e.a, ctx),
                 ex::ACCEL => {
                     self.active |= ex::ACCEL;
                     let ang = self.resolve_angle(e.s, ctx);
-                    self.st.accel = Timed { t: 0, end: e.a };
+                    self.st.accel = Timed { t: 0.0, end: e.a as f32 };
                     self.st.accel_r = e.r;
                     self.st.accel_vec = polar(ang, e.r);
                 }
@@ -388,13 +392,13 @@ impl Bullet {
                     self.active |= ex::ACCEL_TO;
                     let ang = self.resolve_angle(e.s, ctx);
                     let r = if e.a > 0 { (e.r - self.speed) / e.a as f32 } else { 0.0 };
-                    self.st.accel_to = Timed { t: 0, end: e.a };
+                    self.st.accel_to = Timed { t: 0.0, end: e.a as f32 };
                     self.st.accel_to_r = r;
                     self.st.accel_to_vec = polar(ang, r);
                 }
                 ex::ANGLE_ACCEL => {
                     self.active |= ex::ANGLE_ACCEL;
-                    self.st.angacc = Timed { t: 0, end: e.a };
+                    self.st.angacc = Timed { t: 0.0, end: e.a as f32 };
                     self.st.angacc_dspeed = e.r;
                     self.st.angacc_dangle = e.s;
                 }
@@ -416,7 +420,7 @@ impl Bullet {
                         }
                         _ => ang,
                     };
-                    self.st.step = Timed { t: 0, end: e.a };
+                    self.st.step = Timed { t: 0.0, end: e.a as f32 };
                     self.st.step_count = 0;
                     self.st.step_max = e.b;
                     self.st.step_mode = e.c;
@@ -432,7 +436,7 @@ impl Bullet {
                 ex::INVULN => self.invuln = e.a,
                 ex::OFFSCREEN => {
                     self.active |= ex::OFFSCREEN;
-                    self.st.offscreen = e.a;
+                    self.st.offscreen = e.a as f32;
                 }
                 ex::SET_SPRITE => {
                     if e.a & 0x8000 == 0 {
@@ -450,9 +454,12 @@ impl Bullet {
     }
 
     /// One frame (`FUN_004f5680`).
-    pub fn update(&mut self, ctx: &mut Ctx) {
+    pub fn update(&mut self, ctx: &mut Ctx) { self.update_scaled(ctx, 1.0); }
+
+    /// Scope time factor (004f5219, constant005a7320; movement004f5680).
+    pub fn update_scaled(&mut self, ctx: &mut Ctx, dt: f32) {
         if self.state == 2 {
-            self.pos = [self.pos[0] + self.vel[0] / 2.0, self.pos[1] + self.vel[1] / 2.0];
+            self.pos = [self.pos[0] + self.vel[0] * dt / 2.0, self.pos[1] + self.vel[1] * dt / 2.0];
             let done = self.vm.and_then(|id| ctx.world.get(id)).is_none_or(|vm| vm.ivars[0] != 0);
             if done { self.state = 1; }
         }
@@ -461,12 +468,15 @@ impl Bullet {
         if self.state == 1 {
             loop {
                 self.run_ex(ctx);
-                if self.handlers(ctx) == 0 { break; }
+                if self.handlers(ctx, dt) == 0 { break; }
             }
-            self.pos = [self.pos[0] + self.vel[0], self.pos[1] + self.vel[1]];
+            self.pos = [self.pos[0] + self.vel[0] * dt, self.pos[1] + self.vel[1] * dt];
         }
 
-        if self.invuln > 0 {
+        self.timer_fraction += dt;
+        let timer_tick = self.timer_fraction >= 1.0;
+        if timer_tick { self.timer_fraction -= 1.0; }
+        if self.invuln > 0 && timer_tick {
             self.invuln -= 1;
         }
         if self.active & ex::OFFSCREEN == 0 && self.grace < 1 {
@@ -476,7 +486,7 @@ impl Bullet {
                 self.delete = true;
             }
         }
-        if self.grace > 0 {
+        if self.grace > 0 && timer_tick {
             self.grace -= 1;
         }
         let at = field_to_canvas(ctx.field, self.pos);
@@ -507,64 +517,64 @@ impl Bullet {
     }
 
     /// Run the active ex handlers; returns how many finished (they free later ex to start).
-    fn handlers(&mut self, ctx: &mut Ctx) -> u32 {
+    fn handlers(&mut self, ctx: &mut Ctx, dt: f32) -> u32 {
         let mut finished = 0;
         if self.active & ex::SPEEDUP != 0 {
             let s = &mut self.st.speedup;
-            if s.t > 16 {
+            if s.t > 16.0 {
                 self.active &= !ex::SPEEDUP;
                 finished += 1;
             } else {
                 // A burst of +5 that fades out over 16 frames.
                 let v = 5.0 - s.t as f32 * 5.0 / 16.0 + self.speed;
                 self.vel = polar(self.angle, v);
-                s.t += 1;
+                s.t += dt;
             }
         }
         if self.active & ex::ACCEL != 0 {
-            finished += self.accel_step(false) as u32;
+            finished += self.accel_step(false, dt) as u32;
         }
         if self.active & ex::ACCEL_TO != 0 {
-            finished += self.accel_step(true) as u32;
+            finished += self.accel_step(true, dt) as u32;
         }
         if self.active & ex::ANGLE_ACCEL != 0 {
             let s = &mut self.st.angacc;
             if s.t < s.end {
-                self.angle = wrap_angle(self.angle + self.st.angacc_dangle);
-                self.speed += self.st.angacc_dspeed;
+                self.angle = wrap_angle(self.angle + self.st.angacc_dangle * dt);
+                self.speed += self.st.angacc_dspeed * dt;
                 self.set_vel();
-                self.st.angacc.t += 1;
+                self.st.angacc.t += dt;
             } else {
                 self.active &= !ex::ANGLE_ACCEL;
                 finished += 1;
             }
         }
         if self.active & ex::STEP != 0 {
-            finished += self.step(ctx) as u32;
+            finished += self.step(ctx, dt) as u32;
         }
         if self.active & ex::BOUNCE != 0 {
             finished += self.bounce() as u32;
         }
         if self.active & ex::OFFSCREEN != 0 {
-            self.st.offscreen -= 1;
-            if self.st.offscreen <= 0 {
+            self.st.offscreen -= dt;
+            if self.st.offscreen <= 0.0 {
                 self.active &= !ex::OFFSCREEN;
                 finished += 1;
             }
         }
         if self.waiting {
-            if self.st.wait < 1 {
+            if self.st.wait < 1.0 {
                 self.waiting = false;
                 finished += 1;
             } else {
-                self.st.wait -= 1;
+                self.st.wait -= dt;
             }
         }
         finished
     }
 
     /// Acceleration by a vector for `end` frames; the angle follows the velocity.
-    fn accel_step(&mut self, to: bool) -> bool {
+    fn accel_step(&mut self, to: bool, dt: f32) -> bool {
         let (timed, r, v) = if to {
             (&mut self.st.accel_to, self.st.accel_to_r, self.st.accel_to_vec)
         } else {
@@ -574,9 +584,9 @@ impl Bullet {
             self.active &= !(if to { ex::ACCEL_TO } else { ex::ACCEL });
             return true;
         }
-        timed.t += 1;
-        self.speed += r;
-        self.vel = [self.vel[0] + v[0], self.vel[1] + v[1]];
+        timed.t += dt;
+        self.speed += r * dt;
+        self.vel = [self.vel[0] + v[0] * dt, self.vel[1] + v[1] * dt];
         if self.vel[0].abs() > 0.0001 || self.vel[1].abs() > 0.0001 {
             self.angle = wrap_angle(self.vel[1].atan2(self.vel[0]));
             self.speed = (self.vel[0] * self.vel[0] + self.vel[1] * self.vel[1]).sqrt();
@@ -585,12 +595,12 @@ impl Bullet {
     }
 
     /// Step: slow to a stop over `a` frames, then redirect (mode c) at the new speed; `b` times.
-    fn step(&mut self, ctx: &mut Ctx) -> bool {
+    fn step(&mut self, ctx: &mut Ctx, dt: f32) -> bool {
         let st = &mut self.st;
         if st.step.t < st.step.end {
             let v = self.speed - st.step.t as f32 * self.speed / st.step.end as f32;
             self.vel = polar(self.angle, v);
-            st.step.t += 1;
+            st.step.t += dt;
             return false;
         }
         st.step_count += 1;
@@ -602,7 +612,7 @@ impl Bullet {
             _ => {}
         }
         self.speed = st.step_speed;
-        st.step.t = 0;
+        st.step.t = 0.0;
         if st.step_count >= st.step_max {
             self.set_vel();
             self.active &= !ex::STEP;

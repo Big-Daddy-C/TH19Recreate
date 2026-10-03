@@ -98,6 +98,9 @@ pub struct PlayerBullet {
     pub time: i32,
     /// Reimu slot 10: init callback 11 sets piercing, update callback 8 controls speed.
     pub charge_shot: bool,
+    /// FUN_0054fba0 state 2: collider removed, ANM interrupt 1 plays the impact.
+    pub impacting: bool,
+    hit_callback: i32,
     last_enemy: Option<i32>,
 }
 
@@ -419,7 +422,7 @@ impl Player {
             circle.radius += circle.growth; circle.remaining -= 1;
         }
         self.damage_circles.retain(|c| c.remaining > 0);
-        self.update_bullets(enemies, world, field, &mut damage);
+        self.update_bullets(enemies, world, lib, field, &mut damage);
         // FUN00520450 caps the sum of colliders at player+2274, loaded from SHT+28.
         let cap = i32::from_le_bytes(self.sht.params_raw[8..12].try_into().unwrap()).max(0);
         for (enemy, (amount, from)) in enemies.iter_mut().zip(damage) {
@@ -615,7 +618,7 @@ impl Player {
             if let Some(v) = world.get_mut(id) {
                 // Charge orbs rotate through script 10's angular velocity. Their ANM
                 // does not request direction-following rotation (0054df10, +0x4cc).
-                if r.funcs != [11, 8, 0, 7] { v.rot[2] = r.angle; }
+                if v.auto_rotate { v.rot[2] = r.angle; }
             }
             id
         });
@@ -632,31 +635,36 @@ impl Player {
             vm,
             time: 0,
             charge_shot: r.funcs == [11, 8, 0, 7],
+            impacting: false,
+            hit_callback: r.funcs[3],
             last_enemy: None,
         });
     }
 
-    fn update_bullets(&mut self, enemies: &mut [Enemy], world: &mut World, field: [f32; 4], damage: &mut [(i32, [f32; 2])]) {
+    fn update_bullets(&mut self, enemies: &mut [Enemy], world: &mut World, lib: &AnmLibrary, field: [f32; 4], damage: &mut [(i32, [f32; 2])]) {
         let mut i = 0;
         while i < self.bullets.len() {
             let b = &mut self.bullets[i];
             // Callback 8 at 0054b380, read from the original executable's table
             // 005a0400 (not present as a function in the Ghidra export).
-            if b.charge_shot {
+            if !b.impacting && b.charge_shot {
                 b.speed = if b.time < 120 { (b.speed - 0.95).max(0.2) } else { b.speed + 0.2 };
             }
-            if b.homing {
+            if !b.impacting && b.homing {
                 update_homing(b, enemies);
             }
             // FUN_0054df10: callback, then SHT angular/speed increments, then movement.
-            b.angle = crate::motion::wrap_angle(b.angle + b.angular_velocity);
-            b.speed += b.acceleration;
+            if !b.impacting {
+                b.angle = crate::motion::wrap_angle(b.angle + b.angular_velocity);
+                b.speed += b.acceleration;
+            }
             b.time += 1;
             let (s, c) = b.angle.sin_cos();
             b.pos = [b.pos[0] + c * b.speed, b.pos[1] + s * b.speed];
 
             let mut dead = b.pos[0].abs() > 148.0 + 32.0 || b.pos[1] < -32.0 || b.pos[1] > 448.0 + 32.0;
-            if !dead {
+            dead |= b.vm.is_some_and(|id| world.get(id).is_none());
+            if !dead && !b.impacting {
                 for (index, e) in enemies.iter_mut().enumerate() {
                     let d = &mut e.data;
                     if d.flags & flag::NO_HURTBOX != 0 || d.hurtbox[0] <= 0.0 || d.delete {
@@ -670,7 +678,31 @@ impl Player {
                         damage[index].0 += b.damage;
                         damage[index].1 = b.pos;
                         b.last_enemy = Some(d.id);
-                        if !b.charge_shot { dead = true; break; }
+                        if !b.charge_shot {
+                            // Callback 1 adds effect 142 before the shared impact transition.
+                            if b.hit_callback == 1 {
+                                if let Some(file) = self.effect_anm {
+                                    let mut random = || {
+                                        let x = &mut self.skill_rng;
+                                        *x ^= *x << 13; *x ^= *x >> 17; *x ^= *x << 5;
+                                        *x
+                                    };
+                                    // Original replay RNG is not yet shared by this controller.
+                                    let spread = random() as f64 / u32::MAX as f64 * 2.0 - 1.0;
+                                    let angle = crate::motion::wrap_angle(b.angle + spread as f32 * 0.34906584 + std::f32::consts::PI);
+                                    let id = world.spawn_rotated(lib, file, 142, field_to_canvas(field, b.pos), field, angle);
+                                    if let Some(vm) = world.get_mut(id) {
+                                        vm.color = [(random() & 127) as f32 + 127.0, (random() & 63) as f32 + 64.0, (random() & 63) as f32 + 64.0];
+                                        vm.alpha = (random() & 63) as f32 + 96.0;
+                                    }
+                                }
+                            }
+                            b.impacting = true;
+                            b.speed /= 8.0;
+                            if let Some(id) = b.vm { world.interrupt(id, 1); }
+                            else { dead = true; }
+                            break;
+                        }
                     }
                 }
             }
@@ -684,8 +716,8 @@ impl Player {
             let b = &self.bullets[i];
             let at = field_to_canvas(field, b.pos);
             if let Some(vm) = b.vm.and_then(|id| world.get_mut(id)) {
-                vm.origin = [at[0], at[1], 0.0];
-                if !b.charge_shot { vm.rot[2] = b.angle; }
+                vm.origin = [at[0], at[1], if b.impacting { 0.1 } else { 0.0 }];
+                if vm.auto_rotate { vm.rot[2] = b.angle; }
             }
             i += 1;
         }
@@ -759,12 +791,47 @@ use super::*;
     fn amulet(angle: f32, speed: f32, time: i32) -> PlayerBullet {
         PlayerBullet { pos: [0.0, 300.0], angle, speed, hitbox: [4.0; 2], damage: 1,
             homing: true, homing_target: None, angular_velocity: 0.0, acceleration: 0.0,
-            vm: None, time, charge_shot: false, last_enemy: None }
+            vm: None, time, charge_shot: false, impacting: false, hit_callback: 0, last_enemy: None }
     }
 
     fn homing_enemy(id: i32, pos: [f32; 2]) -> Enemy {
         Enemy { threads: th_ecl::Threads::new(th_ecl::Context::new(th_ecl::SubRef { file: 0, sub: 0 })),
             data: crate::EnemyData { id, pos, hurtbox: [10.0; 2], hp: 100, ..Default::default() } }
+    }
+
+    #[test]
+    fn original_shot_impacts_keep_animation_stop_damage_and_expire() {
+        let path=std::path::PathBuf::from(std::env::var_os("TH19_DAT").unwrap_or_else(||
+            std::path::PathBuf::from(std::env::var_os("USERPROFILE").unwrap()).join("Downloads/th19/th19/th19.dat").into_os_string()));
+        if !path.is_file() { return; }
+        let mut dat=th_formats::dat::Archive::open(path).unwrap();
+        let mut lib=AnmLibrary::default();
+        let file=lib.load("pl00.anm",&dat.read("pl00.anm").unwrap()).unwrap();
+        let effect=lib.load("effect.anm",&dat.read("effect.anm").unwrap()).unwrap();
+        let sht=ShtFile::parse(&dat.read("pl00.sht").unwrap()).unwrap();
+        for (script,impact_sprite) in [(6,26),(7,29),(8,35)] {
+            let mut world=World::default();
+            let mut p=Player::new(sht.clone(),file); p.pos=[0.0,100.0]; p.effect_anm=Some(effect);
+            let mut record=sht.slots.iter().flatten().flatten().find(|r| r.anm_script==script).unwrap().clone();
+            record.origin=0; record.offset=[0.0;2];
+            p.spawn_bullet(&record,&mut world,&lib,crate::FIELDS[0]);
+            let id=p.bullets[0].vm.unwrap();
+            let mut enemies=[homing_enemy(1,p.pos)]; enemies[0].data.hurtbox=[100.0;2];
+            let mut damage=[(0,[0.0;2])];
+            p.update_bullets(&mut enemies,&mut world,&lib,crate::FIELDS[0],&mut damage);
+            assert_eq!(damage[0].0,record.damage as i32);
+            assert!(p.bullets[0].impacting);
+            assert!(p.bullets[0].speed < record.speed / 4.0);
+            world.tick(&lib);
+            assert_eq!(world.get(id).unwrap().sprite,impact_sprite);
+            for _ in 0..40 {
+                damage[0].0=0;
+                p.update_bullets(&mut enemies,&mut world,&lib,crate::FIELDS[0],&mut damage);
+                assert_eq!(damage[0].0,0,"impact has no collider");
+                world.tick(&lib);
+            }
+            assert!(world.get(id).is_none()); assert!(p.bullets.is_empty());
+        }
     }
 
     #[test]
