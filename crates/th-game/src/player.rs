@@ -458,7 +458,8 @@ impl Player {
         self.skills.retain_mut(|s| {
             let alive = s.tick(world, field, &mut self.cancel_circles, &mut self.damage_circles);
             if std::mem::take(&mut s.ended) {
-                if crate::sfx::on(crate::sfx::Cat::Skill) { self.sounds.push((0x2c, None)); }
+                // FUN_0053b3a0: stop 0x31, then 0x2c panned to the side.
+                if crate::sfx::on(crate::sfx::Cat::Skill) { self.sounds.push((0x31, Some(crate::sfx::STOP))); self.sounds.push((0x2c, None)); }
             }
             alive
         });
@@ -488,7 +489,7 @@ impl Player {
             let protecting = b.protecting();
             if !b.tick_character(self.pos, world, field, &mut self.cancel_circles, &mut self.cancel_columns, &mut self.cancel_rects, &mut self.damage_circles) {
                 // The update functions end by stopping 0x31 and playing 0x2c (centre pan).
-                if crate::sfx::on(crate::sfx::Cat::Bomb) { self.sounds.push((0x2c, Some(0))); }
+                if crate::sfx::on(crate::sfx::Cat::Bomb) { self.sounds.push((0x31, Some(crate::sfx::STOP))); self.sounds.push((0x2c, Some(0))); }
                 self.bomb = None;
             }
             if protecting {
@@ -791,13 +792,18 @@ impl Player {
 
     fn spawn_bullet(&mut self, r: &ShotRecord, world: &mut World, lib: &AnmLibrary, field: [f32; 4]) {
         let Some(origin) = self.origin_of(r.origin) else { return };
-        // FUN_0054e960: the record's sound (SHT +0x2c) panned by the shot's x.
-        if r.sound >= 0 {
-            if crate::sfx::on(crate::sfx::Cat::PlayerShot) { self.sounds.push((r.sound as u32, Some(((origin[0] + r.offset[0]) * 1000.0 / 192.0) as i32))); }
+        // FUN_0054e960 runs the record's init callback (SHT +0x48 through 0x5a0440; all return 0),
+        // then plays the record's sound (SHT +0x2c) panned by the shot's x: origin + offset, one
+        // velocity step back unless the kind is 4..6. Init callbacks 2, 12 and 18 (0054d9e0,
+        // 0054ccf0, 0054d960) play 0x14 panned by the player's x.
+        if matches!(r.funcs[0], 2 | 12 | 18) && crate::sfx::on(crate::sfx::Cat::BeamStart) {
+            self.sounds.push((0x14, Some((self.pos[0] * 1000.0 / 192.0) as i32)));
+        }
+        if r.sound >= 0 && crate::sfx::on(crate::sfx::Cat::PlayerShot) {
+            let back = if matches!(r.kind, 4..=6) { 0.0 } else { r.angle.cos() * r.speed };
+            self.sounds.push((r.sound as u32, Some(((origin[0] + r.offset[0] - back) * 1000.0 / 192.0) as i32)));
         }
         if r.kind == 2 || r.funcs[0] == 12 {
-            // The beam init callbacks (0054ccf0, 0054d960, 0054d9e0) play 0x14 panned by the player's x.
-            if crate::sfx::on(crate::sfx::Cat::BeamStart) { self.sounds.push((0x14, Some((self.pos[0] * 1000.0 / 192.0) as i32))); }
             let pos = [origin[0] + r.offset[0], origin[1] + r.offset[1]];
             self.beams.push(crate::beam::Beam::new(r, self.anm_file, world, lib, field, pos));
             if r.kind == 2 {

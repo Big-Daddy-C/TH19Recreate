@@ -30,6 +30,11 @@ pub enum Level { Attack, Skill, Extra, Boss }
 pub struct Gauge {
     pub value: i32,
     recovery: u8,
+    /// Charging has started (the controller's timer +0x18 is running).
+    holding: bool,
+    /// Sound requests `(id, pan)` of this tick for the side's player; ids carry
+    /// [`crate::sfx::PER_SIDE`] (`side + 0x54` etc. in the controller) and pan to the side.
+    pub sounds: Vec<(u32, i32)>,
 }
 impl Gauge {
     /// Development aid: set the gauge as if it had been held up to `value`.
@@ -42,13 +47,41 @@ impl Gauge {
     /// Skill blocked represents the character callback returning nonzero.
     pub fn tick(&mut self, held: bool, allowed: bool, meter: i32, settings: Settings,
                 boss_active: bool, skill_blocked: bool) -> Option<Level> {
-        if !allowed { self.value = 0; return None; }
-        if self.recovery > 0 { self.recovery -= 1; return None; }
+        // FUN_004e79e0 sounds (ids are side + 0x54/0x56/0x58, panned to the side): 0x54 (ch00) when
+        // charging starts, 0x56 (ch01) and 0x54 again when the gauge lands in a tier's 10-unit
+        // bucket, stop 0x54 and loop 0x58 (ch03) when it reaches the meter cap, and stop 0x54 and
+        // 0x58 whenever the gauge is not being charged.
+        const START: u32 = 0x54 | crate::sfx::PER_SIDE;
+        const TIER: u32 = 0x56 | crate::sfx::PER_SIDE;
+        const FULL: u32 = 0x58 | crate::sfx::PER_SIDE;
+        let sound = crate::sfx::on(crate::sfx::Cat::Charge);
+        let stop = |g: &mut Self| {
+            g.holding = false;
+            if sound { g.sounds.extend([(START, crate::sfx::STOP), (FULL, crate::sfx::STOP)]); }
+        };
+        if !allowed { self.value = 0; stop(self); return None; }
+        if self.recovery > 0 { self.recovery -= 1; stop(self); return None; }
         if held {
+            if !self.holding {
+                self.holding = true;
+                if sound { self.sounds.push((START, 0)); }
+            }
             let cap = meter.clamp(0, 2500);
-            self.value = (self.value + settings.speed_percent.clamp(0, 200)*10/100).min(cap);
+            if self.value < cap {
+                let new = self.value + settings.speed_percent.clamp(0, 200)*10/100;
+                if sound && [settings.boss, settings.extra, settings.skill, settings.attack].iter().any(|t| new / 10 == t / 10) {
+                    self.sounds.extend([(TIER, 0), (START, 0)]);
+                }
+                if cap <= new {
+                    self.value = cap;
+                    if sound { self.sounds.extend([(START, crate::sfx::STOP), (FULL, 0)]); }
+                } else {
+                    self.value = new;
+                }
+            }
             return None;
         }
+        stop(self);
         if self.value == 0 { return None; }
         let value = std::mem::take(&mut self.value);
         self.recovery = 10;
@@ -66,7 +99,7 @@ mod tests {
     // Synthetic thresholds exercise the controller; these are NOT claimed game defaults.
     const S: Settings = Settings { attack: 100, skill: 200, extra: 300, boss: 400, speed_percent: 100 };
     fn release(value: i32, boss: bool, blocked: bool) -> Option<Level> {
-        Gauge { value, recovery: 0 }.tick(false, true, 500, S, boss, blocked)
+        Gauge { value, ..Default::default() }.tick(false, true, 500, S, boss, blocked)
     }
     #[test]
     fn boundaries_and_callback_gates() {
@@ -90,7 +123,7 @@ mod tests {
     }
     #[test]
     fn interrupted_charge_cancels_without_attack() {
-        let mut g = Gauge { value: 400, recovery: 0 };
+        let mut g = Gauge { value: 400, ..Default::default() };
         assert_eq!(g.tick(false, false, 500, S, false, false), None);
         assert_eq!(g.value, 0);
     }

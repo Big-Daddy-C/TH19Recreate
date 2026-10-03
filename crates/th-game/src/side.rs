@@ -293,7 +293,6 @@ impl SideState {
         self.rng = x;
         x
     }
-    /// Uniform in [0, 1).
     /// `FUN_004bb8d0(id, x * 1000 / 192)`: queue a sound effect panned by the field x of its
     /// source (`id` indexes the exe's sound table).
     pub fn play_sound(&mut self, id: u32, x: f32) {
@@ -621,7 +620,9 @@ impl Side {
                 continue;
             }
             let et = bullet::Et { sprite: a.kind, color: a.color, absolute: true, angle: [a.angle, 0.0],
-                speed: [a.speed, 0.0], count: [1, 1], aim: 1, ..bullet::Et::default() };
+                speed: [a.speed, 0.0], count: [1, 1], aim: 1,
+                // 0051bd50 zeroes its local ET (flags +0x474 = 0: no fire sound) and sets +0x47c to -1.
+                laser: crate::laser::LaserEt { sound: [0, -1], ..Default::default() }, ..bullet::Et::default() };
             bullet::fire(&et, a.pos, &mut ctx, &mut st.bullets);
         }
         if let Some(from) = hit {
@@ -789,8 +790,11 @@ impl Side {
             p.update(keys, &mut self.enemies, world, lib, self.st.field);
             self.st.player_pos = p.pos;
             // The player has no side index; a sound without its own pan is panned to its side.
-            let side_pan = if self.st.field[0] < 320.0 { -100 } else { 100 } * 1000 / 192;
-            for (id, pan) in p.sounds.drain(..) {
+            let side = if self.st.field[0] < 320.0 { 0 } else { 1 };
+            let side_pan = if side == 0 { -100 } else { 100 } * 1000 / 192;
+            let charge = p.charge.sounds.drain(..).map(|(id, pan)| (id, (pan == crate::sfx::STOP).then_some(pan)));
+            for (id, pan) in p.sounds.drain(..).chain(charge).collect::<Vec<_>>() {
+                let id = if id & crate::sfx::PER_SIDE != 0 { (id & !crate::sfx::PER_SIDE) + side } else { id };
                 self.st.sounds.push((id, pan.unwrap_or(side_pan)));
             }
             // Losing a heart raises this side's EX and boss levels by one while below 3
@@ -840,7 +844,12 @@ impl Side {
                 }
             }
             if let Some(at) = at {
+                // FUN_00549fb0(player pos, colour 0): the same award as a bullet graze, with a
+                // black spark and sound 0x2a at the player.
                 self.st.graze += 1;
+                let delay = (self.st.rand() & 7) as i32;
+                if crate::sfx::on(crate::sfx::Cat::Graze) { self.st.play_sound(0x2a, at[0]); }
+                self.st.sparks.push(crate::graze::Spark::new(at, 0, delay));
                 let mut seed = self.st.rand() | 1;
                 self.st.items.drop_orbs(at, || {
                     seed ^= seed << 13;
@@ -913,8 +922,10 @@ impl Side {
         if let Some(at) = grazed {
             self.st.graze += 1;
             let delay = (self.st.rand() & 7) as i32;
-            if crate::sfx::on(crate::sfx::Cat::Graze) { self.st.play_sound(0x2a, at[0]); }
-            self.st.sparks.push(crate::graze::Spark::new(spark_at.unwrap_or(at), crate::graze::DEFAULT_RGB, delay));
+            // 00549fb0 pans by the effect position (the closest point of the laser).
+            let spark = spark_at.unwrap_or(at);
+            if crate::sfx::on(crate::sfx::Cat::Graze) { self.st.play_sound(0x2a, spark[0]); }
+            self.st.sparks.push(crate::graze::Spark::new(spark, crate::graze::DEFAULT_RGB, delay));
             let mut seed = self.st.rand() | 1;
             self.st.items.drop_orbs(at, || {
                 seed ^= seed << 13;
@@ -1006,11 +1017,15 @@ pub fn dispatch_charges(sides: &mut [Side]) {
             let rank = sides[sender].st.extra_level.min(7);
             sides[1 - sender].st.incoming_extra_level = rank;
             sides[1 - sender].st.request(script_request("ExtraAttack", [0.0, 0.0], Some(sender)));
+            // FUN_0050d740 family -> FUN_0050db70: the launch cut-in plays 0x4d at centre pan.
+            if crate::sfx::on(crate::sfx::Cat::Release) { sides[sender].st.sounds.push((0x4d, 0)); }
         }
         if sends.boss && !boss_as_ex {
             let rank = sides[sender].st.boss_level.min(7);
             sides[1 - sender].st.incoming_boss_level = rank;
             sides[1 - sender].st.request(script_request("BossAttack", [0.0, 0.0], Some(sender)));
+            // FUN_0050d740 family -> FUN_0050db70: the launch cut-in plays 0x4d at centre pan.
+            if crate::sfx::on(crate::sfx::Cat::Release) { sides[sender].st.sounds.push((0x4d, 0)); }
         }
     }
     // The dot and special-bullet counters send attacks (FUN_005450e0 and Reimu's FUN_0053ac80).
@@ -1094,12 +1109,16 @@ pub fn dispatch_charges(sides: &mut [Side]) {
                 sides[sender].st.extra_level=(rank+1).min(7);
                 sides[1-sender].st.incoming_extra_level=rank;
                 sides[1-sender].st.request(script_request("ExtraAttack",[0.0,0.0],Some(sender)));
+            // FUN_0050d740 family -> FUN_0050db70: the launch cut-in plays 0x4d at centre pan.
+            if crate::sfx::on(crate::sfx::Cat::Release) { sides[sender].st.sounds.push((0x4d, 0)); }
             }
             Some(Level::Boss) => {
                 let rank=sides[sender].st.boss_level.min(7);
                 sides[sender].st.boss_level=(rank+1).min(7);
                 sides[1-sender].st.incoming_boss_level=rank;
                 sides[1-sender].st.request(script_request("BossAttack",[0.0,0.0],Some(sender)));
+            // FUN_0050d740 family -> FUN_0050db70: the launch cut-in plays 0x4d at centre pan.
+            if crate::sfx::on(crate::sfx::Cat::Release) { sides[sender].st.sounds.push((0x4d, 0)); }
             }
             // Marisa's skill sends six laser orbs that curve down to the opponent player's column
             // (FUN_00417b90): tangents of length 600 turned a sixth of a turn apart from straight up.

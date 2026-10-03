@@ -216,11 +216,14 @@ impl Enemy {
         }
         e.size = main_size(e, world, lib);
 
-        // FUN_00509980's tail also plays sound 0x22 (panned by the enemy x) for a damaged enemy. The
-        // boss variant 0x23 (flags 0x4080 at low health) and the per-enemy override +0x510c are
-        // not ported.
+        // FUN_00509980's tail also plays sound 0x22 (panned by the enemy x) for a damaged enemy. Its
+        // override +0x510c is set to -1 at creation and never written. NOT PORTED: 0x23 instead of
+        // 0x22 for flags 0x4080 (script flag word +0x5170) when health to the next life marker is
+        // below 900 / 200, and 0x24 for a damage rate (+0x5164) of zero.
         if e.damaged {
-            if crate::sfx::on(crate::sfx::Cat::EnemyHit) { st.play_sound(0x22, e.pos[0]); }
+            // Not on the killing blow: FUN_00509980 returns into the death routine before it sets
+            // the damaged flag.
+            if !e.killed && crate::sfx::on(crate::sfx::Cat::EnemyHit) { st.play_sound(0x22, e.pos[0]); }
         }
         // Hit flash (FUN_00509980's tail): a damaged enemy's main sprite is drawn in
         // colour 2 = 0xff0000ff for one frame, then normally for at least 4 frames.
@@ -658,8 +661,11 @@ impl EnemyHost<'_> {
                 let e=&self.e.ets[slot];
                 let origin=if e.absolute {e.offset} else {[self.e.pos[0]+e.offset[0],self.e.pos[1]+e.offset[1]]};
                 if let Some(anm)=self.st.anm_files[0] {
+                    let sound=e.laser.sound[0];
                     let laser=crate::laser::Laser::new_curve(origin,e,&self.st.bullet_types,anm,self.world,self.lib,self.st.field);
                     self.st.lasers.push(laser);
+                    // The curved laser's init FUN_005286c0 plays +0xcd4 = ET +0x478 at centre pan.
+                    if sound>=0 && crate::sfx::on(crate::sfx::Cat::Laser) { self.st.sounds.push((sound as u32, 0)); }
                 }
             }
             702 | 703 => {
@@ -674,11 +680,9 @@ impl EnemyHost<'_> {
                     let laser = crate::laser::Laser::new(kind, origin, e.angle[0], e.speed[0], e.sprite, e.color, &e.laser,
                         &self.st.bullet_types, anm, self.world, self.lib, self.st.field);
                     self.st.lasers.push(laser);
-                    // FUN_0052b8e0 (the infinite laser's init) plays the ET's first sound id (+0x8c8,
-                    // copied from ET +0x478) at centre pan; no other laser class plays one.
-                    if kind == crate::laser::Kind::Infinite && sound >= 0 {
-                        if crate::sfx::on(crate::sfx::Cat::Laser) { self.st.sounds.push((sound as u32, 0)); }
-                    }
+                    // The laser inits play the ET's first sound id (ET +0x478) at centre pan: the line
+                    // laser FUN_0052fca0 (+0xce0) and the infinite laser FUN_0052b8e0 (+0x8c8).
+                    if sound >= 0 && crate::sfx::on(crate::sfx::Cat::Laser) { self.st.sounds.push((sound as u32, 0)); }
                 }
             }
             614 => {
@@ -910,6 +914,8 @@ impl EnemyHost<'_> {
             // boss file's script 0 (ANM slot 3, enemy manager +0x4adc) draws the spell
             // background over the field.
             522 => {
+                // FUN_004f67c0 plays 0x21 at centre pan.
+                if crate::sfx::on(crate::sfx::Cat::Spell) { self.st.sounds.push((0x21, 0)); }
                 self.e.spell_hp7=Some(self.e.hp*7);
                 if let Some(old)=self.st.spell_start_effect.take() {self.world.delete(old);}
                 if let Some(file)=self.st.anm_files[1] {
@@ -1043,6 +1049,8 @@ impl EnemyHost<'_> {
                 let pending=crate::reflect::Pending::new_character(req,source,self.st,character);
                 self.st.pending_reflects.push(pending);
             }
+            // ECL 516 (case 0x3d, 00502df4): sound arg0 panned by the enemy's x (FUN_004bb8a0).
+            516 => if crate::sfx::on(crate::sfx::Cat::Script) { let id=i!(0); if id>=0 { self.st.play_sound(id as u32, self.e.pos[0]); } },
             1023 => self.st.wave_param = i!(0),
             // FUN_004fecc0 case b4: set internal type, clear disabled bit 0x80000.
             1027 => { self.e.spirit_kind = (i!(0) & 7) as u8; self.e.spirit_disabled = false; },

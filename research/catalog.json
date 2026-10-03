@@ -2607,6 +2607,13 @@
             "sound_request"
           ],
           "evidence": "code_checked"
+        },
+        {
+          "text": "Sound audit (2026-10-03, all groups enabled). Levels: th19.cfg is written from 0x62bd14 (00413c5f passes edx=0x62bd14 to 004d6df0), so byte 0xca is the BGM and 0xcb the SE setting (DAT_0062bddf -> DAT_0062ad10); the viewer applies (row volume+5000)*(1-(1-s/100)^3)-5000 hundredths of a dB with s from the user cfg (80 shipped). Requests: stop (FUN_004bb7d0) beats a play of the same id in the frame; looped rows (0x58/0x59) repeat until stopped. Call sites ported: shot sound after the init callback (all playable init callbacks return 0) panned by origin+offset minus one velocity step unless kind 4..6; init callbacks 2/12/18 play 0x14 at the player x; charge controller 004e79e0: side+0x54 on charge start, side+0x56 and side+0x54 when value/10 equals a tier threshold/10 (boss, extra, skill, attack), stop side+0x54 and loop side+0x58 at the meter cap, stop 0x54/0x58 whenever not charging; EX/boss sends (0050d8a0 ex_dispatch, 0050d800 boss_dispatch, also from the auto counter via 0050e7d0/0050e820) call vtable+0x44 = 0050db70 which plays 0x4d; ECL 516 (case 0x3d at 00502df4) plays arg0 panned by enemy +0x48 (= enemy +0x1278 position); ECL 522 (004f67c0) plays 0x21; pause menu 00539470 plays 0xe; line laser init 0052fca0 (+0xce0), infinite 0052b8e0 (+0x8c8) and curved 005286c0 (+0xcd4) all play ET +0x478 (struct offsets 0x458/0x40/0x44c); bullet second sound (ET +0x47c) also on ACCEL/ANGLE_ACCEL/ACCEL_TO starts that are not the first ex (004f1460 LAB_004f1a88, +0x69c = ex index); enemy-body graze (00509980 -> 00549fb0(player, colour 0)) plays 0x2a; laser graze pans by the closest point; enemy damage sound is skipped on the killing blow; bomb/Reimu-skill ends stop 0x31 first; reflected bullet arrivals (0051bd50) have ET flags 0 (no fire sound) and +0x47c = -1. NOT PORTED: enemy damage 0x23 (script flags 0x4080 at low health to the next life marker) and 0x24 (zero damage rate); ECL 523 spell-end 0x45 needs spell object +0x7c bit 0x80 (no setter found); the bullet wrap ex (004ef8e0) and line/curve laser ex sounds (00525d50, 0052e840, 0052ea00, 0052f080) because those ex handlers are not ported; HUD countdown 0xb/0xc (00512fd0); warp 0x50/0x51 (00546ed0, no setter of player flags 0x40/0x80 found); dialogue (00506b70/0050fff0), menus, trophies.",
+          "sources": [
+            "sound_request"
+          ],
+          "evidence": "code_checked"
         }
       ],
       "checks": {

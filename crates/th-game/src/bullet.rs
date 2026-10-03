@@ -389,6 +389,13 @@ impl Bullet {
                 return;
             }
             self.ex_idx += 1;
+            // FUN_004f1460 (LAB_004f1a88): starting an ACCEL, ANGLE_ACCEL or ACCEL_TO ex plays the
+            // bullet's second sound unless it is the first ex of the list (+0x69c is its index).
+            if matches!(e.kind, ex::ACCEL | ex::ANGLE_ACCEL | ex::ACCEL_TO) && self.ex_idx > 1 && self.sound2 >= 0
+                && crate::sfx::on(crate::sfx::Cat::BulletEvent)
+            {
+                self.sounds.push((self.sound2 as u32, 0));
+            }
             match e.kind {
                 k if k == ex::COMMAND | 1 => {
                     if e.a > 0 {

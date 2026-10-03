@@ -619,7 +619,13 @@ impl Viewer {
             }
             KeyCode::KeyR => self.restart(),
             KeyCode::Space => self.paused = !self.paused,
-            KeyCode::Escape if self.mode == Mode::Game => self.paused = !self.paused,
+            KeyCode::Escape if self.mode == Mode::Game => {
+                self.paused = !self.paused;
+                // FUN_00539470 (opening the pause menu) plays 0xe at centre pan.
+                if self.paused && th_game::sfx::on(th_game::sfx::Cat::Pause) {
+                    if let Some(a) = &mut self.audio { a.play(0xe, 0); }
+                }
+            }
             KeyCode::Period if self.paused => {
                 let fast = std::mem::replace(&mut self.fast, false);
                 self.tick();

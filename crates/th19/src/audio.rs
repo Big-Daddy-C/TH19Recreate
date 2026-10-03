@@ -12,8 +12,9 @@ use th_formats::{dat::Archive, exe::Exe, wav::Pcm};
 pub struct Audio {
     /// Kept alive for as long as sound should play.
     sink: MixerDeviceSink,
-    /// PCM and the sound's own gain (from its table volume) by sound id; `None` without a file.
-    sounds: Vec<Option<(Pcm, f32)>>,
+    /// PCM, the sound's own gain (from its table volume) and its loop flag by sound id; `None`
+    /// without a file.
+    sounds: Vec<Option<(Pcm, f32, bool)>>,
     /// One voice per sound id, as the game has one DirectSound buffer per id: playing an id again
     /// ends the previous copy instead of layering a second one. Each play bumps the id's counter;
     /// a playing copy stops when the counter has moved on.
@@ -29,7 +30,7 @@ impl Audio {
     pub fn new(exe: &Exe, dat: &mut Archive, cfg: &std::path::Path) -> Option<Self> {
         let setting = std::fs::read(cfg).ok().and_then(|b| b.get(0xcb).copied()).unwrap_or(80).min(100) as f32;
         let sink = DeviceSinkBuilder::open_default_sink().map_err(|e| log::warn!("audio disabled: {e}")).ok()?;
-        let sounds: Vec<Option<(Pcm, f32)>> = th_formats::exe::sound_table(exe)
+        let sounds: Vec<Option<(Pcm, f32, bool)>> = th_formats::exe::sound_table(exe)
             .into_iter()
             .map(|info| {
                 let info = info?;
@@ -39,7 +40,7 @@ impl Audio {
                 // (table volume + 5000) * (1 - (1 - setting / 100)^3) - 5000, silent at setting 0.
                 let curve = 1.0 - (1.0 - setting / 100.0).powi(3);
                 let db100 = if setting == 0.0 { -10000.0 } else { (info.volume as f32 + 5000.0) * curve - 5000.0 };
-                Some((pcm, 10f32.powf(db100 / 2000.0)))
+                Some((pcm, 10f32.powf(db100 / 2000.0), info.looped))
             })
             .collect();
         let latest = sounds.iter().map(|_| Arc::new(AtomicU32::new(0))).collect();
@@ -54,26 +55,47 @@ impl Audio {
         self.volume = ((self.volume + delta) * 20.0).round().clamp(0.0, 20.0) / 20.0;
     }
 
-    /// Play each requested id once, at the average of its pans (`FUN_004bae70` sums the queued
-    /// pans and divides by their count). The game queues at most 12 distinct ids per frame.
+    /// One frame of requests (`FUN_004bae70`): each id plays once at the average of its queued
+    /// pans, restarting it; a stop request ([`th_game::sfx::STOP`]) for an id in the same frame
+    /// wins over its plays. The game queues at most 12 distinct ids per frame.
     pub fn play_all(&mut self, events: &[(u32, i32)]) {
-        let mut ids: Vec<(u32, i64, i64)> = Vec::new();
+        // (id, pan sum, count, stopped)
+        let mut ids: Vec<(u32, i64, i64, bool)> = Vec::new();
         for &(id, pan) in events {
-            if let Some(e) = ids.iter_mut().find(|e| e.0 == id) {
-                e.1 += pan as i64;
-                e.2 += 1;
-            } else if ids.len() < 12 {
-                ids.push((id, pan as i64, 1));
+            let entry = match ids.iter().position(|e| e.0 == id) {
+                Some(i) => &mut ids[i],
+                None if ids.len() < 12 => {
+                    ids.push((id, 0, 0, false));
+                    ids.last_mut().unwrap()
+                }
+                None => continue,
+            };
+            if pan == th_game::sfx::STOP {
+                entry.3 = true;
+            } else {
+                entry.1 += pan as i64;
+                entry.2 += 1;
             }
         }
-        for (id, sum, count) in ids {
-            self.play(id, (sum / count) as i32);
+        for (id, sum, count, stopped) in ids {
+            if stopped {
+                self.stop(id);
+            } else if count > 0 {
+                self.play(id, (sum / count) as i32);
+            }
+        }
+    }
+
+    /// End whatever copy of `id` is playing.
+    pub fn stop(&mut self, id: u32) {
+        if let Some(counter) = self.latest.get(id as usize) {
+            counter.fetch_add(1, Ordering::Relaxed);
         }
     }
 
     /// `pan` is DirectSound's, in hundredths of a decibel: positive attenuates the left channel.
     pub fn play(&mut self, id: u32, pan: i32) {
-        let Some(Some((pcm, own_gain))) = self.sounds.get(id as usize) else { return };
+        let Some(Some((pcm, own_gain, looped))) = self.sounds.get(id as usize) else { return };
         if self.latest.len() <= id as usize { return; }
         let pan = pan.clamp(-10000, 10000) as f32;
         let gain = |attenuation: f32| 10f32.powf(-attenuation.max(0.0) / 2000.0);
@@ -91,7 +113,7 @@ impl Audio {
         for x in &mut data {
             *x *= self.volume * own_gain;
         }
-        self.sink.mixer().add(Voice { data, pos: 0, latest: counter.clone(), mine, rate });
+        self.sink.mixer().add(Voice { data, pos: 0, latest: counter.clone(), mine, rate, looped: *looped });
     }
 }
 
@@ -103,6 +125,8 @@ struct Voice {
     latest: Arc<AtomicU32>,
     mine: u32,
     rate: NonZero<u32>,
+    /// DSBPLAY_LOOPING (table +0xc): repeat until stopped.
+    looped: bool,
 }
 
 impl Iterator for Voice {
@@ -111,6 +135,9 @@ impl Iterator for Voice {
     fn next(&mut self) -> Option<f32> {
         if self.latest.load(Ordering::Relaxed) != self.mine {
             return None;
+        }
+        if self.looped && self.pos >= self.data.len() {
+            self.pos = 0;
         }
         let v = self.data.get(self.pos).copied();
         self.pos += 1;
