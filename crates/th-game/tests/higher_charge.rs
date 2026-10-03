@@ -890,3 +890,58 @@ fn chain_counters_send_automatic_ex_and_boss_attacks() {
     assert!(g.sides[1].enemies.iter().any(|e| e.data.sub == "ExtraAttack")
         || g.sides[1].st.spawn.iter().any(|r| r.sub == "ExtraAttack"));
 }
+
+/// Reimu's bomb (BombReimuInf): at full meter a 250-frame circle growing 1 -> 268 around the
+/// player, cancelling non-invulnerable bullets, damaging enemies 10 per frame, protecting the
+/// player, started by an edge of the bomb button and by a press in the hit window.
+#[test]
+fn bomb_cancels_bullets_damages_enemies_and_protects_the_player() {
+    use th_game::{bomb::Bomb, side::SpawnRequest};
+    assert_eq!(Bomb::duration(2500), 250);
+    assert_eq!(Bomb::duration(100), 120);
+    let Some(mut g) = setup() else { return };
+    g.sides[0].st.request(SpawnRequest { id: 0, difficulty: 0, sub: "GhostPure".into(), pos: [0.0, 300.0], hp: 200,
+        score: 0, item: -1, mirrored: false, ivars: [2, 0, 2, 0], fvars: [0.0; 8] });
+    for _ in 0..20 { g.tick([0; 2]); }
+    put_bullet(&mut g, 0, 0, 1, [60.0, 380.0], false);
+    put_bullet(&mut g, 0, 0, 1, [-60.0, 380.0], true);
+    put_bullet(&mut g, 0, 0, 1, [100.0, 20.0], false);
+    // The button must be released and pressed again to start another bomb.
+    g.tick([input::BOMB, 0]);
+    assert!(g.sides[0].player.as_ref().unwrap().bomb.is_some());
+    let spirit_hp = |g: &Game| g.sides[0].enemies.iter().find(|e| e.data.sub == "GhostPure").map(|e| e.data.hp);
+    let hp0 = spirit_hp(&g).unwrap();
+    let mut radius = vec![];
+    for _ in 0..120 {
+        g.tick([input::BOMB, 0]);
+        radius.push(g.sides[0].player.as_ref().unwrap().bomb.as_ref().map_or(0.0, |b| b.current_radius));
+    }
+    assert!(g.sides[0].player.as_ref().unwrap().invuln >= 30, "protected while the bomb grows");
+    assert!(radius.windows(2).all(|w| w[1] >= w[0]) && radius[119] > 150.0, "{:?}", &radius[..5]);
+    let kinds: Vec<(i32, bool)> = g.sides[0].st.bullets.iter().map(|b| (b.kind, b.invuln > 0)).collect();
+    assert_eq!(kinds.iter().filter(|k| **k == (0, false)).count(), 1, "only the far bullet is left: {kinds:?}");
+    assert!(kinds.contains(&(0, true)), "the invulnerable bullet survives a player cancel: {kinds:?}");
+    // Enemies in range lose 10 per frame (the unquelled spirit's HP drops steadily).
+    let hp1 = spirit_hp(&g).map_or(i32::MIN, |h| h);
+    assert!(hp1 < hp0 || spirit_hp(&g).is_none(), "{hp0} -> {hp1}");
+    for _ in 0..200 { g.tick([0, 0]); }
+    assert!(g.sides[0].player.as_ref().unwrap().bomb.is_none(), "250 frames plus 10 end frames");
+}
+
+/// A bomb pressed during the 8-frame hit window cancels the death (a deathbomb).
+#[test]
+fn bomb_pressed_in_the_hit_window_cancels_the_death() {
+    let Some(mut g) = setup() else { return };
+    let p = g.sides[0].player.as_mut().unwrap();
+    p.barrier = Barrier::Broken;
+    let lives = p.lives;
+    let field = th_game::FIELDS[0];
+    let pos = p.pos;
+    assert!(p.hit(pos, &mut g.world, &g.lib, field));
+    assert_eq!(p.state, State::Hit);
+    g.tick([input::BOMB, 0]);
+    let p = g.sides[0].player.as_ref().unwrap();
+    assert_eq!(p.state, State::Normal);
+    for _ in 0..30 { g.tick([0, 0]); }
+    assert_eq!(g.sides[0].player.as_ref().unwrap().lives, lives, "no heart lost");
+}

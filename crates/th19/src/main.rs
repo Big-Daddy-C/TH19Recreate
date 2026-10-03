@@ -231,6 +231,11 @@ impl Viewer {
                 self.debug_extra_attack();
             }
             self.debug_spawn();
+            // Development: `TH19_DEBUG_BOMB=frame` presses the bomb button for one frame.
+            if let Some(f) = std::env::var("TH19_DEBUG_BOMB").ok().and_then(|v| v.parse::<u64>().ok()) {
+                if f == self.frames { self.held.insert(KeyCode::KeyC); }
+                else if f + 1 == self.frames { self.held.remove(&KeyCode::KeyC); }
+            }
             let keys = self.player_keys();
             if let Some(g) = &mut self.game {
                 th_game::side::prepare_charge_targets(&mut g.sides);
@@ -422,6 +427,7 @@ impl Viewer {
             (KeyCode::ArrowRight, RIGHT),
             (KeyCode::KeyZ, SHOT),
             (KeyCode::KeyX, CHARGE),
+            (KeyCode::KeyC, BOMB),
         ] {
             if h(key) {
                 bits |= bit;
@@ -457,8 +463,6 @@ impl Viewer {
                 self.godmode = !self.godmode;
                 log::info!("godmode {}", if self.godmode { "on" } else { "off" });
             }
-            // Debug: send an extra attack into player 1's field.
-            KeyCode::KeyB if self.mode == Mode::Game => self.debug_extra_attack(),
             KeyCode::KeyV => self.show_fields = !self.show_fields,
             KeyCode::ArrowRight | KeyCode::ArrowLeft if self.mode != Mode::Anm => {
                 let n = self.stage_files.len().max(1);
@@ -483,7 +487,7 @@ impl Viewer {
                 self.restart();
             }
             // Development: clear both fields (bullets, enemies, bosses, EX attacks).
-            KeyCode::KeyC if self.mode == Mode::Game => {
+            KeyCode::KeyB if self.mode == Mode::Game => {
                 if let Some(g) = &mut self.game {
                     for s in &mut g.sides {
                         s.dev_clear(&mut self.world);
@@ -491,6 +495,8 @@ impl Viewer {
                     log::info!("cleared both fields");
                 }
             }
+            // In game mode C is the bomb (a held input bit, see `player_keys`).
+            KeyCode::KeyC if self.mode == Mode::Game => {}
             KeyCode::KeyC => {
                 self.centered = !self.centered;
                 self.restart();
@@ -713,7 +719,7 @@ fn main() {
     println!(
         "Controls: Tab = switch ANM viewer / stage viewer / game, Left/Right = file or stage, Up/Down = single script,\n\
          A = all scripts, C = toggle centre origin, F = fast-forward x8, V = toggle field divider,\n\
-         R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (1 shot / 2 skill / 3 EX / 4 boss; free meter), B = debug EX, G = godmode, 1-4 = instant charge tier (4 = boss; Shift+1-4 = opponent's), C = clear fields, Shift = focus, PgUp/PgDn = stage,\n\
+         R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (1 shot / 2 skill / 3 EX / 4 boss; free meter), C = bomb (full meter), B = clear fields, G = godmode, 1-4 = instant charge tier (4 = boss; Shift+1-4 = opponent's), Shift = focus, PgUp/PgDn = stage,\n\
          . = step frame, 0-9 = send interrupt, Esc = quit"
     );
 

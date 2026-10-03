@@ -469,6 +469,50 @@
     "item_create": {
       "address": "00521d60",
       "decompile_sha256": "810d56878025b4cb206c94349feee0f232ea425a4fdb61da3e1b1d6f95287c92"
+    },
+    "player_state_machine": {
+      "address": "00546320",
+      "decompile_sha256": "47546bb5e4e8d1ab2265362ea0bf8df9c67e82b0d0aa102616d49af7fe40ffbd"
+    },
+    "bomb_available": {
+      "address": "004ed6d0",
+      "decompile_sha256": "a3a19f5d621298bde14d6c5d0512b865a742c5e412e5d383cbcea060160bd915"
+    },
+    "bomb_start": {
+      "address": "004ed7d0",
+      "decompile_sha256": "4f42371eec9e2967577412c5950a2643b2b64360c099d80449399e26b8617aff"
+    },
+    "bomb_manager_init": {
+      "address": "004edb10",
+      "decompile_sha256": "ef79ec423ff3d8f8f7ed36cd55e59a6fb84fd9d8247166682a4f059f109f9ce9"
+    },
+    "bomb_manager_update": {
+      "address": "004edab0",
+      "decompile_sha256": "7ed9ebe4db1cf22e0b67c43c8f1549ab41f14adb2ad38091ff116ea5ad2c5488"
+    },
+    "reimu_bomb_create": {
+      "address": "0053c280",
+      "decompile_sha256": "cbe79dd0116675b6495573913b0a09798e22963f2389948de7c754bf89705264"
+    },
+    "reimu_bomb_init": {
+      "address": "0053c7d0",
+      "decompile_sha256": "e0e2dbcde8b6fe6fc6a13363363ebf464a642b42d7b56ad21bae33ebb517fdb5"
+    },
+    "reimu_bomb_update": {
+      "address": "0053c510",
+      "decompile_sha256": "ecd4ab05f82bb2b37d0b0fe4036c7b53d4700f1c4ee68f7d4e386ad55f70d8f4"
+    },
+    "bomb_duration": {
+      "address": "004ed3d0",
+      "decompile_sha256": "0b7121d5c05fe75fb17b0ea04273c2e8f89b7cd33921514a30bf9ac29afffa27"
+    },
+    "float_interp": {
+      "address": "00402c30",
+      "decompile_sha256": "20851647e2400d9e6f8836a3cd6deb5cf3800161103a835236663e4c3666c075"
+    },
+    "laser_cancel": {
+      "address": "00530c60",
+      "decompile_sha256": "459656c8a48e847660c2452400b0959af7c8e9bed422a6ac85e2bb9baf2f42cb"
     }
   },
   "features": {
@@ -508,7 +552,20 @@
         "charge_in_effect_update",
         "ecl_call_arguments",
         "bullet_update",
-        "bullet_bounce"
+        "bullet_bounce",
+        "player_state_machine",
+        "bomb_available",
+        "bomb_start",
+        "bomb_manager_init",
+        "bomb_manager_update",
+        "reimu_bomb_create",
+        "reimu_bomb_init",
+        "reimu_bomb_update",
+        "bomb_duration",
+        "float_interp",
+        "laser_cancel",
+        "collider_tick",
+        "collider_hit_query"
       ],
       "code": [
         "crates/th-game/src/charge.rs",
@@ -516,7 +573,8 @@
         "crates/th19/src/main.rs",
         "crates/th-game/src/skill.rs",
         "crates/th-game/src/side.rs",
-        "crates/th-game/src/enemy.rs"
+        "crates/th-game/src/enemy.rs",
+        "crates/th-game/src/bomb.rs"
       ],
       "tests": [
         "crates/th-game/tests/charge_data.rs",
@@ -743,6 +801,31 @@
             "spell_damage_mode"
           ],
           "evidence": "code_checked"
+        },
+        {
+          "text": "Bomb (spirit strike): button bit 4 (`+0x2a8 & 4`) in the player state machine FUN_00546320 starts it in state 1 (normal) and in state 4 (the 8-frame hit window: bomb pressed there restores state 1 = deathbomb) when FUN_004ed6d0 allows it (bomb stock status+0x68 in 1..10, no bomb running (+0x18 != 1), FrontInf +0x310 == 0). FUN_004ed7d0 builds the character's BombInf object from the table at 0x5a02d0 (Reimu = BombReimuInf, vtable 0x5a8b50: +4 init 0053c7d0, +8 update 0053c510, +0x10 end 0053c480), stores the meter (status+0x24, 0..2500) and spends one stock. Reimu: duration FUN_004ed3d0(120,250) = max(120, 250*meter/2500) (x status+0x90/100, default assumed 100); radius interpolation 1 -> meter*224/4000+128 (268 at 2500) and y scale 1 -> meter*32/4000+16 (36), both mode 4 (decelerating), over the duration; pl00.anm (player+0x44) script 19 (flash) and 16 (ring, scale (radius, y scale)) at the player. Every frame before the end: player protection block (+0x2074..) set to 0x28 (40), player cancel circle FUN_004ee770(radius, max 99999) (invulnerable bullets survive), laser cancel FUN_00530c60 (lasers not ported), a collider FUN_005200f0 (radius = interpolated, lifetime 1, damage 10, flag 0x10) hitting every enemy inside each frame; at the duration the VMs get interrupt 1 and the screen shakes (FUN_004b9f00 6,6; not ported), the bomb ends 10 frames later and the meter restores from status+0x28. Practice implementation (user-authorised): C = bomb, meter taken as full, no stock used, edge-triggered. Visuals rendered but not compared with the original; the y squash does not show because the Poly primitive ignores scale y (unverified).",
+          "sources": [
+            "player_state_machine",
+            "bomb_available",
+            "bomb_start",
+            "bomb_manager_init",
+            "bomb_manager_update",
+            "reimu_bomb_create",
+            "reimu_bomb_init",
+            "reimu_bomb_update",
+            "bomb_duration",
+            "float_interp",
+            "laser_cancel"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Skill/damage colliders created each frame or with lifetime (Reimu's skill tail: lifetime 24, growth 1) were limited to one hit per enemy; like all colliders they hit every overlapping enemy every frame (FUN_0051fa30 clears the last-hit id). The per-enemy 90 cap per frame still applies.",
+          "sources": [
+            "collider_tick",
+            "collider_hit_query"
+          ],
+          "evidence": "code_checked"
         }
       ],
       "checks": {
@@ -781,9 +864,11 @@
             "visual": "Provisional HUD screenshot inspected at data/reference/charge-hud.png; charge-vs-original footage comparison not run."
           }
         ],
-        "boss_scope_audit": "2026-10-02: original-asset Reimu health all8levels and rank-specific first attack-cycle counts passed; final cargo test --release --workspace passed41tests; cargo build --release -p th19 passed."
+        "boss_scope_audit": "2026-10-02: original-asset Reimu health all8levels and rank-specific first attack-cycle counts passed; final cargo test --release --workspace passed41tests; cargo build --release -p th19 passed.",
+        "automated_bomb": "2026-10-03: workspace 62 tests incl. bomb duration (250 at full meter), cancel vs invulnerable bullets, per-frame damage, protection, no re-trigger, deathbomb."
       },
       "next": [
+        "Bomb: port the laser cancel (FUN_00530c60), screen shake, the meter restore at the end (status+0x28), stock accounting and the other characters' bombs; compare visuals with original footage.",
         "Port spell-card name banner, FrontInf interrupts2/3, ECL621 distortion; verify new declaration beams against original footage (ANM600 and anchor incomplete).",
         "Compare boss phases and kill times per level against original footage (needs an opponent that dodges; the test bot sits under the boss).",
         "Port spell declare/end presentation (522/523), screen shake 517, sounds 516; find the status+0x40 cap for -9888.",
@@ -886,7 +971,7 @@
           "evidence": "prior_session"
         },
         {
-          "text": "Player shots register colliders (FUN_0051f320: size record+0xc along the shot angle, record+0x10 across, damage, hit interval 1, group 0). FUN_00509980 tests them against the enemy hurtbox from op 500 as a circle of radius w/2 (rectangle when flag 0x1000) via FUN_0051e670/FUN_004d44e0, skips the collider's last enemy, caps a frame's total at player+0x2274 = SHT+0x28 (Reimu 90), multiplies by player+0x2270 (1.0 in VS) and divides by 5 while the shooter's state is 0 or 2. Not ported: the 1.5x bonus within 48 px when status+0xb4>0, the /5 rule, the per-frame cap, and the /30 rule for spell flags 0x21 (not set by 522).",
+          "text": "Player shots register colliders (FUN_0051f320: size record+0xc along the shot angle, record+0x10 across, damage, hit interval 1, group 0). FUN_00509980 tests them against the enemy hurtbox from op 500 as a circle of radius w/2 (rectangle when flag 0x1000) via FUN_0051e670/FUN_004d44e0, skips an enemy that collider already hit within the same frame (the last-hit id +0xa8 is cleared every frame by FUN_0051fa30, so piercing colliders re-hit every frame), caps a frame's total at player+0x2274 = SHT+0x28 (Reimu 90), multiplies by player+0x2270 (1.0 in VS) and divides by 5 while the shooter's state is 0 or 2. Not ported: the 1.5x bonus within 48 px when status+0xb4>0, the /5 rule, the per-frame cap, and the /30 rule for spell flags 0x21 (not set by 522).",
           "sources": [
             "enemy_damage",
             "shot_collider_hits",

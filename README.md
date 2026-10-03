@@ -19,15 +19,15 @@ Right now the `th19` binary is an **ANM + stage viewer** used to validate the pi
 | Key | Action |
 | --- | --- |
 | Tab | cycle ANM viewer → stage (STD) viewer → game (stage + waves) |
-| Game mode | arrows = move, Z = shot, X = hold/release charge (all four tiers), B = debug EX on own field, Shift = focus, PgUp/PgDn = stage (`--game N` starts here) |
+| Game mode | arrows = move, Z = shot, X = hold/release charge (all four tiers), C = bomb (practice: the meter counts as full, no stock used; a press during the 8-frame hit window cancels the death), Shift = focus, PgUp/PgDn = stage (`--game N` starts here) |
 | G (game mode) | development godmode: neither player can be hit |
 | `--godmode`, `--boss-level N` | start with godmode on / player 1's boss level at N (development) |
 | 1–4 (game mode) | development: release player 1's charge instantly at tier 1 shot / 2 skill / 3 EX / 4 boss (falls back to EX while the opponent has a boss); Shift+1–4 makes player 2 release it, so EX/boss attacks land on player 1's field |
-| C (game mode) | development: clear bullets, enemies, bosses and attack scripts on both fields |
+| B (game mode) | development: clear bullets, enemies, bosses and attack scripts on both fields |
 | ← / → | previous / next `.anm` file, or stage |
 | ↑ / ↓ | step through individual scripts |
 | A | toggle "all scripts at once" |
-| C | toggle spawning at screen centre vs. (0,0) (viewer modes) |
+| C | toggle spawning at screen centre vs. (0,0) (ANM/stage viewer modes; the bomb in game mode) |
 | 0–9 | send interrupt N to every VM (except 1–4 in game mode) |
 | Space / `.` | pause / single-step a frame |
 | F | fast-forward ×8 |

@@ -8,7 +8,6 @@ pub struct DamageCircle {
     pub damage: i32,
     pub remaining: i32,
     pub growth: f32,
-    pub last_enemy: Option<i32>,
 }
 pub struct Skill {
     pub time: i32,
@@ -88,7 +87,6 @@ impl Skill {
                         damage: 4,
                         remaining: 1,
                         growth: 0.0,
-                        last_enemy: None,
                     });
                 }
             }
@@ -100,7 +98,6 @@ impl Skill {
                 damage: 1,
                 remaining: 24,
                 growth: 1.0,
-                last_enemy: None,
             });
         }
         self.time += 1;

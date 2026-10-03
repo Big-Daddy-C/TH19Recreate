@@ -14,6 +14,8 @@ use crate::enemy::{field_to_canvas, flag, Enemy};
 pub mod input {
     pub const SHOT: u32 = 1;
     pub const CHARGE: u32 = 2;
+    /// The bomb button (`+0x2a8 & 4` in FUN_00546320).
+    pub const BOMB: u32 = 4;
     pub const FOCUS: u32 = 8;
     pub const UP: u32 = 0x10;
     pub const DOWN: u32 = 0x20;
@@ -128,6 +130,9 @@ pub struct Player {
     pub charge_event: Option<crate::charge::Level>,
     pub last_charge: Option<crate::charge::Level>,
     pub skills: Vec<crate::skill::Skill>,
+    /// The running bomb (`BombInf`), at most one.
+    pub bomb: Option<crate::bomb::Bomb>,
+    bomb_prev: bool,
     pub cancel_circles: Vec<([f32;2], f32)>,
     damage_circles: Vec<crate::skill::DamageCircle>,
     skill_rng: u32,
@@ -192,7 +197,7 @@ impl Player {
             charge: crate::charge::Gauge::default(),
             meter: charge_settings.attack,
             free_charge: false, opponent_boss_active: false, charge_event: None, last_charge: None,
-            skills: Vec::new(), cancel_circles: Vec::new(), damage_circles: Vec::new(), skill_rng: 0x1cafe777,
+            skills: Vec::new(), bomb: None, bomb_prev: false, cancel_circles: Vec::new(), damage_circles: Vec::new(), skill_rng: 0x1cafe777,
             charge_timer: None,
             aura_anm: None,
             charge_vm: None,
@@ -405,17 +410,38 @@ impl Player {
             && self.state == State::Normal, self.pos, self.anm_file, world, lib, field);
         self.cancel_circles.clear();
         self.skills.retain_mut(|s| s.tick(world, field, &mut self.cancel_circles, &mut self.damage_circles));
+        // The bomb button (FUN_00546320 states 1 and 4): pressing it starts the bomb, and during
+        // the 8-frame hit window it also cancels the death (a deathbomb). Practice economy: no
+        // stock is used and the meter counts as full (FUN_004ed6d0/FUN_004ed7d0 spend one bomb
+        // and read the meter, both deferred).
+        let bomb_pressed = keys & input::BOMB != 0 && !self.bomb_prev;
+        self.bomb_prev = keys & input::BOMB != 0;
+        if bomb_pressed && self.bomb.is_none() && matches!(self.state, State::Normal | State::Hit) {
+            if self.state == State::Hit {
+                self.state = State::Normal;
+                self.state_time = 0;
+            }
+            self.bomb = Some(crate::bomb::Bomb::new(self.pos, crate::bomb::MAX_METER, self.anm_file, world, lib, field));
+        }
+        if let Some(b) = &mut self.bomb {
+            let protecting = b.protecting();
+            if !b.tick(self.pos, world, field, &mut self.cancel_circles, &mut self.damage_circles) {
+                self.bomb = None;
+            }
+            if protecting {
+                self.invuln = self.invuln.max(crate::bomb::PROTECTION);
+            }
+        }
         let mut damage = vec![(0i32, self.pos); enemies.len()];
         for circle in &mut self.damage_circles {
             for (index, enemy) in enemies.iter_mut().enumerate() {
                 let d = &mut enemy.data;
-                if d.delete || d.flags & flag::NO_HURTBOX != 0 || d.hurtbox[0] <= 0.0 || circle.last_enemy == Some(d.id) { continue; }
+                if d.delete || d.flags & flag::NO_HURTBOX != 0 || d.hurtbox[0] <= 0.0 { continue; }
                 let x = circle.pos[0].clamp(d.pos[0]-d.hurtbox[0]/2.0,d.pos[0]+d.hurtbox[0]/2.0);
                 let y = circle.pos[1].clamp(d.pos[1]-d.hurtbox[1]/2.0,d.pos[1]+d.hurtbox[1]/2.0);
                 if dist2(circle.pos,[x,y]) <= circle.radius.powi(2) {
                     damage[index].0 += circle.damage;
                     damage[index].1 = circle.pos;
-                    circle.last_enemy=Some(d.id);
                 }
             }
             circle.radius += circle.growth; circle.remaining -= 1;
@@ -903,7 +929,7 @@ fn combined_player_colliders_obey_original_damage_cap() {
     assert_eq!(i32::from_le_bytes(p.sht.params_raw[8..12].try_into().unwrap()),90);
     // Three skill colliders total 120 this frame; the original caps their sum at 90.
     p.damage_circles=(0..3).map(|_|crate::skill::DamageCircle {
-        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1,last_enemy:None
+        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1
     }).collect();
     let mut enemies=[crate::Enemy {
         threads:th_ecl::Threads::new(th_ecl::Context::new(th_ecl::SubRef{file:0,sub:0})),
@@ -913,7 +939,7 @@ fn combined_player_colliders_obey_original_damage_cap() {
     assert_eq!(enemies[0].data.hp,4910);
     enemies[0].data.hp=1500; enemies[0].data.spell_hp7=Some(10500);
     p.damage_circles=(0..3).map(|_|crate::skill::DamageCircle {
-        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1,last_enemy:None
+        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1
     }).collect();
     p.update(0,&mut enemies,&mut world,&lib,crate::FIELDS[0]);
     assert_eq!(enemies[0].data.spell_hp7,Some(10410));
@@ -921,7 +947,7 @@ fn combined_player_colliders_obey_original_damage_cap() {
     p.state=State::Entering;
     enemies[0].data.hp=5000;enemies[0].data.spell_hp7=None;
     p.damage_circles=(0..3).map(|_|crate::skill::DamageCircle {
-        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1,last_enemy:None
+        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1
     }).collect();
     p.update(0,&mut enemies,&mut world,&lib,crate::FIELDS[0]);
     assert_eq!(enemies[0].data.hp,4982,"Entering divides the capped 90 damage by five");
