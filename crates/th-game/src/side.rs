@@ -673,9 +673,13 @@ impl Side {
             vm,
         });
         // Chain: each kill adds its reward (ins_1032) to a timer capped at 60 frames.
-        st.chain_timer = (st.chain_timer + e.rewards.e).min(60);
-        st.chain += 1;
-        st.chain_max = st.chain_max.max(st.chain);
+        // ECL 1041 (enemy flag 0x20000000) skips this and the credit above as one block in
+        // FUN_0050c1f0 (FUN_0051d4e0 + FUN_00549780); the death effect, explosion and orbs stay.
+        if !e.suppress_kill_rewards {
+            st.chain_timer = (st.chain_timer + e.rewards.e).min(60);
+            st.chain += 1;
+            st.chain_max = st.chain_max.max(st.chain);
+        }
         // FUN_0050c1f0: the enemy's own item, then orbs for a chain beyond 5: 1 for 6..11,
         // 2 for 12..23 and 3 from 24.
         if (9..=14).contains(&e.item) {
