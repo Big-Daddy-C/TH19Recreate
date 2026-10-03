@@ -513,6 +513,34 @@
     "laser_cancel": {
       "address": "00530c60",
       "decompile_sha256": "459656c8a48e847660c2452400b0959af7c8e9bed422a6ac85e2bb9baf2f42cb"
+    },
+    "ghostctrl_credit_update": {
+      "address": "005450e0",
+      "decompile_sha256": "9a4eb8c30dfc04306fce1ffe566ad4d17601433d177a8aa0a022060764551cf1"
+    },
+    "dot_counter_add": {
+      "address": "00548bc0",
+      "decompile_sha256": "d7058687bf8cfb1209f58ff17d5d88b993b53d238f948acb83ed12ea440aa4a3"
+    },
+    "special_counter_add": {
+      "address": "00548d00",
+      "decompile_sha256": "8649c0894d40d30fe70d159e60bcf8c08efcbd32b30f59f65ea787d17488f2e4"
+    },
+    "reimu_update_special": {
+      "address": "0053ac80",
+      "decompile_sha256": "96cf1cf6ceeadae05bbdc2ccc68e61674ce74fa2f2ec41d4fd5a6d77ba6a1384"
+    },
+    "reimu_special_send": {
+      "address": "0053b190",
+      "decompile_sha256": "4b66a8b89576cbab439bb7e0a3f302dc69214deed7cb1a04f1c11c674d82fbb2"
+    },
+    "onmyo_init": {
+      "address": "0053bd80",
+      "decompile_sha256": "081639eb60dc474e0ed1959130c17bd66c25254261f6b87737edbd6bf639f0b5"
+    },
+    "onmyo_update": {
+      "address": "0053bc50",
+      "decompile_sha256": "8f5ee6d96e02829b27ee59d65ced586ab7102344588e03918226b3ef11dfb63a"
     }
   },
   "features": {
@@ -955,6 +983,7 @@
         "crates/th-game/src/side.rs",
         "crates/th-game/src/enemy.rs",
         "crates/th-game/src/bullet.rs",
+        "crates/th-game/src/reflect.rs",
         "crates/th-game/src/reflect.rs"
       ],
       "tests": [
@@ -1409,22 +1438,51 @@
           "evidence": "code_checked"
         },
         {
-          "text": "Terminology resolution (assumption, partly secondary evidence): 'special bullets' sent by the opponent are not a separate bullet class in the executable; Reimu's EX/boss attacks are already pl00.ecl subs routed by dispatch_charges, and the other cross-field attacks are (a) animal and pure spirits (GhostCtrl, credit counter +0x54 via 00548c60), (b) bullets cancelled by kill explosions, converted and re-fired on the other field (own type early, type 4 later) and (c) the automatic EX/boss sends above. The wiki's 'white dot' counters (cancel +15/30/36/45 by difficulty, kill formula A+min(3*hits,60)+E, minus 150+rank/2 per reflected dot) resemble the item accumulator of 00521c60 (+0xff8e8 rate added to +0xff8ec, an item of type 9/2 per 100) which creates collectible items through 00521d60, i.e. the item/meter economy the user deferred; that mapping was not verified and the wiki page was only read through a browser capture.",
+          "text": "Terminology (superseded by the next two findings): the wiki's reflected 'white dot bullets', 'special bullets' and 'pure spirits' are three GhostCtrl/ExtraAttack counters, not item or meter systems.",
           "sources": [
-            "item_drop_counter",
-            "item_create",
-            "bullet_cancel_drop"
+            "ghostctrl_credit_update",
+            "dot_counter_add",
+            "special_counter_add"
           ],
-          "evidence": "assumption"
+          "evidence": "code_checked"
+        },
+        {
+          "text": "White dot bullets: FUN_00548bc0 adds to the dot counter (GhostCtrl-credit object +0x50, cap 0x578 = 1400) and stores the position (+0x58); kills add min(3*chain,60) + time bonus (VS 0 / 30 / 110 / 200 after 3600 / 7200 / 10800 frames) + 40 (ordinary enemy) or + 20 (spirit) (FUN_0051d4e0), each bullet cancelled by a kill explosion adds 30 times the difficulty rate (FUN_0051c8c0). FUN_005450e0 (GhostCtrl update): while the counter >= 150 - int(pressure/200*100) it subtracts that threshold and sends one flying bullet (FUN_0051c650) of type 1, or type 4 with probability 0 / 1/5 / 2/5 / 1/2 by round time (rand%5 > 3, rand%5 > 2, rand%6 > 2), random colour (rand & 15), carried speed 1.0, from the last position + a random point within 24 to x in +-148, y 0..16 on the opponent's field (same 60..159 frame Hermite flight and arrival as converted bullets). Matches the wiki's 'reflecting white dots' (cancel 15/30/36/45 = 30 x difficulty rate; time bonus 0/30/110/200 on VS; drain 150 + rank term). Ported (Normal rate 1.0, pressure 0); the type-4 look is the white round bullet of table type 4 (unverified in game).",
+          "sources": [
+            "ghostctrl_credit_update",
+            "dot_counter_add",
+            "kill_explosion_create",
+            "explosion_update"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Special bullets are character-specific: FUN_00548d00 adds to ExtraAttackInf +0x1c (DAT_005d1a98[side]) and stores the position (+0x1d4); spirit kills add time bonus (VS 0 / 20 / 40 / 100) + (N*5+5)*2 for a spirit reflected N times, other kinds 50, each cancelled bullet adds 1 (+ pressure term). Each character's update (Reimu FUN_0053ac80, vtable 0x5a8a18 +0x2c; others FUN_0053cbe0, 0053df80, 0053eb60, 005402e0, 00541330 ...) subtracts the threshold table 0x59d518 {100,90,90,80} by difficulty (Normal 90 assumed) while the counter is above it and fewer than the limit (+0x38: 20, doubled at 3600 and 7200 frames, 999 from 10800; +0x3c counts live ones) are out, then calls character vtable +0x28 (Reimu FUN_0053b190 -> EXOnmyoInf, vtable 0x5a8ad4). EXOnmyoInf (init 0053bd80, update 0053bc50) flies like the converted bullets (bullet type 44 colour 1 = the red yin-yang, scale 0.8, 60..159 frames, from the kill position to x +-160, y 0..60) and on arrival spawns pl00.ecl ExtraAttack00 (hp 200) at the target, which fires one bouncing type-44 yin-yang bullet (rank = sender EX level). Ported for Reimu only; the other characters' special bullets are not.",
+          "sources": [
+            "special_counter_add",
+            "reimu_update_special",
+            "reimu_special_send",
+            "onmyo_init",
+            "onmyo_update",
+            "ghostctrl_credit_update"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "User screenshot (Screenshot 2026-10-03 021435.png) shows red yin-yang orbs arriving on the player's field like ordinary sent bullets; they are bullet type 44 colour 1 (table 0x5c6650, script 327, radius 10). Fixed spirit kill credit: a spirit kill adds the special time bonus + 5 to the pure spirit credit (previously + 5 only).",
+          "sources": [],
+          "evidence": "user_observation"
         }
       ],
       "checks": {
         "automated": "2026-10-03: workspace tests pass (56) incl. animal travel-direction rotation, charge-vs-quelled-spirit kill within 20 frames, explosion per-frame damage. Original-game parity not assessed.",
         "original_game_parity": "not_run",
         "visual": "data/reference/spirits-and-impacts.png frame1600 inspected: naturally chain-earned pure spirit visible on opponent field. Four-type behavior checked with original ECL assets; full footage comparison unrun.",
-        "automated_auto": "2026-10-03: workspace 60 tests incl. 12-spirit chain trigger arithmetic, cooldown/penalty/drain rules, automatic EX/boss send routing without level raise."
+        "automated_auto": "2026-10-03: workspace 60 tests incl. 12-spirit chain trigger arithmetic, cooldown/penalty/drain rules, automatic EX/boss send routing without level raise.",
+        "automated_special": "2026-10-03: workspace 65 tests incl. dot counter threshold 150 sends two bullets that arrive, special counter 90 sends two ExtraAttack00 yin-yang orbs, time-based type/bonus/limit tables."
       },
       "next": [
+        "Port the other characters' special bullets (FUN_0053cbe0 etc.), difficulty-dependent thresholds/rates and the pressure term; compare dot colours and special flight against footage.",
         "Port match-config pressure initial value/cap/interval and its escalation, ability/reward modifiers and replay RNG.",
         "Port remaining spirit-specific ECL318 and verify chain explosion visuals and warnings against original footage."
       ]

@@ -118,6 +118,12 @@ pub struct SideState {
     pub pending_reflects: Vec<crate::reflect::Pending>,
     /// Converted bullets that arrived this tick and fire on this side.
     pub arrived_reflects: Vec<crate::reflect::Arrival>,
+    /// White dot counter (FUN_00548bc0, max 1400) and special bullet counter (FUN_00548d00).
+    pub dot_counter: i32,
+    pub special_counter: i32,
+    /// Where the last kill or cancel happened (the origin of what they send).
+    pub last_credit_pos: [f32; 2],
+    pub last_special_pos: [f32; 2],
     /// Development rain (frames left): bullets and spirits fall on this field.
     pub rain: i32,
     pub sent_spirits_pending: usize,
@@ -207,6 +213,18 @@ impl SideState {
         self.scope_circle.is_some_and(|(centre,r)|
             (pos[0]-centre[0]).powi(2)+(pos[1]-centre[1]).powi(2) < r*r+radius*radius)
     }
+    /// `FUN_00548bc0`: feed the white dot counter (cap 1400) and remember where it happened.
+    pub fn add_dots(&mut self, n: i32, pos: [f32; 2]) {
+        self.dot_counter = (self.dot_counter + n).clamp(0, 1400);
+        self.last_credit_pos = pos;
+    }
+
+    /// `FUN_00548d00`: feed the special bullet counter.
+    pub fn add_special(&mut self, n: i32, pos: [f32; 2]) {
+        self.special_counter += n;
+        self.last_special_pos = pos;
+    }
+
     pub fn rand(&mut self) -> u32 {
         // APPROX: the game uses its own replay RNG; any uniform generator plays the same.
         let mut x = self.rng;
@@ -336,7 +354,7 @@ impl Side {
                 explosions: Vec::new(),
                 scope_circle: None,
                 spirit_credit: 0, spirit_origin: [0.0;2], spirit_pressure: 0, spirit_frames: 0,
-                outgoing_spirits: Vec::new(), pending_spirits: Vec::new(), outgoing_reflects: Vec::new(), pending_reflects: Vec::new(), arrived_reflects: Vec::new(), rain: 0,
+                outgoing_spirits: Vec::new(), pending_spirits: Vec::new(), outgoing_reflects: Vec::new(), pending_reflects: Vec::new(), arrived_reflects: Vec::new(), rain: 0, dot_counter: 0, special_counter: 0, last_credit_pos: [0.0; 2], last_special_pos: [0.0; 2],
                 sent_spirits_pending: 0,
             },
             enemies: Vec::new(),
@@ -391,7 +409,10 @@ impl Side {
         for (kind, color, speed, origin) in cancelled {
             let roll = st.rand();
             let kind = crate::reflect::converted_kind(kind, st.spirit_frames, roll);
-            st.outgoing_reflects.push(crate::reflect::Request { kind, color, speed, origin });
+            st.outgoing_reflects.push(crate::reflect::Request { kind, color, speed, origin, target: None, special_rank: None });
+            // FUN_00548bc0(30) and FUN_00548d00(1) per cancelled bullet.
+            st.add_dots(30, origin);
+            st.add_special(1, origin);
             // FUN_00549780(0): one more chain hit, no extra chain time.
             if st.chain > 9 { st.auto.gain(1); }
             st.chain += 1;
@@ -462,6 +483,13 @@ impl Side {
         });
         // Converted bullets that arrived fire on this field (FUN_0051bd50).
         for a in std::mem::take(&mut st.arrived_reflects) {
+            if let Some(rank) = a.special {
+                // EXOnmyoInf: the flying yin-yang becomes ExtraAttack00 (FUN_0053bc50).
+                st.incoming_extra_level = rank.clamp(0, 7) as u8;
+                st.request(SpawnRequest { id: 0, difficulty: 0, sub: "ExtraAttack00".into(), pos: a.pos, hp: 200, score: 0,
+                    item: -1, mirrored: false, ivars: [0; 4], fvars: [0.0; 8] });
+                continue;
+            }
             let et = bullet::Et { sprite: a.kind, color: a.color, absolute: true, angle: [a.angle, 0.0],
                 speed: [a.speed, 0.0], count: [1, 1], aim: 1, ..bullet::Et::default() };
             bullet::fire(&et, a.pos, &mut ctx, &mut st.bullets);
@@ -482,10 +510,20 @@ impl Side {
             let distance = (e.pos[0]-st.player_pos[0]).powi(2)+(e.pos[1]-st.player_pos[1]).powi(2);
             st.outgoing_spirits.push(crate::spirit::Request {
                 kind:crate::spirit::Kind::from_distance(distance), origin:e.pos,level:e.ivars[2] });
-            st.spirit_credit = (st.spirit_credit+5).min(700);
+            // FUN_0051d4e0 case 1: dots min(3*chain,60) + time bonus + 20; special bullets
+            // time bonus + (N*5+5)*2 for a spirit reflected N times; spirit credit bonus + 5.
+            let frames = st.spirit_frames;
+            let n = (e.ivars[2] - 1).max(0);
+            st.add_dots((3 * st.chain).min(60) + crate::reflect::dot_time_bonus(frames) + 20, e.pos);
+            st.add_special(crate::reflect::special_time_bonus(frames) + (n * 5 + 5) * 2, e.pos);
+            st.spirit_credit = (st.spirit_credit + crate::reflect::special_time_bonus(frames) + 5).min(700);
             if st.chain > 4 { st.auto.gain(15); }
-        } else if st.chain > 9 {
-            st.spirit_credit = (st.spirit_credit+30).min(700);
+        } else {
+            // Case 0: dots min(3*chain,60) + time bonus + 40.
+            st.add_dots((3 * st.chain).min(60) + crate::reflect::dot_time_bonus(st.spirit_frames) + 40, e.pos);
+            if st.chain > 9 {
+                st.spirit_credit = (st.spirit_credit+30).min(700);
+            }
         }
         // The effect is turned to face away from the shot that landed the kill.
         let angle = match e.last_hit {
@@ -677,6 +715,37 @@ pub fn dispatch_charges(sides: &mut [Side]) {
             sides[1 - sender].st.request(script_request("BossAttack", [0.0, 0.0]));
         }
     }
+    // The dot and special-bullet counters send attacks (FUN_005450e0 and Reimu's FUN_0053ac80).
+    for sender in 0..2 {
+        let frames = sides[sender].st.spirit_frames;
+        let mut active = sides[1 - sender].enemies.iter().filter(|e| e.data.sub == "ExtraAttack00").count()
+            + sides[1 - sender].st.pending_reflects.iter().filter(|p| p.is_special()).count();
+        let rank = sides[sender].st.extra_level as i32;
+        let st = &mut sides[sender].st;
+        // White dots: threshold 150 minus the pressure term, one bullet each.
+        let threshold = (150 - (st.spirit_pressure as f32 / 200.0 * 100.0) as i32).max(1);
+        while st.dot_counter >= threshold {
+            st.dot_counter -= threshold;
+            let roll = st.rand();
+            let (a, r) = (st.randf() * std::f32::consts::TAU, st.randf() * 24.0);
+            let o = st.last_credit_pos;
+            let origin = [o[0] + a.cos() * r, o[1] + a.sin() * r];
+            let target = [st.randf2() * 148.0, st.randf() * 16.0];
+            let color = (st.rand() & 0xf) as i32;
+            st.outgoing_reflects.push(crate::reflect::Request { kind: crate::reflect::dot_kind(frames, roll), color,
+                speed: 0.5, origin, target: Some(target), special_rank: None });
+        }
+        // Special bullets: threshold 100/90/90/80 by difficulty (Normal assumed), limited.
+        const THRESHOLD: i32 = 90;
+        while st.special_counter >= THRESHOLD {
+            st.special_counter -= THRESHOLD;
+            if active >= crate::reflect::special_limit(frames) { break; }
+            active += 1;
+            let target = [st.randf2() * 160.0, st.randf() * 60.0];
+            st.outgoing_reflects.push(crate::reflect::Request { kind: 44, color: 1, speed: 0.0,
+                origin: st.last_special_pos, target: Some(target), special_rank: Some(rank) });
+        }
+    }
     // Bullets cancelled by a kill explosion fly to the opponent's field and fire there.
     for sender in 0..2 {
         let field = sides[sender].st.field;
@@ -751,6 +820,7 @@ impl Side {
                 speed: 2.0 + st.randf() * 1.5,
                 angle: std::f32::consts::FRAC_PI_2 + st.randf2() * 0.15,
                 pos: [x, 0.0],
+                special: None,
             };
             st.arrived_reflects.push(a);
         }
@@ -771,6 +841,8 @@ impl Side {
         }
         self.st.spawn.clear();
         self.st.rain = 0;
+        self.st.dot_counter = 0;
+        self.st.special_counter = 0;
         self.st.outgoing_reflects.clear();
         self.st.arrived_reflects.clear();
         for r in self.st.pending_reflects.drain(..) { r.delete(world); }

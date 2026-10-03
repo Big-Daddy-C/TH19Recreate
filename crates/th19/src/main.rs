@@ -231,6 +231,15 @@ impl Viewer {
                 self.debug_extra_attack();
             }
             self.debug_spawn();
+            // Development: `TH19_DEBUG_SPECIAL=frame` loads player 2's dot and special counters.
+            if std::env::var("TH19_DEBUG_SPECIAL").ok().and_then(|v| v.parse::<u64>().ok()) == Some(self.frames) {
+                if let Some(g) = &mut self.game {
+                    g.sides[1].st.dot_counter = 750;
+                    g.sides[1].st.special_counter = 360;
+                    g.sides[1].st.last_credit_pos = [0.0, 120.0];
+                    g.sides[1].st.last_special_pos = [0.0, 120.0];
+                }
+            }
             if std::env::var_os("TH19_DEBUG_FOCUS").is_some() { self.held.insert(KeyCode::ShiftLeft); }
             if std::env::var("TH19_DEBUG_RAIN").ok().and_then(|v| v.parse::<u64>().ok()) == Some(self.frames) {
                 if let Some(g) = &mut self.game { g.sides[1].start_rain(); }

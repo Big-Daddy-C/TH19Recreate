@@ -960,3 +960,45 @@ fn rain_drops_bullets_and_spirits_on_the_chosen_field() {
     assert!(bullets > 20 && spirits >= 1, "bullets {bullets}, spirits {spirits}");
     assert!(g.sides[0].st.bullets.is_empty() && g.sides[0].enemies.iter().all(|e| !e.data.sub.starts_with("Ghost")));
 }
+
+/// FUN_005450e0 / FUN_0053ac80: the dot counter (threshold 150) sends white-dot bullets of type 1
+/// (type 4 later) with random colours; the special counter (threshold 90 on Normal) sends Reimu's
+/// special bullet, a flying red yin-yang that becomes ExtraAttack00 on the other field.
+#[test]
+fn dot_and_special_counters_send_bullets_and_yin_yang_orbs() {
+    let Some(mut g) = setup() else { return };
+    g.sides[1].st.dot_counter = 310; // two dots
+    g.sides[1].st.last_credit_pos = [0.0, 100.0];
+    let before = g.sides[0].st.bullets.len();
+    let mut peak = 0;
+    for _ in 0..200 {
+        g.tick([0; 2]);
+        peak = peak.max(g.sides[0].st.bullets.len());
+    }
+    assert!(peak >= before + 2, "two dots must arrive on the opponent's field (peak {peak})");
+    assert!(g.sides[1].st.dot_counter < 150);
+
+    g.sides[1].st.special_counter = 200; // two special bullets (90 each)
+    g.sides[1].st.last_special_pos = [0.0, 100.0];
+    assert!(g.sides[0].enemies.iter().all(|e| e.data.sub != "ExtraAttack00"));
+    // ExtraAttack00 fires one yin-yang bullet (type 44) and ends.
+    let mut orbs = 0;
+    for _ in 0..200 {
+        g.tick([0; 2]);
+        orbs = orbs.max(g.sides[0].st.bullets.iter().filter(|b| b.kind == 44).count());
+    }
+    assert_eq!(orbs, 2, "each special bullet becomes an ExtraAttack00 yin-yang orb");
+    assert_eq!(g.sides[1].st.special_counter, 20);
+}
+
+#[test]
+fn dot_types_follow_the_round_time() {
+    use th_game::reflect::{dot_kind, dot_time_bonus, special_limit, special_time_bonus};
+    assert!((0..100).all(|r| dot_kind(100, r) == 1));
+    assert_eq!((0..5).filter(|&r| dot_kind(4000, r) == 4).count(), 1);
+    assert_eq!((0..5).filter(|&r| dot_kind(8000, r) == 4).count(), 2);
+    assert_eq!((0..6).filter(|&r| dot_kind(11000, r) == 4).count(), 3);
+    assert_eq!([dot_time_bonus(0), dot_time_bonus(4000), dot_time_bonus(8000), dot_time_bonus(11000)], [0, 30, 110, 200]);
+    assert_eq!([special_time_bonus(0), special_time_bonus(4000), special_time_bonus(8000), special_time_bonus(11000)], [0, 20, 40, 100]);
+    assert_eq!([special_limit(0), special_limit(4000), special_limit(8000), special_limit(11000)], [20, 40, 80, 999]);
+}

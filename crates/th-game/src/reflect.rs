@@ -14,6 +14,12 @@ pub struct Request {
     pub speed: f32,
     /// Where it was, in the sender's field coordinates.
     pub origin: [f32; 2],
+    /// Where it lands on the receiving field; `None` picks the explosion-cancel rule (x near
+    /// where the bullet was, y in 0..32).
+    pub target: Option<[f32; 2]>,
+    /// A character's special bullet: on arrival it becomes `ExtraAttack00` (Reimu: a yin-yang
+    /// orb, `EXOnmyoInf`) at the sender's EX rank instead of an ordinary bullet.
+    pub special_rank: Option<i32>,
 }
 
 /// The type the converted bullet takes (`FUN_0051c8c0`): the cancelled bullet's own type
@@ -39,6 +45,7 @@ pub struct Pending {
     start: [f32; 2],
     curve: Interp<2>,
     vm: Option<VmId>,
+    special_rank: Option<i32>,
 }
 
 /// A converted bullet reaching the opponent's field.
@@ -48,9 +55,14 @@ pub struct Arrival {
     pub speed: f32,
     pub angle: f32,
     pub pos: [f32; 2],
+    /// Set for a special bullet: the EX rank its `ExtraAttack00` plays at.
+    pub special: Option<i32>,
 }
 
 impl Pending {
+    /// Whether this is a special bullet (counts against the sender's special limit).
+    pub fn is_special(&self) -> bool { self.special_rank.is_some() }
+
     pub fn delete(self, world: &mut World) {
         if let Some(id) = self.vm { world.delete(id); }
     }
@@ -59,12 +71,13 @@ impl Pending {
     /// the receiving field (x within 16 of where the bullet was, y in 0..32).
     pub fn new(req: Request, source_field: [f32; 4], receiver: &mut SideState) -> Self {
         let delay = (receiver.rand() & 0xffff) as i32 % 100 + 60;
-        let target = [req.origin[0] + receiver.randf2() * 16.0, receiver.randf() * 32.0];
+        let jitter = [receiver.randf2() * 16.0, receiver.randf() * 32.0];
+        let target = req.target.unwrap_or([req.origin[0] + jitter[0], jitter[1]]);
         let start = field_to_canvas(source_field, req.origin);
         let end = field_to_canvas(receiver.field, target);
         let mut curve = Interp::default();
         curve.start_bezier(start, [receiver.randf2() * 100.0, -400.0], end, [receiver.randf2() * 100.0, 100.0], delay);
-        Self { kind: req.kind, color: req.color, speed: (req.speed + 0.5).min(6.0), target, delay, time: 0, start, curve, vm: None }
+        Self { kind: req.kind, color: req.color, speed: (req.speed + 0.5).min(6.0), target, delay, time: 0, start, curve, vm: None, special_rank: req.special_rank }
     }
 
     /// One frame: the bullet's sprite (0.8 scale) flies; on arrival it becomes a bullet
@@ -88,6 +101,9 @@ impl Pending {
             return None;
         }
         if let Some(id) = self.vm.take() { world.delete(id); }
+        if self.special_rank.is_some() {
+            return Some(Arrival { kind: self.kind, color: self.color, speed: 0.0, angle: 0.0, pos: self.target, special: self.special_rank });
+        }
         // APPROX: FUN_00404c90's result is hidden in the decompile; the side fans are read as
         // a random angle in the quarter turn that points inward.
         let angle = if self.target[0].abs() >= 64.0 {
@@ -97,6 +113,35 @@ impl Pending {
             FRAC_PI_2 + (receiver.randf() * 2.0 - 1.0) * FRAC_PI_6
         };
         let speed = receiver.randf() * 0.2 + self.speed + receiver.spirit_pressure as f32 / 200.0 * 2.0;
-        Some(Arrival { kind: self.kind, color: self.color, speed, angle, pos: self.target })
+        Some(Arrival { kind: self.kind, color: self.color, speed, angle, pos: self.target, special: None })
     }
+}
+
+/// White dot bullets (type 1, or type 4 later) come from the dot counter (`FUN_00548bc0`, GhostCtrl
+/// +0x50, `FUN_005450e0`): the type is 4 with probability 0 / 1/5 / 2/5 / 1/2 as the round passes
+/// 3600, 7200 and 10800 frames.
+pub fn dot_kind(frames: i32, roll: u32) -> i32 {
+    let white = match frames {
+        ..3600 => false,
+        3600..7200 => roll % 5 > 3,
+        7200..10800 => roll % 5 > 2,
+        _ => roll % 6 > 2,
+    };
+    if white { 4 } else { 1 }
+}
+
+/// Counter gain per kill from the round time (VS values of FUN_0051d4e0): dots 0/30/110/200.
+pub fn dot_time_bonus(frames: i32) -> i32 {
+    match frames { ..3600 => 0, 3600..7200 => 30, 7200..10800 => 110, _ => 200 }
+}
+
+/// Special-bullet gain per spirit kill from the round time (VS): 0/20/40/100.
+pub fn special_time_bonus(frames: i32) -> i32 {
+    match frames { ..3600 => 0, 3600..7200 => 20, 7200..10800 => 40, _ => 100 }
+}
+
+/// How many special bullets one side may have on the other (ExtraAttackInf +0x38): 20, doubling
+/// at 3600 and 7200 frames, unlimited from 10800.
+pub fn special_limit(frames: i32) -> usize {
+    match frames { ..3600 => 20, 3600..7200 => 40, 7200..10800 => 80, _ => 999 }
 }
