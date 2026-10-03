@@ -546,6 +546,7 @@ impl EnemyHost<'_> {
         let f = |s: &mut Self, ctx: &Context, n: usize| ctx.float_arg(ins, n, s);
         if op == 613 {
             self.st.cancel_bullets = true;
+            self.st.cancel_lasers(crate::laser::CancelArea::All, false, self.world, self.lib);
             return;
         }
         if matches!(op,615|616) {
@@ -554,6 +555,7 @@ impl EnemyHost<'_> {
             for b in &mut self.st.bullets {
                 if b.within_cancel(self.e.pos,r,self.world,self.lib) { b.cancel(); }
             }
+            self.st.cancel_lasers(crate::laser::CancelArea::Circle { pos: self.e.pos, radius: r }, false, self.world, self.lib);
             return;
         }
         let et = i(self, ctx, 0);
@@ -626,9 +628,10 @@ impl EnemyHost<'_> {
             // Laser parameters (cases 0x8d, 0x8e, 0x78): lengths and width, the four phase times
             // and flags, sound ids.
             700 => {
-                let (a, b, _, w) = (f(self, ctx, 1), f(self, ctx, 2), f(self, ctx, 3), f(self, ctx, 4));
+                let (a, b, z, w) = (f(self, ctx, 1), f(self, ctx, 2), f(self, ctx, 3), f(self, ctx, 4));
                 let l = &mut self.e.ets[slot].laser;
                 l.len = [a, b];
+                l.f3 = z;
                 l.width = w;
             }
             701 => {
@@ -642,13 +645,17 @@ impl EnemyHost<'_> {
                 let (a, b) = (i(self, ctx, 1), i(self, ctx, 2));
                 self.e.ets[slot].laser.sound = [a, b];
             }
-            // Infinite laser (case 0x90) at the ET's origin along its first angle.
-            703 => {
+            // Line laser (case 0x8f, type 0) or infinite laser (case 0x90, type 1) at the ET's
+            // origin along its first angle.
+            702 | 703 => {
                 let e = &self.e.ets[slot];
-                let origin =
+                let mut origin =
                     if e.absolute { e.offset } else { [self.e.pos[0] + e.offset[0], self.e.pos[1] + e.offset[1]] };
                 if let Some(anm) = self.st.anm_files[0] {
-                    let laser = crate::laser::Laser::new(origin, e.angle[0], e.speed[0], e.sprite, e.color, &e.laser,
+                    origin[0] += e.angle[0].cos() * e.distance;
+                    origin[1] += e.angle[0].sin() * e.distance;
+                    let kind = if op == 702 { crate::laser::Kind::Line } else { crate::laser::Kind::Infinite };
+                    let laser = crate::laser::Laser::new(kind, origin, e.angle[0], e.speed[0], e.sprite, e.color, &e.laser,
                         &self.st.bullet_types, anm, self.world, self.lib, self.st.field);
                     self.st.lasers.push(laser);
                 }
@@ -969,7 +976,10 @@ impl EnemyHost<'_> {
                 let v = f!(1 + d);
                 ctx.set_float_var(ins, 0, v, self);
             }
-            600..=620 | 700 | 701 | 703 => self.et_op(ctx, ins),
+            600..=620 | 700 | 701 | 702 | 703 => self.et_op(ctx, ins),
+            // Marisa's spell clears the optional per-frame enemy callback. Table 005994f8
+            // entry zero is null; nonzero callback IDs remain explicitly unsupported.
+            624 if i!(0) == 0 => {},
             621 => {
                 let radius = f!(0);
                 let color = i!(1) as u32;
@@ -978,6 +988,15 @@ impl EnemyHost<'_> {
             1007 | 1034 | 1035 => {
                 let rank=match op {1034=>self.st.incoming_extra_level,1035=>self.st.incoming_boss_level,_=>i!(0).clamp(0,7) as u8};
                 self.e.script_rank=Some(rank); ctx.rank_bit=1<<rank;
+            }
+            // Ray to the field's edge (case 0x6d): from (arg 2, arg 3) along the angle in arg 4,
+            // where it meets the field rectangle (x +-148, y 0..448); the point goes to the
+            // variables named by args 0 and 1 (FUN_004d3140).
+            569 => {
+                let (x, y, a) = (f!(2), f!(3), f!(4));
+                let p = crate::laser::ray_to_field_edge([x, y], a);
+                ctx.set_float_var(ins, 0, p[0], self);
+                ctx.set_float_var(ins, 1, p[1], self);
             }
             1023 => self.st.wave_param = i!(0),
             // FUN_004fecc0 case b4: set internal type, clear disabled bit 0x80000.

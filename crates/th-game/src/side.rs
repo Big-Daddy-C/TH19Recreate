@@ -264,6 +264,12 @@ impl SideState {
         self.last_special_pos = pos;
     }
 
+    pub fn cancel_lasers(&mut self, area: crate::laser::CancelArea, respect_invuln: bool, world: &mut World, lib: &AnmLibrary) {
+        let Some(anm) = self.anm_files[0] else { return };
+        let mut ctx = crate::laser::CancelContext { world, lib, types: &self.bullet_types, anm, field: self.field };
+        crate::laser::cancel_lasers(&mut self.lasers, area, respect_invuln, &mut ctx);
+    }
+
     pub fn rand(&mut self) -> u32 {
         // APPROX: the game uses its own replay RNG; any uniform generator plays the same.
         let mut x = self.rng;
@@ -814,13 +820,21 @@ impl Side {
     /// `FUN_0052b250`).
     fn update_lasers(&mut self, world: &mut World, lib: &AnmLibrary) {
         let field = self.st.field;
+        // The player's circle/column clearing also visits the laser manager. Script clears
+        // use the same geometry with a separate immunity policy (00530c60/005303f0).
+        let mut areas = Vec::new();
+        if let Some(p) = &self.player {
+            areas.extend(p.cancel_circles.iter().map(|&(pos,radius)| crate::laser::CancelArea::Circle {pos,radius}));
+            areas.extend(p.cancel_columns.iter().map(|&(x,half_width)| crate::laser::CancelArea::Column {x,half_width}));
+        }
+        for area in areas { self.st.cancel_lasers(area, true, world, lib); }
         let mut lasers = std::mem::take(&mut self.st.lasers);
         let mut hit = false;
         let mut grazed = None;
         let player = self.player.as_ref().map(|p| (p.pos, p.hitbox_radius().max(3.0), p.hitbox_radius() > 0.0));
         lasers.retain_mut(|l| {
             let alive = l.update(world, field);
-            if let Some((pos, radius, vulnerable)) = player {
+            if let Some((pos, radius, vulnerable)) = player.filter(|_| alive) {
                 match l.contact(pos, radius) {
                     crate::laser::Contact::Hit if vulnerable => hit = true,
                     crate::laser::Contact::Hit | crate::laser::Contact::Graze if l.graze_tick() => grazed = Some(pos),
@@ -1086,6 +1100,7 @@ impl Side {
                 world.delete(id);
             }
         }
+        for mut laser in self.st.lasers.drain(..) { laser.delete(world); }
         for x in self.st.explosions.drain(..) {
             if let Some(id) = x.vm {
                 world.delete(id);

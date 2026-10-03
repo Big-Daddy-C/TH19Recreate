@@ -1254,27 +1254,86 @@ fn lasers_hit_and_graze_the_player() {
     let pos = g.sides[0].player.as_ref().unwrap().pos;
     let et = LaserEt { len: [512.0, 512.0], width: 14.0, times: [3, 3, 40, 3], ..Default::default() };
     // One 20 px to the side (grazed), then one on the player.
-    let side_laser = Laser::new([pos[0] + 20.0, 440.0], -std::f32::consts::FRAC_PI_2, 8.0, 38, 6, &et, &types, anm, &mut g.world, &g.lib, field);
+    let side_laser = Laser::new(th_game::laser::Kind::Infinite, [pos[0] + 20.0, 440.0], -std::f32::consts::FRAC_PI_2, 8.0, 38, 6, &et, &types, anm, &mut g.world, &g.lib, field);
     g.sides[0].st.lasers.push(side_laser);
     for _ in 0..12 { g.tick([0; 2]); }
     assert!(g.sides[0].st.graze >= 1, "grazed: {}", g.sides[0].st.graze);
     assert!(!g.sides[0].st.items.list.is_empty() || g.sides[0].player.as_ref().unwrap().meter > 0, "orbs from the graze");
     assert_eq!(g.sides[0].player.as_ref().unwrap().barrier, th_game::player::Barrier::Up);
-    let on_player = Laser::new([pos[0], 440.0], -std::f32::consts::FRAC_PI_2, 8.0, 38, 6, &et, &types, anm, &mut g.world, &g.lib, field);
+    let on_player = Laser::new(th_game::laser::Kind::Infinite, [pos[0], 440.0], -std::f32::consts::FRAC_PI_2, 8.0, 38, 6, &et, &types, anm, &mut g.world, &g.lib, field);
     g.sides[0].st.lasers.push(on_player);
     for _ in 0..12 { g.tick([0; 2]); }
     assert_eq!(g.sides[0].player.as_ref().unwrap().barrier, th_game::player::Barrier::Broken, "the beam hit");
 }
 
 #[test]
-fn zz_marisa_boss_probe() {
-    let Some(mut g) = setup() else { return };
-    for level in [1u8, 3, 5, 7] {
+fn all_marisa_boss_levels_execute_their_laser_pattern_and_clear() {
+    use th_game::laser::Kind;
+    for level in 0..8u8 {
+        let Some(mut g) = setup() else { return };
         send_marisa_attack(&mut g, 0, "BossAttack");
         g.sides[0].st.incoming_boss_level = level;
-        for _ in 0..1500 { g.tick([0; 2]); }
-        eprintln!("level {level}: unknown {:?} lasers {} enemies {}", g.sides[0].st.unknown_ops, g.sides[0].st.lasers.len(), g.sides[0].enemies.len());
+        let expected = if matches!(level, 2 | 3) { Kind::Infinite } else { Kind::Line };
+        let mut seen = false;
+        for _ in 0..1000 {
+            g.tick([0; 2]);
+            seen |= g.sides[0].st.lasers.iter().any(|l| l.kind == expected && l.len > 16.0);
+            assert!(g.sides[0].st.lasers.iter().all(|l| l.pos.iter().all(|p| p.is_finite()) && l.angle.is_finite()));
+        }
+        assert!(seen, "rank {level} must fire {expected:?} from the original pl01.ecl branch");
+        for op in [569, 624, 700, 701, 702, 703] {
+            assert!(!g.sides[0].st.unknown_ops.contains_key(&op), "rank {level}: opcode {op}");
+        }
+        let vms: Vec<_> = g.sides[0].st.lasers.iter().filter_map(|l| l.vm()).collect();
+        g.sides[0].dev_clear(&mut g.world);
+        assert!(g.sides[0].st.lasers.is_empty());
+        assert!(vms.into_iter().all(|id| g.world.get(id).is_none()), "clear removes the beam visuals too");
     }
+}
+
+#[test]
+fn laser_cancellation_splits_survivors_and_respects_immunity() {
+    use th_game::laser::{CancelArea, Kind, Laser, LaserEt};
+    let Some(mut g) = setup() else { return };
+    let st = &mut g.sides[0].st;
+    let et = LaserEt { len: [160.0; 2], width: 16.0, ..Default::default() };
+    let mut l = Laser::new(Kind::Line, [0.0, 100.0], 0.0, 4.0, 38, 6, &et,
+        &st.bullet_types, st.anm_files[0].unwrap(), &mut g.world, &g.lib, st.field);
+    l.invuln = 20;
+    st.lasers.push(l);
+    let area = CancelArea::Circle { pos: [40.0, 100.0], radius: 7.0 };
+    st.cancel_lasers(area, true, &mut g.world, &g.lib);
+    assert_eq!(st.lasers.len(), 1);
+    assert_eq!(st.lasers[0].len, 160.0, "player clearing respects immunity");
+    st.cancel_lasers(area, false, &mut g.world, &g.lib);
+    assert_eq!(st.lasers.len(), 2, "script clearing removes only the covered 16-pixel section");
+    assert_eq!(st.lasers[0].pos, [0.0, 100.0]);
+    assert_eq!(st.lasers[0].len, 32.0);
+    assert_eq!(st.lasers[1].pos, [48.0, 100.0]);
+    assert_eq!(st.lasers[1].len, 112.0);
+    assert!(st.lasers.iter_mut().all(|l| l.contact([40.0, 100.0], 1.0) != th_game::laser::Contact::Hit));
+    st.cancel_lasers(CancelArea::All, false, &mut g.world, &g.lib);
+    assert!(st.lasers.is_empty());
+}
+
+#[test]
+fn bomb_column_cuts_infinite_lasers_into_travelling_remainders() {
+    use th_game::laser::{Kind, Laser, LaserEt};
+    let Some(mut g) = setup() else { return };
+    use_marisa(&mut g, 0);
+    g.tick([input::BOMB, 0]);
+    let st = &mut g.sides[0].st;
+    let et = LaserEt { len: [256.0; 2], width: 14.0, times: [1,1,200,10], ..Default::default() };
+    st.lasers.push(Laser::new(Kind::Infinite, [-128.0, 100.0], 0.0, 8.0, 38, 6, &et,
+        &st.bullet_types, st.anm_files[0].unwrap(), &mut g.world, &g.lib, st.field));
+    let mut saw_remainder = false;
+    for _ in 0..20 {
+        g.tick([0; 2]);
+        saw_remainder |= g.sides[0].st.lasers.iter().any(|l| l.kind == Kind::Line && l.pos[0] > 0.0);
+    }
+    let lasers = &g.sides[0].st.lasers;
+    assert!(lasers.iter().any(|l| l.kind == Kind::Infinite && l.len < 160.0), "emitter-side beam is shortened: {:?}", lasers.iter().map(|l| (l.kind,l.pos,l.len)).collect::<Vec<_>>());
+    assert!(saw_remainder, "downstream piece travels onward before its travel limit expires");
 }
 
 #[test]

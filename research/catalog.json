@@ -721,6 +721,62 @@
     "ecl_cases_laser": {
       "address": "004fecc0",
       "decompile_sha256": "145bb78a3907254fc4f19360d88f5865d82d3514bf44c3babe91d4219841972a"
+    },
+    "laser_line_init": {
+      "address": "0052fca0",
+      "decompile_sha256": "c6de4b71d6e484142798e0ca4d6b4708bca5dafdc749298e0d58c9cf4687e4da"
+    },
+    "laser_line_update": {
+      "address": "0052e0c0",
+      "decompile_sha256": "df4ee278cca6ad063ed1d8d18374928a1b4ca6b61d9ebf843c49a6552dd15d4b"
+    },
+    "laser_line_hitbox": {
+      "address": "0052db90",
+      "decompile_sha256": "12400e2dd492a541ef2a31b860b7d4d228a567c5be5b3609b608a0ed1d9ded57"
+    },
+    "laser_line_circle_cancel": {
+      "address": "0052c9f0",
+      "decompile_sha256": "648d1a7b2efa9984a71707ac12d64b17e2d62a2ef1fc3ba5fe7581bde9717adf"
+    },
+    "laser_line_rect_cancel": {
+      "address": "0052d350",
+      "decompile_sha256": "f8d40124171931c3ae03a791f5a46e68611205f8c5b1c3d376505f09d5947918"
+    },
+    "laser_line_split": {
+      "address": "0052d680",
+      "decompile_sha256": "fd001629794e05260c98eeac770b63baf44a9f91d3dd880efb2082c5f622db15"
+    },
+    "laser_infinite_circle_cancel": {
+      "address": "0052a040",
+      "decompile_sha256": "2e6d40a93cd12802fe62ebc30f89cac99fd69dbabe0246b97c7fb444604c99f7"
+    },
+    "laser_infinite_rect_cancel": {
+      "address": "0052a970",
+      "decompile_sha256": "3220beddcc4a2102d5d8ec3fc84e6e6873c87490f155a406491b63c0f2bb2b5e"
+    },
+    "laser_infinite_split": {
+      "address": "0052ac90",
+      "decompile_sha256": "169ea5344418bbc50733891949b212575c1b0b80532c8e679e7b416d0f65ba00"
+    },
+    "laser_cancel_all": {
+      "address": "00530bd0",
+      "decompile_sha256": "11949418f646c4fa9e78f328abb6daef5a41e813f6f95556e3ff4ef310486d5a"
+    },
+    "laser_cancel_circle": {
+      "address": "00530c60",
+      "decompile_sha256": "459656c8a48e847660c2452400b0959af7c8e9bed422a6ac85e2bb9baf2f42cb"
+    },
+    "laser_cancel_rect": {
+      "address": "005303f0",
+      "decompile_sha256": "d447fd06ad2102ff36f9924437b46b2e318c588394c4358599d29bcf4321e4d6"
+    },
+    "laser_line_clear": {
+      "address": "0052bce0",
+      "decompile_sha256": "5e4928228c3c646d10878ee5e8448c358b0591a3be1244a5c9b995bf7b8d895c"
+    },
+    "laser_infinite_clear": {
+      "address": "00529160",
+      "decompile_sha256": "8b8f96955e62177abec2ce3304dde5e129e9a5962b4a74a29e0a42968160db47"
     }
   },
   "features": {
@@ -1820,7 +1876,7 @@
     },
     "marisa": {
       "implementation": "partial",
-      "summary": "Marisa is selectable (] / [ for the bot, Shift for the player; --p1 / --p2 N): her own pl01 shots, option beams, charge beams, charging column, skill and special bullets (laser orbs landing as ExtraAttack00), bomb column, the bot's Marisa rules, and infinite lasers (ECL 700/701/608/703). Line lasers (ECL 702), ray/aim ops 569/624 and laser cancels are not ported.",
+      "summary": "Selectable Marisa: original shots, option/charge beams, column scope, skill/special laser orbs, bomb, bot rules and original EX/boss programs. ECL 702 line and 703 infinite lasers run; circle/column/script cancellation splits surviving segments. Laser Ex programs, some boss globals/presentation and visual parity remain incomplete.",
       "symbols": [
         "shot_record_to_bullet",
         "shot_record_pick",
@@ -1842,7 +1898,21 @@
         "ray_circle",
         "ray_rect",
         "rect_rect",
-        "ecl_cases_laser"
+        "ecl_cases_laser",
+        "laser_line_init",
+        "laser_line_update",
+        "laser_line_hitbox",
+        "laser_line_circle_cancel",
+        "laser_line_rect_cancel",
+        "laser_line_split",
+        "laser_infinite_circle_cancel",
+        "laser_infinite_rect_cancel",
+        "laser_infinite_split",
+        "laser_cancel_all",
+        "laser_cancel_circle",
+        "laser_cancel_rect",
+        "laser_line_clear",
+        "laser_infinite_clear"
       ],
       "code": [
         "crates/th-game/src/character.rs",
@@ -1930,14 +2000,60 @@
             "bot_reimu_approach"
           ],
           "evidence": "code_checked"
+        },
+        {
+          "text": "Continuation of 7090364 and Claude's uncommitted laser changes: ECL 702 constructs a line laser; 703 constructs an infinite laser. ECL 700 supplies current/cap lengths, travel limit and width, plus the ET direction/speed/origin/distance. Line lasers grow then travel (0052e0c0), shrink at their travel limit, and receive a 30-frame off-field grace period (0052fca0). Their hitbox uses 80% of length with width rules in 0052db90. Sprite scaling uses actual tile dimensions. The port still omits laser Ex programs and native endpoint/scope decorations.",
+          "sources": [
+            "ecl_cases_laser",
+            "laser_line_init",
+            "laser_line_update",
+            "laser_line_hitbox"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "ECL 569 handler at 00504f38 calls 004d3140 against x +/-148, y 0..448 and selects the forward intersection using a direction-angle comparison. Decompiled C aliases the two output coordinates incorrectly; assembly confirms distinct writes. Miss outputs remain zero. ECL 624 is NOT a ray instruction: case 0x84 reads the callback table at 005994f8. Marisa uses 624(0), whose table entry is null. Only this callback-clear case is supported; nonzero IDs remain reported.",
+          "sources": [
+            "ecl_cases_laser",
+            "ray_rect"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Native laser cancellation samples at distances 8,24,40,... and cuts at 16-pixel boundaries. Infinite circle/all cancellation uses the strict end test; rectangle and line area cancellation include the exact end. The rectangle overlap receives projected step components (16*cos(angle),16*sin(angle)); checked assembly 0052d4b0..0052d4f8. Circle checks sample centers. Invulnerability (+85c) is tested only when the caller requests it. ECL 613 visits both bullet and laser managers; 615/616 do so within a circle. Player circles/Marisa bomb columns now also visit lasers.",
+          "sources": [
+            "laser_line_circle_cancel",
+            "laser_line_rect_cancel",
+            "laser_infinite_circle_cancel",
+            "laser_infinite_rect_cancel",
+            "laser_cancel_all",
+            "laser_cancel_circle",
+            "laser_cancel_rect",
+            "ecl_cases_laser"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "0052d680 trims the line tail, retains the first survivor and spawns surviving runs longer than 24 pixels as separate line lasers. 0052ac90 keeps the infinite emitter-side prefix (which can grow again), converts downstream surviving runs into travelling lines at speed 8 and limits travel by original cap minus segment offset. All-cancel sets the laser dead. Cancel animations are chosen by original type/color; extended Ex state is not yet copied to fragments because laser Ex programs are unported. Developer clear also removes every laser and its VM.",
+          "sources": [
+            "laser_line_split",
+            "laser_infinite_split",
+            "laser_line_clear",
+            "laser_infinite_clear"
+          ],
+          "evidence": "code_checked"
         }
       ],
       "checks": {
         "automated_marisa": "2026-10-03: marisa_beams_grow_cut_at_enemies_damage_and_end_with_the_shot_button, marisa_charge_releases_fire_charge_beams, ray_enters_a_circle_ahead",
-        "automated_marisa_more": "2026-10-03: marisa_extra_attack_fires_lasers_from_her_own_program, lasers_hit_and_graze_the_player, marisa_skill_and_special_bullets_send_laser_orbs_that_become_extra_attack_00, marisa_bomb_is_a_full_height_column, laser unit tests"
+        "automated_marisa_more": "2026-10-03: marisa_extra_attack_fires_lasers_from_her_own_program, lasers_hit_and_graze_the_player, marisa_skill_and_special_bullets_send_laser_orbs_that_become_extra_attack_00, marisa_bomb_is_a_full_height_column, laser unit tests",
+        "continuation_2026_10_03": "Working tree based on 7090364: cargo test --workspace PASS (91 tests); cargo build --release -p th19 PASS. Replaced cumulative diagnostic Marisa probe with independent checks of original first laser pattern at all eight ranks; added segment/immunity and bomb-column remainder tests. Captured and inspected data/reference/marisa-boss-continuation.png at frame 570 (--p1 2 --p2 1 --full-charge --boss-level 3 --preview-charge 4 --no-bot --godmode). No matched original footage comparison.",
+        "continuation_line_capture_2026_10_03": "data/reference/marisa-line-continuation.png captured/inspected at frame 560, rank 1, same flags as spell capture except --boss-level 1. Original screenshots/footage have not been aligned for comparison."
       },
       "next": [
-        "Port LaserLineInf (ECL 702) with its Ex program, ECL 569 / 624 (ray to the field edge), laser cancels (FUN_00530c60 / 005303f0), the other laser types, Marisa's boss attacks' remaining unknown ops; verify beam alpha against footage."
+        "Port laser Ex programs, curve/beam types and endpoint/scope presentation; copy full extended state when splitting supported Ex lasers.",
+        "Audit remaining boss globals (including -9888 speed scaling), RNG/motion and opcodes 516/517/524/527/534/1020; do not equate first-pattern execution tests with full trajectory parity.",
+        "Compare Reimu/Marisa shots, lasers, bombs and all boss phases against matched original-game footage."
       ]
     },
     "lasers": {

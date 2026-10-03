@@ -19,10 +19,10 @@ Right now the `th19` binary is an **ANM + stage viewer** used to validate the pi
 | Key | Action |
 | --- | --- |
 | Tab | cycle ANM viewer → stage (STD) viewer → game (stage + waves) |
-| Game mode | arrows = move, Z = shot, X = hold/release charge (all four tiers), C = bomb (practice: the meter counts as full, no stock used; a press during the 8-frame hit window cancels the death), Shift = focus, PgUp/PgDn = stage (`--game N` starts here) |
+| Game mode | arrows = move, Z = shot, X = hold/release charge (all four tiers), C = bomb (current meter determines strength; full meter in full-charge mode; no stock used; a press during the 8-frame hit window cancels the death), Shift = focus, PgUp/PgDn = stage (`--game N` starts here) |
 | G (game mode) | development godmode: neither player can be hit |
-| K (game mode) | player 2 plays like the game's bot (Normal difficulty, Reimu) / just holds the shot button |
-| M (game mode) | development full-charge mode: every tier available and free (off by default; otherwise the meter fills from blue orbs) |
+| K (game mode) | player 2 uses the bot (Normal difficulty, Reimu or Marisa) / just holds the shot button |
+| M (game mode) | development full-charge mode: every tier available and free (off by default; otherwise the meter fills from blue orbs). `--full-charge` enables it at launch. |
 | `]` / `[` (game mode) | next / previous character for the bot (Reimu 1, Marisa 2); with Shift, for the player. Restarts the match. `--p1 N` / `--p2 N` pick them at start, `--no-bot` starts with the dummy |
 | `--godmode`, `--boss-level N` | start with godmode on / player 1's boss level at N (development) |
 | 1–4 (game mode) | development: release player 1's charge instantly at tier 1 shot / 2 skill / 3 EX / 4 boss (falls back to EX while the opponent has a boss); Shift+1–4 makes player 2 release it, so EX/boss attacks land on player 1's field |
@@ -121,7 +121,35 @@ the executable. Suggested pipeline:
 - [ExpHP's thpages](https://exphp.github.io/thpages/) — instruction and interpolation reference (used as documentation only).
 - Touhou Project © ZUN / Team Shanghai Alice. This project is unofficial and requires a legitimately owned copy of the game.
 
-### Gameplay progress
+### Current playable build (2026-10-03)
+
+Reimu (1) and Marisa (2) are selectable. Marisa has her original shots, option/charge
+beams, column scope, skill/special laser orbs, EX and boss scripts, and bomb column.
+Meter orbs from grazes and supported enemy/chain drops fill the charge meter. **M**
+switches back to full-charge practice. Some orb sources and match settings remain
+unverified; scope-dependent spirit drops have not been established from the source.
+
+Marisa's boss line lasers now grow and travel, while infinite lasers warn, widen and
+shrink. Circle/column clearing cuts them in 16-pixel sections according to the native
+splitters, preserving travelling remainders and cancellation immunity. Script clearing
+can bypass that immunity; **B** clears laser visuals and collisions as well as enemies
+and bullets. Tests exercise the original first boss pattern at all eight attack ranks.
+
+```powershell
+cd C:\Users\wante\th19-rs
+cargo run --release -p th19 -- --game 1 --p1 2 --p2 1
+```
+
+Add `--full-charge` for practice. In game, **Shift+[ / Shift+]** selects your character;
+**[ / ]** selects the opponent's. Selection restarts the match.
+
+Remaining limitations include laser Ex programs, curve/beam enemy lasers, specialized
+laser endpoint/scope visuals, some boss globals and presentation instructions, ability
+modifiers, and matched original-game footage comparison. Passing tests does not establish
+complete trajectory or visual parity. The sections below retain earlier milestone notes;
+this section and the controls table describe the current build.
+
+### Earlier gameplay progress
 
 The player starts with two hearts and a barrier. Breaking the barrier grants 100 frames
 of invulnerability; losing a heart restores it. Final defeat finishes the round and awards
@@ -129,8 +157,8 @@ one point to the opponent. The title displays round points and the outcome. R re
 viewer, including the score; full multi-round match progression remains to be implemented.
 
 All four Reimu charge tiers are playable. Hold **X** and release at the desired bottom-bar
-marker. The window title shows the ready tier and last released attack. Charging is free
-and all tiers are available; natural meter gain and spending are deferred for practice.
+marker. The window title shows the ready tier and last released attack. Full-charge
+practice makes all tiers available; otherwise available meter limits charging.
 
 | Tier | Hold time at 60 Hz | Release |
 | --- | --- | --- |
@@ -141,8 +169,8 @@ and all tiers are available; natural meter gain and spending are deferred for pr
 
 Every higher release also fires the basic local charge shot. A full release becomes EX
 if the opponent already has a boss. The blue bar shows the available practice capacity;
-the lower bar shows held charge. These bars and the boss HP bar are provisional. B still
-injects a debug EX on your own field. It is separate from X's opponent attack.
+the lower bar shows held charge. These bars and the boss HP bar are provisional. B clears
+both fields; 1–4 remain the instant-charge development controls.
 
 For a reproducible local capture, use `--game 1 --preview-charge 2 --frames 183
 --screenshot data/reference/charge-skill.png` (join into one command). Preview tiers 1–4

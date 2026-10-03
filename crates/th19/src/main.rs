@@ -790,7 +790,7 @@ fn main() {
     println!(
         "Controls: Tab = switch ANM viewer / stage viewer / game, Left/Right = file or stage, Up/Down = single script,\n\
          A = all scripts, C = toggle centre origin, F = fast-forward x8, V = toggle field divider,\n\
-         R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (1 shot / 2 skill / 3 EX / 4 boss; free meter), C = bomb (full meter), B = clear fields, T = rain on the opponent (Shift+T on you), G = godmode, 1-4 = instant charge tier (4 = boss; Shift+1-4 = opponent's), Shift = focus, PgUp/PgDn = stage,\n\
+         R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (1 shot / 2 skill / 3 EX / 4 boss), M = toggle full-charge practice, C = bomb, B = clear fields, T = rain on the opponent (Shift+T on you), G = godmode, 1-4 = instant charge tier (4 = boss; Shift+1-4 = opponent's), Shift = focus, [ / ] = bot character (Shift for player), K = bot/dummy, PgUp/PgDn = stage,\n\
          . = step frame, 0-9 = send interrupt, Esc = quit"
     );
 
@@ -809,6 +809,7 @@ fn main() {
             viewer.start_boss_level = n.clamp(1, 8) - 1;
         }
         viewer.godmode = args.iter().any(|a| a == "--godmode");
+        viewer.full_charge = args.iter().any(|a| a == "--full-charge");
         viewer.bot_ai = !args.iter().any(|a| a == "--no-bot");
         // `--p1 N` / `--p2 N`: character select numbers (1 Reimu, 2 Marisa).
         for (flag, side) in [("--p1", 0), ("--p2", 1)] {
