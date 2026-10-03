@@ -127,4 +127,23 @@ mod tests {
         assert_eq!(g.tick(false, false, 500, S, false, false), None);
         assert_eq!(g.value, 0);
     }
+    /// FUN_004e79e0: start once, a tier sound on each threshold bucket, the full-charge loop at the
+    /// cap, and stops while not charging.
+    #[test]
+    fn charge_sounds_follow_the_controller() {
+        use crate::sfx::{PER_SIDE, STOP};
+        let mut g = Gauge::default();
+        let mut log = Vec::new();
+        for _ in 0..25 {
+            g.tick(true, true, 250, S, false, false);
+            log.push(std::mem::take(&mut g.sounds));
+        }
+        assert_eq!(log[0], vec![(0x54 | PER_SIDE, 0)], "start on the first held tick");
+        // Value 100 (attack threshold) is reached on the 10th tick.
+        assert_eq!(log[9], vec![(0x56 | PER_SIDE, 0), (0x54 | PER_SIDE, 0)]);
+        assert_eq!(log[24], vec![(0x54 | PER_SIDE, STOP), (0x58 | PER_SIDE, 0)], "cap 250 reached");
+        assert!(log[1..9].iter().all(|v| v.is_empty()));
+        g.tick(false, true, 250, S, false, false);
+        assert_eq!(g.sounds, vec![(0x54 | PER_SIDE, STOP), (0x58 | PER_SIDE, STOP)]);
+    }
 }
