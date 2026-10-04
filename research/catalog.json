@@ -2614,6 +2614,13 @@
             "sound_request"
           ],
           "evidence": "code_checked"
+        },
+        {
+          "text": "Enemy damage sound variant ported: script flag 0x80 (+0x5170) is set by ECL 512 with a slot >= 0 (00501ad3; cleared for a negative slot) and 0x4000 by ECL 511 when 0x80 is set (00501a57), so 0x4080 = boss. +0x6240 = HP minus the first set HP-interrupt threshold (0050d080 writes +0x63b8; 00508850 computes) or HP without one. The spell object +0x7c gets bits 0x203 and loses 0x98 on declaration (004f67c0) and loses bit 1 on spell end (004f6730), so bit 1 = spell active. 0x23 (damage01) plays for a boss below 900 (200 while a spell is active); APPROX: bit 8 of the spell object (with bit 1 it suppresses 0x23) has no setter found and is treated as clear. The HUD countdown 00512fd0 (0xb under 5, 0xc under 2) belongs to an unported per-side HUD whose +0x58 source was not found.",
+          "sources": [
+            "sound_request"
+          ],
+          "evidence": "code_checked"
         }
       ],
       "checks": {
