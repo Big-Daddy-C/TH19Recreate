@@ -1660,6 +1660,7 @@ fn ran_ex_talismans_target_the_opponent_field_edges() {
     }
 }
 
+
 /// Original pl03 ANM11 copies four different parent angles and scales its offsets.
 #[test]
 fn ran_scope_draws_four_native_cross_arms() {

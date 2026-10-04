@@ -450,7 +450,10 @@ impl Viewer {
                     .collect();
                 return format!(
                     "th19-rs - {name}{}{} - {} - {} VMs{}{} - points {}:{} {:?}",
-                    self.audio.as_ref().map_or(String::new(), |a| format!(" - VOL {:.0}%", a.volume() * 100.0)),
+                    self.audio.as_ref().map_or(String::new(), |a| {
+                        let muted = th_game::sfx::muted();
+                        format!(" - VOL {:.0}%{}", a.volume() * 100.0, if muted.is_empty() { String::new() } else { format!(" (muted: {})", muted.join(", ")) })
+                    }),
                     format!("{}{}{}{}", if self.godmode { " - GODMODE" } else { "" }, if self.full_charge { " - FULLCHARGE" } else { "" }, if self.opponent_idle { " - IDLE" } else if self.bot_ai { " - BOT" } else { " - DUMMY" }, if self.player_bot_ai { " - P1 AI" } else { "" }),
                     n.join(" | "),
                     self.world.len(),
@@ -542,6 +545,15 @@ impl Viewer {
                     self.bot_ai = !self.bot_ai;
                     self.bot = th_game::bot::Bot::new();
                     log::info!("bot ai {}", if self.bot_ai { "on" } else { "off (holds shot)" });
+                }
+            }
+            // F1..F12 mute / unmute sound groups (Shift: the next twelve); see th_game::sfx::Cat.
+            KeyCode::F1 | KeyCode::F2 | KeyCode::F3 | KeyCode::F4 | KeyCode::F5 | KeyCode::F6
+            | KeyCode::F7 | KeyCode::F8 | KeyCode::F9 | KeyCode::F10 | KeyCode::F11 | KeyCode::F12 => {
+                let n = code as usize - KeyCode::F1 as usize;
+                let shift = self.held.contains(&KeyCode::ShiftLeft) || self.held.contains(&KeyCode::ShiftRight);
+                if th_game::sfx::toggle(n + if shift { 12 } else { 0 }) {
+                    log::info!("muted sound groups: {:?}", th_game::sfx::muted());
                 }
             }
             // L: the opponent stands still and does nothing.
@@ -848,7 +860,7 @@ fn main() {
     println!(
         "Controls: Tab = switch ANM viewer / stage viewer / game, Left/Right = file or stage, Up/Down = single script,\n\
          A = all scripts, C = toggle centre origin, F = fast-forward x8, V = toggle field divider,\n\
-         R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (1 shot / 2 skill / 3 EX / 4 boss), M = toggle full-charge practice, C = bomb, B = clear fields, T = rain on the opponent (Shift+T on you), G = godmode, 1-4 = instant charge tier (4 = boss; Shift+1-4 = opponent's), Shift = focus, [ / ] = bot character (Shift for player), K = opponent bot/dummy, L = opponent does nothing, Shift+K = player AI/manual, - / + = volume, PgUp/PgDn = stage,\n\
+         R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (1 shot / 2 skill / 3 EX / 4 boss), M = toggle full-charge practice, C = bomb, B = clear fields, T = rain on the opponent (Shift+T on you), G = godmode, 1-4 = instant charge tier (4 = boss; Shift+1-4 = opponent's), Shift = focus, [ / ] = bot character (Shift for player), K = opponent bot/dummy, L = opponent does nothing, Shift+K = player AI/manual, - / + = volume, F1-F12 (Shift for more) = mute a sound group, PgUp/PgDn = stage,\n\
          . = step frame, 0-9 = send interrupt, Esc = pause in a game (Shift+Esc quits; elsewhere Esc quits)"
     );
 

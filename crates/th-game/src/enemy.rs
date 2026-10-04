@@ -216,27 +216,19 @@ impl Enemy {
         }
         e.size = main_size(e, world, lib);
 
-        // FUN_00509980's tail plays a damage sound (panned by the enemy x) for a damaged enemy; its
-        // override +0x510c is set to -1 at creation and never written. 0x22 normally; 0x23 for a
-        // boss (script flags 0x4080: ECL 512 with a slot sets 0x80, 511 then 0x4000) whose health
-        // above its HP interrupt (+0x6240 = HP - the first set interrupt threshold, set by
-        // 0050d080 / ECL phase interrupt; plain HP without one) is below 900, or below 200 while a
-        // spell card is active (spell object +0x7c bit 1, set by 004f67c0 and cleared by
-        // 004f6730). APPROX: the spell object's bit 8 (which suppresses 0x23 together with bit 1)
-        // has no setter found and is taken as clear. NOT PORTED: 0x24 for a damage rate
-        // (+0x5164) of zero.
-        if e.damaged {
-            // Not on the killing blow: FUN_00509980 returns into the death routine before it sets
-            // the damaged flag.
-            if !e.killed && crate::sfx::on(crate::sfx::Cat::EnemyHit) {
-                let boss = st.boss_ids.contains(&e.id);
-                let to_interrupt = e.hp - e.phase_interrupt.as_ref().map_or(0, |(hp, _, _)| (*hp).max(0));
-                let low = if e.spell_hp7.is_some() { 200 } else { 900 };
-                st.play_sound(if boss && to_interrupt < low { 0x23 } else { 0x22 }, e.pos[0]);
-            }
-        }
-        // Hit flash (FUN_00509980's tail): a damaged enemy's main sprite is drawn in
-        // colour 2 = 0xff0000ff for one frame, then normally for at least 4 frames.
+        // FUN_00509980's tail: a damaged enemy (flag 0x20) whose main VM exists and whose hold
+        // counter (+0x5104) is zero is tinted 0xff0000ff, sets the hold to 4 and plays a damage
+        // sound panned by its x; while the hold counts down (4 more ticks) neither happens, so a
+        // continuously hit enemy flashes and sounds once every 5 ticks. The sound's override
+        // +0x510c is -1 at creation and never written. 0x22 normally; 0x23 for a boss (script
+        // flags 0x4080: ECL 512 with a slot sets 0x80, 511 then 0x4000) whose health above its HP
+        // interrupt (+0x6240 = HP - the first set interrupt threshold, set by 0050d080 / ECL phase
+        // interrupt; plain HP without one) is below 900, or below 200 while a spell card is active
+        // (spell object +0x7c bit 1, set by 004f67c0 and cleared by 004f6730). APPROX: the spell
+        // object's bit 8 (which suppresses 0x23 together with bit 1) has no setter found and is
+        // taken as clear. NOT PORTED: 0x24 for a damage rate (+0x5164) of zero. Not on the killing
+        // blow: FUN_00509980 returns into the death routine before it sets the damaged flag.
+        let mut hurt_sound = None;
         if let Some(vm) = e.main.and_then(|m| e.vms[m.slot]).and_then(|id| world.get_mut(id)) {
             if e.flash_hold > 0 {
                 vm.color_mode = 0;
@@ -246,9 +238,18 @@ impl Enemy {
                 vm.alpha2 = 255.0;
                 vm.color_mode = 1;
                 e.flash_hold = 4;
+                if !e.killed {
+                    let boss = st.boss_ids.contains(&e.id);
+                    let to_interrupt = e.hp - e.phase_interrupt.as_ref().map_or(0, |(hp, _, _)| (*hp).max(0));
+                    let low = if e.spell_hp7.is_some() { 200 } else { 900 };
+                    hurt_sound = Some(if boss && to_interrupt < low { 0x23 } else { 0x22 });
+                }
             } else {
                 vm.color_mode = 0;
             }
+        }
+        if let Some(id) = hurt_sound.filter(|_| crate::sfx::on(crate::sfx::Cat::EnemyHit)) {
+            st.play_sound(id, e.pos[0]);
         }
         e.damaged = false;
 

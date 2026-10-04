@@ -2628,6 +2628,13 @@
             "sound_request"
           ],
           "evidence": "code_checked"
+        },
+        {
+          "text": "Enemy damage flash and sound share one gate in FUN_00509980: the hold counter +0x5104 (set to 4 by the damaged branch) is tested BEFORE that branch (if nonzero: tint off, decrement, skip), so a continuously damaged enemy flashes and plays 0x22/0x23 once every 5 ticks, and only when the enemy has its main VM (+0x134). The port played the sound on every damaged tick (a 60 Hz buzz under Marisa's beam); now gated with the flash. Charge-shot hit callbacks 3/9 (0054c5f0, 0054a7b0) play 0x41 only inside the branch that creates an explosion collider (FUN_005200f0/00520240 succeed); the port plays it unconditionally on a callback 3/4/9 hit (APPROX, those collider explosions are not ported). Sound groups can be muted at run time with F1-F12 / Shift+F1-F12 (th_game::sfx).",
+          "sources": [
+            "sound_request"
+          ],
+          "evidence": "code_checked"
         }
       ],
       "checks": {
