@@ -70,6 +70,20 @@ struct Menu {
     vms: Vec<th_anm::VmId>,
 }
 
+/// A row of the pause menu.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Row {
+    Resume,
+    /// 1 vs 1 or 2 vs 2.
+    Mode,
+    /// The character of player slot `n` (0 you, 1 rival, 2 ally, 3 second rival).
+    Char(usize),
+    Song,
+    Se,
+    Music,
+    Quit,
+}
+
 struct Viewer {
     audio: Option<audio::Audio>,
     /// The pause menu (Esc in a game), with its text sprites.
@@ -111,7 +125,13 @@ struct Viewer {
     player_bot_ai: bool,
     player_bot: th_game::bot::Bot,
     /// Each side's character (`]` / `[` change the bot's, with Shift the player's).
-    chars: [th_game::character::Character; 2],
+    chars: [th_game::character::Character; 4],
+    /// Players per team: 1 (1 vs 1) or 2 (2 vs 2).
+    team_size: usize,
+    /// The song chosen in the menu (an index into thbgm.fmt), overriding the stage and boss music.
+    music_override: Option<usize>,
+    /// The theme of the stage's characters, chosen when the stage loads.
+    stage_theme: Option<&'static str>,
     /// Development full-charge mode (M): every tier is always available and costs nothing.
     full_charge: bool,
     bot: th_game::bot::Bot,
@@ -161,7 +181,10 @@ impl Viewer {
             opponent_idle: false,
             player_bot_ai: false,
             player_bot: th_game::bot::Bot::new(),
-            chars: [th_game::character::Character::Reimu; 2],
+            chars: [th_game::character::Character::Reimu; 4],
+            team_size: 1,
+            music_override: None,
+            stage_theme: None,
             full_charge: false,
             bot: th_game::bot::Bot::new(),
             start_boss_level: 0,
@@ -216,23 +239,40 @@ impl Viewer {
     /// several do (`th_formats::music`). A stage nobody uses stays silent. It keeps playing across
     /// rounds of the same stage.
     fn start_music(&mut self) {
-        let Some(audio) = &mut self.audio else { return };
-        if self.music_stage == Some(self.stage_idx) {
+        if self.audio.is_none() || self.music_stage == Some(self.stage_idx) {
             return;
         }
         self.music_stage = Some(self.stage_idx);
         let themes = th_formats::music::stage_themes(&self.character_stages, self.stage_idx as u32);
-        if themes.is_empty() {
-            audio.stop_music();
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos());
+        self.stage_theme = (!themes.is_empty()).then(|| themes[nanos as usize % themes.len()]);
+        self.update_music();
+    }
+
+    /// Keep the right track playing: the song picked in the menu if any, else the theme of the
+    /// character whose boss is on either field, else the stage's theme (silence for a stage no
+    /// character uses). Boss music is an assumption: the original's trigger was not found.
+    fn update_music(&mut self) {
+        if self.mode != Mode::Game {
             return;
         }
-        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos());
-        audio.play_music(themes[nanos as usize % themes.len()]);
+        let boss = self.game.as_ref().and_then(|g| {
+            g.sides.iter().find_map(|s| s.boss_owner()).and_then(|owner| self.chars.get(owner).map(|c| *c as usize))
+        });
+        let Some(audio) = &mut self.audio else { return };
+        let picked = self.music_override.and_then(|i| audio.track_names().get(i).cloned());
+        let theme = picked
+            .or_else(|| boss.and_then(|c| th_formats::music::CHARACTER_THEMES.get(c)).map(|t| t.to_string()))
+            .or_else(|| self.stage_theme.map(str::to_string));
+        match theme {
+            Some(name) => audio.play_music(&name),
+            None => audio.stop_music(),
+        }
     }
 
     /// Load the ECL scripts and their sprites and start both sides' stage scripts.
     fn load_game(&mut self) -> Option<Game> {
-        let chars = self.chars;
+        let chars = [self.chars[0], self.chars[1]];
         // One ECL program and sprite-slot set per side's character: attacks a side sends run
         // the sender's script on the other field.
         let mut progs = Vec::new();
@@ -371,6 +411,7 @@ impl Viewer {
                 }
             }
             self.world.tick(&self.lib);
+            self.update_music();
         }
     }
 
@@ -568,8 +609,9 @@ impl Viewer {
     fn open_menu(&mut self) {
         self.paused = true;
         self.menu = Some(Menu { sel: 0, vms: Vec::new() });
-        if th_game::sfx::on(th_game::sfx::Cat::Pause) {
-            if let Some(a) = &mut self.audio {
+        if let Some(a) = &mut self.audio {
+            a.set_duck(true);
+            if th_game::sfx::on(th_game::sfx::Cat::Pause) {
                 a.play(0xe, 0);
             }
         }
@@ -582,42 +624,89 @@ impl Viewer {
                 self.world.delete(id);
             }
         }
+        if let Some(a) = &mut self.audio {
+            a.set_duck(false);
+        }
         self.paused = false;
+    }
+
+    /// The menu's rows for the current mode.
+    fn menu_rows(&self) -> Vec<Row> {
+        let mut rows = vec![Row::Resume, Row::Mode, Row::Char(0)];
+        if self.team_size == 2 {
+            rows.extend([Row::Char(2), Row::Char(1), Row::Char(3)]);
+        } else {
+            rows.push(Row::Char(1));
+        }
+        rows.extend([Row::Song, Row::Se, Row::Music, Row::Quit]);
+        rows
     }
 
     /// Rebuild the menu's text sprites.
     fn draw_menu(&mut self) {
         let Some(ascii) = self.load_anm("ascii.anm") else { return };
         let (se, bgm) = self.audio.as_ref().map_or((0, 0), |a| (a.se_setting(), a.bgm_setting()));
+        let rows = self.menu_rows();
+        let team = self.team_size;
+        let song = match self.music_override {
+            None => "Auto".to_string(),
+            Some(i) => self.audio.as_ref().and_then(|a| a.track_names().get(i).map(|n| th_formats::music::track_label(n))).unwrap_or_default(),
+        };
         // (label, value shown right-aligned)
-        let lines = [("Resume", String::new()), ("Sound effects", format!("{se}%")), ("Music", format!("{bgm}%")), ("Quit", String::new())];
+        let lines: Vec<(String, String)> = rows
+            .iter()
+            .map(|r| match *r {
+                Row::Resume => ("Resume".into(), String::new()),
+                Row::Mode => ("Players".into(), if team == 2 { "2 vs 2".into() } else { "1 vs 1".into() }),
+                Row::Char(i) => {
+                    let label = match (team, i) {
+                        (1, 0) => "Player 1",
+                        (1, _) => "Player 2",
+                        (_, 0) => "You",
+                        (_, 2) => "Ally",
+                        (_, 1) => "Rival 1",
+                        _ => "Rival 2",
+                    };
+                    (label.into(), self.chars[i].name().to_string())
+                }
+                Row::Song => ("Song".into(), song.clone()),
+                Row::Se => ("Sound effects".into(), format!("{se}%")),
+                Row::Music => ("Music".into(), format!("{bgm}%")),
+                Row::Quit => ("Quit".into(), String::new()),
+            })
+            .collect();
         let Some(menu) = &mut self.menu else { return };
         for id in menu.vms.drain(..) {
             self.world.delete(id);
         }
-        let sel = menu.sel;
+        let sel = menu.sel.min(lines.len() - 1);
         let mut vms = Vec::new();
-        vms.extend(th_game::text::big_text_at(&mut self.world, &self.lib, ascii, "- Menu -", [200.0, 150.0], 1.0,
+        vms.extend(th_game::text::big_text_at(&mut self.world, &self.lib, ascii, "- Menu -", [150.0, 60.0], 1.0,
             th_game::text::Align::Left, [180.0, 205.0, 255.0], MENU_PRIORITY));
         for (i, (label, value)) in lines.iter().enumerate() {
             let (mark, color) = if i == sel { ("> ", [255.0, 230.0, 100.0]) } else { ("  ", [255.0, 255.0, 255.0]) };
-            let y = 200.0 + i as f32 * 36.0;
+            let y = 110.0 + i as f32 * 34.0;
             vms.extend(th_game::text::big_text_at(&mut self.world, &self.lib, ascii, &format!("{mark}{label}"),
-                [200.0, y], 1.0, th_game::text::Align::Left, color, MENU_PRIORITY));
+                [150.0, y], 1.0, th_game::text::Align::Left, color, MENU_PRIORITY));
             if !value.is_empty() {
-                vms.extend(th_game::text::big_text_at(&mut self.world, &self.lib, ascii, value, [470.0, y], 1.0,
+                let shown = if matches!(rows[i], Row::Mode | Row::Char(_) | Row::Song | Row::Se | Row::Music) { format!("< {value} >") } else { value.clone() };
+                vms.extend(th_game::text::big_text_at(&mut self.world, &self.lib, ascii, &shown, [500.0, y], 1.0,
                     th_game::text::Align::Right, color, MENU_PRIORITY));
             }
         }
         if let Some(menu) = &mut self.menu {
             menu.vms = vms;
+            menu.sel = sel;
         }
     }
 
-    /// Menu input: Up / Down choose, Left / Right change a volume by 10%, Z or Enter activates,
-    /// Esc resumes.
+    /// Menu input: Up / Down choose a row; Left / Right or `,` / `.` (the `<` and `>` keys) change
+    /// it (volumes by 10%); Z or Enter activates; Esc resumes.
     fn menu_key(&mut self, code: KeyCode) {
         let Some(sel) = self.menu.as_ref().map(|m| m.sel) else { return };
+        let rows = self.menu_rows();
+        let n = rows.len();
+        let row = rows[sel.min(n - 1)];
         // The cursor and value sounds use the menu ids 10 (select00) and 9 (cancel00) seen in the
         // menu code (FUN_004e0f60); which one the original plays for which action is not traced.
         let beep = |v: &mut Viewer, id: u32| {
@@ -625,41 +714,74 @@ impl Viewer {
                 a.play(id, 0);
             }
         };
+        let delta: i32 = match code {
+            KeyCode::ArrowLeft | KeyCode::Comma => -1,
+            KeyCode::ArrowRight | KeyCode::Period => 1,
+            _ => 0,
+        };
         match code {
             KeyCode::Escape => {
                 beep(self, 9);
                 return self.close_menu();
             }
             KeyCode::ArrowUp | KeyCode::ArrowDown => {
-                let next = if code == KeyCode::ArrowUp { (sel + 3) % 4 } else { (sel + 1) % 4 };
+                let next = if code == KeyCode::ArrowUp { (sel + n - 1) % n } else { (sel + 1) % n };
                 if let Some(m) = &mut self.menu {
                     m.sel = next;
                 }
                 beep(self, 10);
             }
-            KeyCode::ArrowLeft | KeyCode::ArrowRight if matches!(sel, 1 | 2) => {
-                let step: i32 = if code == KeyCode::ArrowLeft { -10 } else { 10 };
-                if let Some(a) = &mut self.audio {
-                    let cur = if sel == 1 { a.se_setting() } else { a.bgm_setting() } as i32;
-                    let new = (cur + step).clamp(0, 100) as u8;
-                    if sel == 1 {
-                        a.set_se_setting(new);
-                    } else {
-                        a.set_bgm_setting(new);
+            _ if delta != 0 => match row {
+                Row::Se | Row::Music => {
+                    if let Some(a) = &mut self.audio {
+                        let cur = if row == Row::Se { a.se_setting() } else { a.bgm_setting() } as i32;
+                        let new = (cur + delta * 10).clamp(0, 100) as u8;
+                        if row == Row::Se {
+                            a.set_se_setting(new);
+                        } else {
+                            a.set_bgm_setting(new);
+                        }
                     }
+                    self.save_settings();
+                    beep(self, 10);
                 }
-                self.save_settings();
-                beep(self, 10);
-            }
-            KeyCode::KeyZ | KeyCode::Enter => match sel {
-                0 => {
+                Row::Song => {
+                    let count = self.audio.as_ref().map_or(0, |a| a.track_names().len());
+                    if count > 0 {
+                        // Auto, then every track in thbgm.fmt order.
+                        let cur = self.music_override.map_or(0, |i| i + 1) as i32;
+                        let next = (cur + delta).rem_euclid(count as i32 + 1) as usize;
+                        self.music_override = next.checked_sub(1);
+                        self.update_music();
+                    }
+                    beep(self, 10);
+                }
+                Row::Char(i) => {
+                    self.chars[i] = self.chars[i].shifted(delta);
+                    beep(self, 10);
+                    self.load_stage();
+                }
+                Row::Mode => {
+                    self.team_size = if self.team_size == 1 { 2 } else { 1 };
+                    beep(self, 10);
+                    self.load_stage();
+                }
+                _ => return,
+            },
+            KeyCode::KeyZ | KeyCode::Enter => match row {
+                Row::Resume => {
                     beep(self, 9);
                     return self.close_menu();
                 }
-                3 => self.quit = true,
+                Row::Quit => self.quit = true,
                 _ => {}
             },
             _ => return,
+        }
+        // Changing characters or the mode reloads the match, which clears the world (and the menu's
+        // sprites); the menu stays open on top of it.
+        if let Some(m) = &mut self.menu {
+            m.vms.clear();
         }
         self.draw_menu();
     }

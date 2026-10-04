@@ -1239,6 +1239,13 @@ impl Side {
             }
         }
     }
+    /// The program owner (the sender's player index) of the boss on this field, if there is one.
+    pub fn boss_owner(&self) -> Option<usize> {
+        let boss = |sub: &str| matches!(sub, "BossAttack" | "Boss00" | "Boss00Boss");
+        self.enemies.iter().find(|e| !e.data.delete && (e.data.boss_slot.is_some() || boss(&e.data.sub))).map(|e| e.data.owner)
+            .or_else(|| self.st.spawn.iter().find(|s| boss(&s.sub)).and_then(|s| s.owner))
+    }
+
     pub fn has_boss(&self) -> bool {
         !self.st.boss_ids.is_empty() || self.st.spawn.iter().any(|s| s.sub=="BossAttack" || s.sub=="Boss00")
             || self.enemies.iter().any(|e| !e.data.delete && (e.data.sub=="BossAttack" || e.data.sub=="Boss00"))

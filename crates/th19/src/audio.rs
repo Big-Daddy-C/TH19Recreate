@@ -31,6 +31,8 @@ pub struct Audio {
     music: Option<String>,
     music_latest: Arc<AtomicU32>,
     music_gain: Arc<AtomicU32>,
+    /// 2/3 while the menu is open (everything is 1/3 quieter), otherwise 1.
+    duck: f32,
 }
 
 /// `FUN_004bb970`: DirectSound volume (hundredths of a dB) of the music for a setting,
@@ -87,6 +89,7 @@ impl Audio {
             music: None,
             music_latest: Arc::new(AtomicU32::new(0)),
             music_gain: Arc::new(AtomicU32::new(gain(music_db100(bgm_setting) as f32).to_bits())),
+            duck: 1.0,
         })
     }
 
@@ -105,8 +108,25 @@ impl Audio {
     /// Takes effect immediately on the running track.
     pub fn set_bgm_setting(&mut self, setting: u8) {
         self.bgm_setting = setting.min(100);
-        self.music_gain.store(gain(music_db100(self.bgm_setting) as f32).to_bits(), Ordering::Relaxed);
+        self.apply_music_gain();
     }
+
+    fn apply_music_gain(&self) {
+        let g = gain(music_db100(self.bgm_setting) as f32) * self.duck;
+        self.music_gain.store(g.to_bits(), Ordering::Relaxed);
+    }
+
+    /// Lower everything by a third while the menu is open.
+    pub fn set_duck(&mut self, on: bool) {
+        self.duck = if on { 2.0 / 3.0 } else { 1.0 };
+        self.apply_music_gain();
+    }
+
+    /// Names (`th19_NN`) of the music tracks in thbgm.fmt order.
+    pub fn track_names(&self) -> Vec<String> {
+        self.tracks.iter().map(|t| t.name.trim_end_matches(".wav").to_string()).collect()
+    }
+
 
     /// Start the track `name` (`th19_NN`) from the beginning, looping at its loop point. Playing
     /// the track that is already running does nothing.
@@ -197,7 +217,7 @@ impl Audio {
         if self.latest.len() <= id as usize {
             return;
         }
-        let own_gain = gain(se_db100(*volume, self.se_setting));
+        let own_gain = gain(se_db100(*volume, self.se_setting)) * self.duck;
         let pan = pan.clamp(-10000, 10000) as f32;
         let side = |attenuation: f32| 10f32.powf(-attenuation.max(0.0) / 2000.0);
         let (left, right) = (side(pan), side(-pan));

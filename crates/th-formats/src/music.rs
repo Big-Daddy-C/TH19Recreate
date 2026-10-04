@@ -31,3 +31,24 @@ pub fn character_stages(exe: &Exe) -> Vec<u32> {
 pub fn stage_themes(stages: &[u32], stage: u32) -> Vec<&'static str> {
     stages.iter().zip(CHARACTER_THEMES).filter(|(s, _)| **s == stage).map(|(_, t)| t).collect()
 }
+
+/// A short English label for a track (`th19_NN`), for the song selector.
+pub fn track_label(name: &str) -> String {
+    let num: u32 = name.trim_start_matches("th19_").parse().unwrap_or(0);
+    let who = match num {
+        1 => "Title",
+        21 => "Ending",
+        22 => "Staff roll",
+        _ => match CHARACTER_THEMES.iter().position(|t| *t == name) {
+            Some(c) => CHARACTER_NAMES[c],
+            None => "",
+        },
+    };
+    if who.is_empty() { format!("{num:02}") } else { format!("{num:02} {who}") }
+}
+
+/// The nineteen characters in `pl00`..`pl18` order.
+pub const CHARACTER_NAMES: [&str; 19] = [
+    "Reimu", "Marisa", "Sanae", "Ran", "Aunn", "Nazrin", "Seiran", "Orin", "Tsukasa", "Mamizou", "Yachie",
+    "Saki", "Yuuma", "Suika", "Biten", "Enoko", "Chiyari", "Hisami", "Zanmu",
+];
