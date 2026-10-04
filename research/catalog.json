@@ -2621,6 +2621,13 @@
             "sound_request"
           ],
           "evidence": "code_checked"
+        },
+        {
+          "text": "Sound 0x14 (Marisa beam, lazer02) and 0x37 are LOOPED rows (table +0xc = 1; row scan: ids 0x14, 0x37, 0x58, 0x59). The beam update callbacks 0054d370 and 0054c830 stop 0x14 (FUN_004bb7d0) when a beam ends (state 2, VM interrupt 1); 0054f7c0 stops 0x1e and 0x37 when the shot manager is idle. The port now stops 0x14 when a beam ends (fixes Marisa's sound repeating after shooting stopped). 0x1e/0x37 have no player in this port.",
+          "sources": [
+            "sound_request"
+          ],
+          "evidence": "code_checked"
         }
       ],
       "checks": {

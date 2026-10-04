@@ -855,7 +855,13 @@ impl Player {
         for b in &mut beams {
             let origin = self.origin_of(b.origin()).unwrap_or(self.pos);
             let alive = if b.is_charge() { !matches!(self.state, State::GameOver) } else { keep };
+            let was_ended = b.ended;
             b.update(origin, alive, field, world);
+            // 0054d370 / 0054c830: when a beam ends (state 2, VM interrupt 1) they stop sound 0x14,
+            // which is a looped sound (table row +0xc = 1) started by the beam init callbacks.
+            if !was_ended && b.ended && crate::sfx::on(crate::sfx::Cat::BeamStart) {
+                self.sounds.push((0x14, Some(crate::sfx::STOP)));
+            }
             b.collide(enemies, world, lib, field, self.anm_file, &mut hits);
             if b.ended && !b.is_charge() { if let Some(g) = self.beam_groups.get_mut(b.group.max(0) as usize) { *g = false; } }
         }
@@ -1118,6 +1124,30 @@ use super::*;
             let back=p.options[1].pos;let free_off=p.sht.options[0][2];
             assert_eq!(back,[p.fixed[0]+(free_off[0]*128.0) as i32,p.fixed[1]+(free_off[1]*128.0) as i32]);
         }
+    }
+
+    #[test]
+    fn marisa_shot_sounds_stop_with_the_shot() {
+        let path=std::path::PathBuf::from(std::env::var_os("TH19_DAT").unwrap_or_else(||
+            std::path::PathBuf::from(std::env::var_os("USERPROFILE").unwrap()).join("Downloads/th19/th19/th19.dat").into_os_string()));
+        if !path.is_file() {return;}
+        let mut dat=th_formats::dat::Archive::open(path).unwrap();
+        let (mut world,lib,field)=(World::default(),AnmLibrary::default(),[0.0,0.0,384.0,448.0]);
+        let mut sht=th_formats::sht::ShtFile::parse(&dat.read("pl01.sht").unwrap()).unwrap();
+        sht.option_script=-1;
+        let mut p=Player::new(sht,0);p.character=Character::Marisa;p.state=State::Normal;p.power=200;
+        let mut log=Vec::new();
+        for t in 0..200 {
+            let keys=if t<100 {input::SHOT} else {0};
+            p.update(keys,&mut [],&mut world,&lib,field);
+            for (id,pan) in p.sounds.drain(..) {log.push((t,id,pan));}
+        }
+        eprintln!("{log:?}");
+        // The looped beam sound 0x14 starts with the beam and is stopped when the shot ends.
+        let stop=Some(crate::sfx::STOP);
+        assert!(log.iter().any(|&(t,id,pan)| id==0x14&&pan!=stop&&t<5));
+        assert!(log.iter().any(|&(t,id,pan)| id==0x14&&pan==stop&&t>=100),"no stop for the beam sound: {log:?}");
+        assert!(log.iter().all(|&(t,id,pan)| t<100+15||(id==0x14&&pan==stop)),"sound after the shot stopped: {log:?}");
     }
 
     fn amulet(angle: f32, speed: f32, time: i32) -> PlayerBullet {
