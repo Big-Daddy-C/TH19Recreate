@@ -95,7 +95,7 @@ struct Viewer {
     /// Each character's stage (`th_formats::music::character_stages`) and the stage whose music
     /// is playing.
     character_stages: Vec<u32>,
-    music_stage: Option<usize>,
+    music_stage: Option<(usize, [usize; 4], usize)>,
     mode: Mode,
     /// Overlay the playfield divider on the stage background.
     show_fields: bool,
@@ -242,35 +242,31 @@ impl Viewer {
         }
     }
 
-    /// The stage's music: the theme of a character who uses this stage, chosen at random when
-    /// several do (`th_formats::music`). A stage nobody uses stays silent. It keeps playing across
-    /// rounds of the same stage.
+    /// The default music: the theme of one of the players' characters, picked at random when a
+    /// match (or a different line-up) starts and kept across rounds. The Song row in the menu
+    /// overrides it. There is no separate boss music.
     fn start_music(&mut self) {
-        if self.audio.is_none() || self.music_stage == Some(self.stage_idx) {
+        let key = (self.stage_idx, std::array::from_fn(|i| self.chars[i] as usize), self.team_size);
+        if self.audio.is_none() || self.music_stage == Some(key) {
             return;
         }
-        self.music_stage = Some(self.stage_idx);
-        let themes = th_formats::music::stage_themes(&self.character_stages, self.stage_idx as u32);
+        self.music_stage = Some(key);
+        let players: Vec<usize> = (0..self.team_size.clamp(1, 2) * 2).map(|i| self.chars[i] as usize).collect();
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos());
-        self.stage_theme = (!themes.is_empty()).then(|| themes[nanos as usize % themes.len()]);
+        let pick = players[nanos as usize % players.len()];
+        self.stage_theme = th_formats::music::CHARACTER_THEMES.get(pick).copied();
         self.update_music();
     }
 
-    /// Keep the right track playing: the song picked in the menu if any, else the theme of the
-    /// character whose boss is on either field, else the stage's theme (silence for a stage no
-    /// character uses). Boss music is an assumption: the original's trigger was not found.
+    /// Keep the right track playing: the song picked in the menu if any, else the random
+    /// player theme chosen by `start_music`.
     fn update_music(&mut self) {
         if self.mode != Mode::Game {
             return;
         }
-        let boss = self.game.as_ref().and_then(|g| {
-            g.sides.iter().find_map(|s| s.boss_owner()).and_then(|owner| self.chars.get(owner).map(|c| *c as usize))
-        });
         let Some(audio) = &mut self.audio else { return };
         let picked = self.music_override.and_then(|i| audio.track_names().get(i).cloned());
-        let theme = picked
-            .or_else(|| boss.and_then(|c| th_formats::music::CHARACTER_THEMES.get(c)).map(|t| t.to_string()))
-            .or_else(|| self.stage_theme.map(str::to_string));
+        let theme = picked.or_else(|| self.stage_theme.map(str::to_string));
         match theme {
             Some(name) => audio.play_music(&name),
             None => audio.stop_music(),
