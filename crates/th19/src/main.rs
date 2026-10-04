@@ -124,6 +124,9 @@ struct Viewer {
     /// Shift+K gives player 1 an independent copy of the same AI controller.
     player_bot_ai: bool,
     player_bot: th_game::bot::Bot,
+    /// Controllers for the teammates in 2v2 (yours, then the opposing team's).
+    ally_bot: th_game::bot::Bot,
+    rival_bot: th_game::bot::Bot,
     /// Each side's character (`]` / `[` change the bot's, with Shift the player's).
     chars: [th_game::character::Character; 4],
     /// Players per team: 1 (1 vs 1) or 2 (2 vs 2).
@@ -181,6 +184,8 @@ impl Viewer {
             opponent_idle: false,
             player_bot_ai: false,
             player_bot: th_game::bot::Bot::new(),
+            ally_bot: th_game::bot::Bot::new(),
+            rival_bot: th_game::bot::Bot::new(),
             chars: [th_game::character::Character::Reimu; 4],
             team_size: 1,
             music_override: None,
@@ -213,6 +218,8 @@ impl Viewer {
         self.stage = None;
         self.bot = th_game::bot::Bot::new();
         self.player_bot = th_game::bot::Bot::new();
+        self.ally_bot = th_game::bot::Bot::new();
+        self.rival_bot = th_game::bot::Bot::new();
         let Some(name) = self.stage_files.get(self.stage_idx).cloned() else { return };
         let std = match self.dat.read(&name).map(|b| th_formats::stage::StdFile::parse(&b)) {
             Ok(Ok(s)) => s,
@@ -272,12 +279,14 @@ impl Viewer {
 
     /// Load the ECL scripts and their sprites and start both sides' stage scripts.
     fn load_game(&mut self) -> Option<Game> {
-        let chars = [self.chars[0], self.chars[1]];
-        // One ECL program and sprite-slot set per side's character: attacks a side sends run
-        // the sender's script on the other field.
+        let chars = self.chars;
+        let team = self.team_size.clamp(1, 2);
+        // One ECL program and sprite-slot set per player's character: attacks a player sends
+        // run the sender's script on the other field. Index = side for the first players,
+        // side + 2 for their partners.
         let mut progs = Vec::new();
-        let mut sets = [[None; 8]; 2];
-        for (i, c) in chars.iter().enumerate() {
+        let mut sets = [[None; 8]; 4];
+        for (i, c) in chars.iter().enumerate().take(2 * team) {
             let ecl = format!("{}.ecl", c.prefix());
             let dat = &mut self.dat;
             let prog = th_ecl::Program::load(&ecl, |n| dat.read(n).ok()).map_err(|e| log::error!("{ecl}: {e}")).ok()?;
@@ -312,16 +321,19 @@ impl Viewer {
             s.st.ascii_anm = ascii;
             s.st.ghost_anm = ghost;
             s.start(&progs[i]);
-            let prefix = chars[i].prefix();
-            let sht = self.dat.read(&format!("{prefix}.sht")).ok().and_then(|b| th_formats::sht::ShtFile::parse(&b).ok());
-            let pl_anm = self.load_anm(&format!("{prefix}.anm"));
-            if let (Some(sht), Some(anm)) = (sht, pl_anm) {
-                let mut p = th_game::player::Player::new(sht, anm);
-                p.character = chars[i];
-                p.free_charge = self.full_charge;
-                p.aura_anm = aura;
-                p.effect_anm = s.st.anm_files[1];
-                s.player = Some(p);
+            for slot in 0..team {
+                let c = chars[i + 2 * slot];
+                let prefix = c.prefix();
+                let sht = self.dat.read(&format!("{prefix}.sht")).ok().and_then(|b| th_formats::sht::ShtFile::parse(&b).ok());
+                let pl_anm = self.load_anm(&format!("{prefix}.anm"));
+                if let (Some(sht), Some(anm)) = (sht, pl_anm) {
+                    let mut p = th_game::player::Player::new(sht, anm);
+                    p.character = c;
+                    p.free_charge = self.full_charge;
+                    p.aura_anm = aura;
+                    p.effect_anm = s.st.anm_files[1];
+                    if slot == 0 { s.player = Some(p) } else { s.partner = Some(p) }
+                }
             }
         }
         sides[0].st.boss_level = self.start_boss_level;
@@ -384,7 +396,14 @@ impl Viewer {
                     let k = if i == 0 {
                         if self.player_bot_ai { self.player_bot.think(s) } else { keys }
                     } else if self.opponent_idle { 0 } else if self.bot_ai { self.bot.think(s) } else { th_game::player::input::SHOT };
-                    if let Some(p) = &mut s.player {
+                    // Teammates are always bots for now (the menu will configure this later).
+                    if s.partner.is_some() {
+                        std::mem::swap(&mut s.player, &mut s.partner);
+                        s.partner_keys = if i == 0 { self.ally_bot.think(s) }
+                            else if self.opponent_idle { 0 } else if self.bot_ai { self.rival_bot.think(s) } else { th_game::player::input::SHOT };
+                        std::mem::swap(&mut s.player, &mut s.partner);
+                    }
+                    for p in s.player.iter_mut().chain(s.partner.iter_mut()) {
                         p.godmode = self.godmode;
                         p.free_charge = self.full_charge;
                     }
@@ -393,8 +412,8 @@ impl Viewer {
                     s.st.sounds.clear();
                 }
                 th_game::side::dispatch_charges(&mut g.sides);
-                let defeated = std::array::from_fn(|i| g.sides[i].player.as_ref()
-                    .is_some_and(|p| p.state == th_game::player::State::GameOver));
+                // A team is out when both teammates are out of hearts.
+                let defeated = std::array::from_fn(|i| g.sides[i].defeated());
                 g.round.resolve(defeated);
                 // APPROX: after a KO, hold briefly, then start the next round on fresh
                 // fields with the score kept (the original transition is not ported yet).
@@ -500,6 +519,20 @@ impl Viewer {
         } else {list.extend(self.world.draw_list(&self.lib,th_anm::Pass::Ui));}
         if let Some(g) = &self.game {
             for (side, field) in g.sides.iter().zip(FIELDS) {
+                // Provisional: hearts of each player in the top margin (partner on the right).
+                for (k, p) in side.players().enumerate() {
+                    for h in 0..p.lives.max(0) {
+                        let hx = if k == 0 { field[0] + 8.0 * h as f32 } else { field[0] + field[2] - 8.0 * (h + 1) as f32 };
+                        list.push(th_anm::DrawBatch::solid_rect([hx, 1.0, 6.0, 4.0], [0.95, 0.2, 0.3, 1.0]));
+                    }
+                }
+                if let Some(p) = &side.partner {
+                    let [x, _, w, _] = field;
+                    list.push(th_anm::DrawBatch::solid_rect([x, 6.0, w*(if p.free_charge {2500} else {p.meter}) as f32/2500.0, 3.0], [0.15, 0.45, 0.95, 1.0]));
+                    let ready = p.charge.value >= p.charge_settings.attack;
+                    let color = if ready { [1.0, 0.8, 0.2, 1.0] } else { [0.7, 0.7, 0.8, 1.0] };
+                    list.push(th_anm::DrawBatch::solid_rect([x, 10.0, w*p.charge.value as f32/2500.0, 4.0], color));
+                }
                 if let Some(p) = &side.player {
                     // Provisional HUD, outside the playfield. Top row = available meter;
                     // bottom row = held charge. Original front.anm HUD remains to be ported.
@@ -1193,7 +1226,9 @@ fn main() {
         viewer.full_charge = args.iter().any(|a| a == "--full-charge");
         viewer.bot_ai = !args.iter().any(|a| a == "--no-bot");
         // `--p1 N` / `--p2 N`: character select numbers (1 Reimu, 2 Marisa, 3 Sanae, 4 Ran).
-        for (flag, side) in [("--p1", 0), ("--p2", 1)] {
+        // `--2v2` plays two per team; `--p3` is your ally, `--p4` the second rival.
+        if args.iter().any(|a| a == "--2v2") { viewer.team_size = 2; }
+        for (flag, side) in [("--p1", 0), ("--p2", 1), ("--p3", 2), ("--p4", 3)] {
             if let Some(n) = args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)?.parse::<usize>().ok()) {
                 viewer.chars[side] = th_game::character::Character::ALL[(n.max(1) - 1).min(th_game::character::Character::ALL.len() - 1)];
             }
@@ -1240,6 +1275,36 @@ fn main() {
 #[cfg(test)]
 mod charge_input_tests {
     use super::*;
+    #[test]
+    fn two_vs_two_teammates_have_own_hearts_and_one_boss_per_field() {
+        let Some(home) = std::env::var_os("USERPROFILE") else { return };
+        let path = std::env::var_os("TH19_DAT").map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(home).join("Downloads/th19/th19/th19.dat"));
+        if !path.is_file() { return; }
+        use th_game::character::Character::*;
+        use th_game::charge::Level;
+        let mut viewer = Viewer::new(Archive::open(path).unwrap());
+        viewer.mode = Mode::Game;
+        viewer.team_size = 2;
+        viewer.chars = [Reimu, Marisa, Sanae, Ran];
+        viewer.game = viewer.load_game();
+        let g = viewer.game.as_mut().unwrap();
+        assert_eq!(g.progs.len(), 4);
+        assert_eq!(g.sides[1].partner.as_ref().unwrap().character, Ran);
+        // Separate hearts: one teammate out does not end the team.
+        g.sides[0].partner.as_mut().unwrap().state = th_game::player::State::GameOver;
+        assert!(!g.sides[0].defeated());
+        g.sides[0].player.as_mut().unwrap().state = th_game::player::State::GameOver;
+        assert!(g.sides[0].defeated());
+        // Both teammates release a boss attack in the same frame: one boss, one EX.
+        for side in &mut g.sides { for p in side.player.iter_mut().chain(side.partner.iter_mut()) { p.state = th_game::player::State::Normal; } }
+        g.sides[0].player.as_mut().unwrap().charge_event = Some(Level::Boss);
+        g.sides[0].partner.as_mut().unwrap().charge_event = Some(Level::Boss);
+        th_game::side::dispatch_charges(&mut g.sides);
+        let subs: Vec<(&str, Option<usize>)> = g.sides[1].st.spawn.iter().map(|r| (r.sub.as_str(), r.owner)).collect();
+        assert_eq!(subs, [("BossAttack", Some(0)), ("ExtraAttack", Some(2))], "{subs:?}");
+    }
+
     #[test]
     fn shift_k_toggles_independent_player_ai_and_returns_to_manual_input() {
         let Some(home) = std::env::var_os("USERPROFILE") else { return };

@@ -99,11 +99,8 @@ impl Items {
     }
 
     /// `FUN_00520d40`: one frame. Returns the number of orbs the player collected.
-    pub fn update(&mut self, player: Option<&Player>, st: &SideState, world: &mut World, lib: &AnmLibrary) -> i32 {
-        let mut collected = 0;
-        let (ppos, pstate) = player.map_or(([0.0, 1000.0], State::Dead), |p| (p.pos, p.state));
-        let present = player.is_some();
-        let alive = !matches!(pstate, State::Dead | State::Hit);
+    pub fn update(&mut self, players: &[&Player], st: &SideState, world: &mut World, lib: &AnmLibrary) -> Vec<i32> {
+        let mut collected = vec![0; players.len().max(1)];
         let file = st.anm_files[0];
         self.list.retain_mut(|it| {
             if it.phase == Phase::Wait {
@@ -117,6 +114,15 @@ impl Items {
                 }
                 return true;
             }
+            // Each item follows the living player nearest to it.
+            let near = players.iter().enumerate().min_by(|a, b| {
+                let key = |p: &Player| (matches!(p.state, State::Dead), (p.pos[0] - it.pos[0]).powi(2) + (p.pos[1] - it.pos[1]).powi(2));
+                key(a.1).partial_cmp(&key(b.1)).unwrap_or(std::cmp::Ordering::Equal)
+            });
+            let idx = near.map_or(0, |(i, _)| i);
+            let (ppos, pstate) = near.map_or(([0.0, 1000.0], State::Dead), |(_, p)| (p.pos, p.state));
+            let present = near.is_some();
+            let alive = !matches!(pstate, State::Dead | State::Hit);
             let mut gone = false;
             let homing_now = present && alive && ppos[1] <= COLLECT_LINE;
             match it.phase {
@@ -166,7 +172,7 @@ impl Items {
             if !gone && present && pstate != State::Dead {
                 let d2 = (ppos[0] - it.pos[0]).powi(2) + (ppos[1] - it.pos[1]).powi(2);
                 if d2 < PICKUP_RADIUS * PICKUP_RADIUS {
-                    collected += 1;
+                    collected[idx] += 1;
                     if crate::sfx::on(crate::sfx::Cat::Item) { self.sounds.push((0x25, (it.pos[0] * 1000.0 / 192.0) as i32)); }
                     gone = true;
                 } else if !matches!(it.phase, Phase::Attracted | Phase::Homing | Phase::Rising)

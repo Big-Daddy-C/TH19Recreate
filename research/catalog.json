@@ -2659,6 +2659,16 @@
             "stage_select"
           ],
           "evidence": "code_checked"
+        },
+        {
+          "text": "Ran's spell-card 'BossB' spinning familiar (ECL 301) is created with flag 0x20 for ~60 ticks, then 0x101. ECL 525 (FUN_0050ca70, the clear on boss defeat) spares enemies with (flags & 0xa0) != 0 unless flag 0x100, and the native 518 handler falls through into 525's clear. The port runs the clear when the boss slot is released (ECL 512 with slot < 0) and kills every enemy with flag 0x100 and no boss slot, so the familiar vanishes with the bullets. APPROX: derived from the user's report plus the flag logic above, not compared against original footage. Regression: ran_boss_clones_do_not_outlive_the_boss.",
+          "sources": [],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Port-only features, not original behaviour: the pause menu (Esc) has a Players row (1v1 / 2v2), a character select per player, a song selector (Auto or any of the 24 thbgm.fmt tracks) and ducks music/SE by one third while open. Boss music is an ASSUMPTION: while a boss attack is on a field the sender character's theme plays (the original's VS music trigger was not found). 2v2: each field holds two players (SideState tracks the first, Side.partner the second), each with its own hearts, meter and charge gauge; EX/boss levels are kept per player; ECL program owner indexes are side (first players) and side+2 (partners); a boss attack requested while the opponent field already has or is spawning a boss is sent as that player's EX attack; a team loses when both players are out of hearts. Aimed bullets target the first living player; items follow the nearest living player. The ally/rival partners are always bots for now.",
+          "sources": [],
+          "evidence": "assumption"
         }
       ],
       "checks": {

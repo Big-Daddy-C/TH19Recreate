@@ -79,7 +79,7 @@ pub struct SideState {
     pub anm_files: [Option<usize>; 8],
     /// The sprite slots of each side's character program (slot 3 is its `plXXb.anm`); enemies
     /// run their owner's slots.
-    pub anm_sets: [[Option<usize>; 8]; 2],
+    pub anm_sets: [[Option<usize>; 8]; 4],
     /// This field's side index (0 left, 1 right).
     pub index: usize,
     pub spawn: Vec<SpawnRequest>,
@@ -313,7 +313,7 @@ impl SideState {
     /// synchronously and scripts read the new id right away (variable -9931).
     /// Sprite slots of `owner`'s character program.
     pub fn anm_set(&self, owner: usize) -> &[Option<usize>; 8] {
-        &self.anm_sets[owner.min(1)]
+        &self.anm_sets[owner.min(3)]
     }
 
     pub fn request(&mut self, mut req: SpawnRequest) {
@@ -393,9 +393,36 @@ pub struct Side {
     /// The stage script thread group (`main`), run like an enemy with no body.
     pub stage: Option<Enemy>,
     pub player: Option<Player>,
+    /// 2v2: the teammate sharing this field. It has its own HP and charge pool.
+    pub partner: Option<Player>,
+    /// Input bits for the partner (the viewer or a bot writes them each frame).
+    pub partner_keys: u32,
+    /// The partner's EX and boss levels (`SideState` holds the first player's).
+    pub partner_levels: [u8; 2],
 }
 
 impl Side {
+    /// Both players of this field (the first player, then the partner).
+    pub fn players(&self) -> impl Iterator<Item = &Player> {
+        self.player.iter().chain(self.partner.iter())
+    }
+
+    /// Player `slot` (0 = first player, 1 = partner).
+    pub fn slot_mut(&mut self, slot: usize) -> Option<&mut Player> {
+        if slot == 0 { self.player.as_mut() } else { self.partner.as_mut() }
+    }
+
+    /// Where bullets and enemies aim: the first player, or the partner once it is out.
+    pub fn target_pos(&self) -> [f32; 2] {
+        let out = |p: &Player| matches!(p.state, crate::player::State::Dead | crate::player::State::GameOver);
+        self.players().find(|p| !out(p)).or(self.player.as_ref()).map_or([0.0, 400.0], |p| p.pos)
+    }
+
+    /// Every player on this field has lost all hearts.
+    pub fn defeated(&self) -> bool {
+        self.player.is_some() && self.players().all(|p| p.state == crate::player::State::GameOver)
+    }
+
     pub fn new(field: [f32; 4], seed: u32, wave_sequence: [u8; 256], anm_files: [Option<usize>; 8]) -> Self {
         Self {
             st: SideState {
@@ -412,7 +439,7 @@ impl Side {
                 wave_counter: 0,
                 wave_param: 0,
                 anm_files,
-                anm_sets: [anm_files; 2],
+                anm_sets: [anm_files; 4],
                 index: 0,
                 spawn: Vec::new(),
                 alive: Vec::new(),
@@ -451,6 +478,9 @@ impl Side {
             enemies: Vec::new(),
             stage: None,
             player: None,
+            partner: None,
+            partner_keys: 0,
+            partner_levels: [0; 2],
         }
     }
 
@@ -531,47 +561,52 @@ impl Side {
         };
         let mut ctx =
             bullet::Ctx { world, lib, types: &types, anm, field: st.field, player: st.player_pos, rand: &mut rand };
-        let mut hit: Option<[f32; 2]> = None;
+        let mut hit: Option<(usize, [f32; 2])> = None;
         let mut grazes: Vec<([f32; 2], u32)> = Vec::new();
-        let player_r = self.player.as_ref().map_or(0.0, |p| p.hitbox_radius());
-        let cancel = self.player.as_ref().and_then(|p| p.cancel_radius);
+        let ps: Vec<&Player> = self.player.iter().chain(self.partner.iter()).collect();
+        let radii: Vec<f32> = ps.iter().map(|p| p.hitbox_radius()).collect();
         let (scope, scope_character) = (st.scope_circle, st.scope_character);
-        for b in st.bullets.iter_mut() {
+        'bullets: for b in st.bullets.iter_mut() {
             // Original contact callback applies its factor to the following movement tick.
             let dt = b.scope_time_scale;
             b.update_scaled(&mut ctx, dt);
             st.sounds.extend(b.sounds.drain(..));
             let slowed = b.state == 1 && b.hitbox > 0.0 && scope.is_some_and(|(c,r)| crate::scope::bullet_hit(scope_character,c,r,b.pos,b.hitbox));
             // The graze ring counts as contact too (iVar6 == 2 from FUN_00549e00); a hit does not.
-            let (dx, dy) = (b.pos[0] - st.player_pos[0], b.pos[1] - st.player_pos[1]);
-            let d2 = dx * dx + dy * dy;
-            let ring = b.state == 1 && !b.delete && b.hitbox > 0.0 && self.player.is_some()
-                && !(player_r > 0.0 && d2 < player_r * player_r + b.hitbox * b.hitbox)
-                && d2 < (3.0 + 40.0f32.max(b.hitbox / 2.5)).powi(2) + b.hitbox * b.hitbox;
+            let d2_of = |b: &bullet::Bullet, p: &Player| (b.pos[0] - p.pos[0]).powi(2) + (b.pos[1] - p.pos[1]).powi(2);
+            let reach2 = |b: &bullet::Bullet| (3.0 + 40.0f32.max(b.hitbox / 2.5)).powi(2) + b.hitbox * b.hitbox;
+            let ring = b.state == 1 && !b.delete && b.hitbox > 0.0
+                && ps.iter().zip(&radii).any(|(p, &r)| {
+                    let d2 = d2_of(b, p);
+                    !(r > 0.0 && d2 < r * r + b.hitbox * b.hitbox) && d2 < reach2(b)
+                });
             b.scope_contact(slowed, slowed || ring, ctx.world, &mut *ctx.rand);
-            let (dx, dy) = (b.pos[0] - st.player_pos[0], b.pos[1] - st.player_pos[1]);
-            let d2 = dx * dx + dy * dy;
-            if let Some(r) = cancel {
-                if d2 <= r * r && b.invuln == 0 {
-                    b.cancel();
-                    continue;
+            for p in &ps {
+                if let Some(r) = p.cancel_radius {
+                    if d2_of(b, p) <= r * r && b.invuln == 0 {
+                        b.cancel();
+                        continue 'bullets;
+                    }
                 }
             }
             // Marisa's bomb band (FUN_004ee0d0): a live or appearing bullet touching the column.
-            if self.player.as_ref().is_some_and(|p| p.cancel_columns.iter().any(|&(x, w)|
+            if ps.iter().any(|p| p.cancel_columns.iter().any(|&(x, w)|
                 b.invuln == 0 && matches!(b.state, 1 | 2) && (b.pos[0] - x).abs() <= w + b.hitbox)) { b.cancel(); continue; }
-            if self.player.as_ref().is_some_and(|p| p.cancel_rects.iter().any(|&(pos,size)|
+            if ps.iter().any(|p| p.cancel_rects.iter().any(|&(pos,size)|
                 b.invuln==0 && matches!(b.state,1|2) && crate::scope::rect_circle(pos,size,b.pos,b.hitbox))) { b.cancel(); continue; }
-            if self.player.as_ref().is_some_and(|p| p.cancel_circles.iter().any(|(pos,r)|
+            if ps.iter().any(|p| p.cancel_circles.iter().any(|(pos,r)|
                 b.intersects_cancel(*pos,*r,ctx.world,ctx.lib))) { b.cancel(); continue; }
             // FUN_00549e00: hit when d^2 < player_r^2 + bullet_r^2.
-            if b.state == 1 && !b.delete && player_r > 0.0 && d2 < player_r * player_r + b.hitbox * b.hitbox {
-                hit = Some(b.pos);
-            } else if b.state == 1 && !b.delete && b.hitbox > 0.0 && self.player.is_some() {
+            let hit_by = if b.state == 1 && !b.delete {
+                ps.iter().zip(&radii).position(|(p, &r)| r > 0.0 && d2_of(b, p) < r * r + b.hitbox * b.hitbox)
+            } else { None };
+            if let Some(i) = hit_by {
+                hit = Some((i, b.pos));
+            } else if b.state == 1 && !b.delete && b.hitbox > 0.0 && !ps.is_empty() {
                 // Otherwise inside the graze ring (radius 3 + max(40, r / 2.5), plus r): the
                 // bullet's gate decides whether this tick grazes (FUN_004f5130 / FUN_00549fb0).
-                let reach = 3.0 + 40.0f32.max(b.hitbox / 2.5);
-                if b.graze.tick(d2 < reach * reach + b.hitbox * b.hitbox) {
+                let near = ps.iter().any(|p| d2_of(b, p) < reach2(b));
+                if b.graze.tick(near) {
                     // Colour +0x694: the type's table colour for mode 6, else 0xffd08080.
                     let rgb = types.get(b.kind.max(0) as usize)
                         .filter(|t| t.cancel_mode == 6)
@@ -628,8 +663,8 @@ impl Side {
                 laser: crate::laser::LaserEt { sound: [0, -1], ..Default::default() }, ..bullet::Et::default() };
             bullet::fire(&et, a.pos, &mut ctx, &mut st.bullets);
         }
-        if let Some(from) = hit {
-            if let Some(p) = &mut self.player {
+        if let Some((i, from)) = hit {
+            if let Some(p) = if i == 0 { self.player.as_mut() } else { self.partner.as_mut() } {
                 p.hit(from, ctx.world, lib, st.field);
             }
         }
@@ -751,11 +786,18 @@ impl Side {
         }
     }
 
+    /// The scope of the first player whose scope is active (else the first player's character).
+    fn update_scope(&mut self) {
+        let scoped = self.player.iter().chain(self.partner.iter()).find(|p| p.scope.active()).or(self.player.as_ref());
+        let st = &mut self.st;
+        st.scope_circle = scoped.filter(|p| p.scope.active()).map(|p| (p.scope.pos, p.scope.radius));
+        st.scope_column = scoped.is_some_and(|p| p.character == crate::character::Character::Marisa);
+        st.scope_character = scoped.map_or(Default::default(), |p| p.character);
+    }
+
     /// One frame. `keys` are the player's input bits ([`crate::player::input`]).
     pub fn tick(&mut self, progs: &[Program], keys: u32, world: &mut World, lib: &AnmLibrary) {
-        self.st.scope_circle = self.player.as_ref().filter(|p| p.scope.active()).map(|p| (p.scope.pos,p.scope.radius));
-        self.st.scope_column = self.player.as_ref().is_some_and(|p| p.character == crate::character::Character::Marisa);
-        self.st.scope_character = self.player.as_ref().map_or(Default::default(),|p|p.character);
+        self.update_scope();
         let mut requests = Vec::new();
         self.st.pending_spirits.retain_mut(|p| {
             if let Some(req) = p.tick(self.st.ghost_anm,world,lib) { requests.push(req); false } else { true }
@@ -797,21 +839,25 @@ impl Side {
             self.create_pending(progs);
             i += 1;
         }
-        if let Some(p) = &mut self.player {
-            p.update(keys, &mut self.enemies, world, lib, self.st.field);
-            self.st.player_pos = p.pos;
+        for slot in 0..2 {
+            let k = if slot == 0 { keys } else { self.partner_keys };
+            let field = self.st.field;
+            let Some(p) = (if slot == 0 { self.player.as_mut() } else { self.partner.as_mut() }) else { continue };
+            p.update(k, &mut self.enemies, world, lib, field);
             // The player has no side index; a sound without its own pan is panned to its side.
-            let side = if self.st.field[0] < 320.0 { 0 } else { 1 };
+            let side = if field[0] < 320.0 { 0 } else { 1 };
             let side_pan = if side == 0 { -100 } else { 100 } * 1000 / 192;
             let charge = p.charge.sounds.drain(..).map(|(id, pan)| (id, (pan == crate::sfx::STOP).then_some(pan)));
             for (id, pan) in p.sounds.drain(..).chain(charge).collect::<Vec<_>>() {
                 let id = if id & crate::sfx::PER_SIDE != 0 { (id & !crate::sfx::PER_SIDE) + side } else { id };
                 self.st.sounds.push((id, pan.unwrap_or(side_pan)));
             }
-            // Losing a heart raises this side's EX and boss levels by one while below 3
+            // Losing a heart raises this player's EX and boss levels by one while below 3
             // (FUN_00549830, status +0x38/+0x3c).
             if std::mem::take(&mut p.just_died) {
-                for level in [&mut self.st.extra_level, &mut self.st.boss_level] {
+                let levels = if slot == 0 { [&mut self.st.extra_level, &mut self.st.boss_level] }
+                    else { let [e, b] = &mut self.partner_levels; [e, b] };
+                for level in levels {
                     if *level < 3 {
                         *level += 1;
                     }
@@ -821,12 +867,12 @@ impl Side {
                 use crate::charge::Level;
                 let sub = match level { Level::Attack => None, Level::Skill => Some("Ecl_EtBreakLv2"),
                     Level::Extra => Some("Ecl_EtBreakLv3"), Level::Boss => Some("Ecl_EtBreakLv4") };
-                if let Some(sub) = sub { self.st.request(script_request(sub,p.pos,None)); }
+                let pos = p.pos;
+                if let Some(sub) = sub { self.st.request(script_request(sub,pos,None)); }
             }
         }
-        self.st.scope_circle = self.player.as_ref().filter(|p| p.scope.active()).map(|p| (p.scope.pos,p.scope.radius));
-        self.st.scope_column = self.player.as_ref().is_some_and(|p| p.character == crate::character::Character::Marisa);
-        self.st.scope_character = self.player.as_ref().map_or(Default::default(),|p|p.character);
+        self.st.player_pos = self.target_pos();
+        self.update_scope();
         self.update_bullets(world, lib);
         self.update_lasers(world, lib);
         self.update_explosions(world);
@@ -840,8 +886,8 @@ impl Side {
         self.update_combo(world, lib);
         // FUN_00509980: a body with flag 0x200 that is not touching the player but is inside
         // its graze ring throws an orb at the player every 6th frame of its own time.
-        if let Some(p) = self.player.as_ref().filter(|p| !matches!(p.state, crate::player::State::Dead)) {
-            let mut at = None;
+        let mut at = None;
+        for p in self.players().filter(|p| !matches!(p.state, crate::player::State::Dead)) {
             for e in &self.enemies {
                 let d = &e.data;
                 if d.flags & 0x200 == 0 || d.flags & (crate::enemy::flag::NO_HITBOX | crate::enemy::flag::HIDDEN) != 0 || d.time % 6 != 0 {
@@ -854,6 +900,8 @@ impl Side {
                     at = Some(p.pos);
                 }
             }
+        }
+        {
             if let Some(at) = at {
                 // FUN_00549fb0(player pos, colour 0): the same award as a bullet graze, with a
                 // black spark and sound 0x2a at the player.
@@ -871,12 +919,17 @@ impl Side {
             }
         }
         let mut items = std::mem::take(&mut self.st.items);
-        let orbs = items.update(self.player.as_ref(), &self.st, world, lib);
+        let orbs = {
+            let ps: Vec<&Player> = self.player.iter().chain(self.partner.iter()).collect();
+            items.update(&ps, &self.st, world, lib)
+        };
         self.st.sounds.extend(items.sounds.drain(..));
         self.st.items = items;
-        if orbs > 0 {
-            if let Some(p) = self.player.as_mut() {
-                p.meter = (p.meter + crate::item::meter_for(orbs)).clamp(0, 2500);
+        for (slot, &n) in orbs.iter().enumerate() {
+            if n > 0 {
+                if let Some(p) = if slot == 0 { self.player.as_mut() } else { self.partner.as_mut() } {
+                    p.meter = (p.meter + crate::item::meter_for(n)).clamp(0, 2500);
+                }
             }
         }
         let mut k = 0;
@@ -901,27 +954,30 @@ impl Side {
         // The player's circle/column clearing also visits the laser manager. Script clears
         // use the same geometry with a separate immunity policy (00530c60/005303f0).
         let mut areas = Vec::new();
-        if let Some(p) = &self.player {
+        for p in self.players() {
             areas.extend(p.cancel_circles.iter().map(|&(pos,radius)| crate::laser::CancelArea::Circle {pos,radius}));
             areas.extend(p.cancel_rects.iter().map(|&(pos,size)| crate::laser::CancelArea::Rect {pos,size}));
             areas.extend(p.cancel_columns.iter().map(|&(x,half_width)| crate::laser::CancelArea::Column {x,half_width}));
         }
         for area in areas { self.st.cancel_lasers(area, true, world, lib); }
         let mut lasers = std::mem::take(&mut self.st.lasers);
-        let mut hit = false;
+        let mut hit: Option<usize> = None;
         let mut grazed = None;
         let mut spark_at = None;
-        let player = self.player.as_ref().map(|p| (p.pos, p.hitbox_radius().max(3.0), p.hitbox_radius() > 0.0));
+        let players: Vec<([f32; 2], f32, bool)> =
+            self.players().map(|p| (p.pos, p.hitbox_radius().max(3.0), p.hitbox_radius() > 0.0)).collect();
         lasers.retain_mut(|l| {
             let alive = l.update(world, field);
-            if let Some((pos, radius, vulnerable)) = player.filter(|_| alive) {
-                match l.contact(pos, radius) {
-                    crate::laser::Contact::Hit if vulnerable => hit = true,
-                    crate::laser::Contact::Hit | crate::laser::Contact::Graze if l.graze_tick() => {
-                        grazed = Some(pos);
-                        spark_at = Some(l.graze_point(pos));
+            if alive {
+                for (i, &(pos, radius, vulnerable)) in players.iter().enumerate() {
+                    match l.contact(pos, radius) {
+                        crate::laser::Contact::Hit if vulnerable => hit = Some(i),
+                        crate::laser::Contact::Hit | crate::laser::Contact::Graze if l.graze_tick() => {
+                            grazed = Some(pos);
+                            spark_at = Some(l.graze_point(pos));
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
             if !alive {
@@ -945,8 +1001,8 @@ impl Side {
                 (seed >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0
             });
         }
-        if hit {
-            if let Some(p) = self.player.as_mut() {
+        if let Some(slot) = hit {
+            if let Some(p) = if slot == 0 { self.player.as_mut() } else { self.partner.as_mut() } {
                 let from = p.pos;
                 p.hit(from, world, lib, field);
             }
@@ -996,10 +1052,12 @@ impl Side {
 /// one attack an extra simulation tick. Higher attacks are sent to the opponent only.
 pub fn prepare_charge_targets(sides: &mut [Side]) {
     if sides.len()!=2 { return; }
-    let positions=[sides[0].player.as_ref().map_or([0.0,400.0],|p|p.pos),sides[1].player.as_ref().map_or([0.0,400.0],|p|p.pos)];
+    let positions=[sides[0].target_pos(),sides[1].target_pos()];
     for i in 0..2 {sides[i].st.opponent_pos=positions[1-i];}
     let active = [sides[0].has_boss(),sides[1].has_boss()];
-    for i in 0..2 { if let Some(p)=&mut sides[i].player { p.opponent_boss_active=active[1-i]; } }
+    for i in 0..2 {
+        for slot in 0..2 { if let Some(p)=sides[i].slot_mut(slot) { p.opponent_boss_active=active[1-i]; } }
+    }
 }
 pub fn dispatch_charges(sides: &mut [Side]) {
     if sides.len()!=2 { return; }
@@ -1095,7 +1153,7 @@ pub fn dispatch_charges(sides: &mut [Side]) {
         let character=sides[sender].player.as_ref().map_or(Default::default(),|p|p.character);
         for mut req in std::mem::take(&mut sides[sender].st.outgoing_reflects) {
             if req.aim_player {
-                let x = sides[1 - sender].player.as_ref().map_or(0.0, |p| p.pos[0]);
+                let x = sides[1 - sender].target_pos()[0];
                 req.target = Some([x, 448.0]);
             }
             let receiver = &mut sides[1 - sender].st;
@@ -1105,9 +1163,22 @@ pub fn dispatch_charges(sides: &mut [Side]) {
     }
     sides[0].st.sent_spirits_pending = sides[1].st.pending_spirits.len();
     sides[1].st.sent_spirits_pending = sides[0].st.pending_spirits.len();
-    let events: [Option<crate::charge::Level>;2] = std::array::from_fn(|i| sides[i].player.as_mut().and_then(|p| p.charge_event.take()));
-    for (sender,event) in events.into_iter().enumerate() {
+    // Program owners: the first players are 0 and 1, their partners 2 and 3 (see `anm_set`).
+    for (sender, slot) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+        let Some(mut event) = sides[sender].slot_mut(slot).and_then(|p| p.charge_event.take()) else { continue };
         use crate::charge::Level;
+        let owner = sender + 2 * slot;
+        // A partner has its own EX and boss levels; swap them in while it sends.
+        if slot == 1 {
+            let s = &mut sides[sender];
+            std::mem::swap(&mut s.st.extra_level, &mut s.partner_levels[0]);
+            std::mem::swap(&mut s.st.boss_level, &mut s.partner_levels[1]);
+        }
+        // Only one boss attack can be on a field: a second one (the teammate's, sent in the
+        // same frame) is that player's EX attack instead.
+        if event == Level::Boss && sides[1 - sender].has_boss() { event = Level::Extra; }
+        let character = sides[sender].slot_mut(slot).map_or(Default::default(), |p| p.character);
+        let origin_pos = sides[sender].slot_mut(slot).map_or([0.0; 2], |p| p.pos);
         match event {
             // The release controller (FUN_004e79e0) dispatches, then raises the sender's
             // level by one (capped at 7). The attack plays at the level shown on the gauge
@@ -1115,35 +1186,40 @@ pub fn dispatch_charges(sides: &mut [Side]) {
             // (EX Lv1 = 1 wave of 6, Lv2 = 1 of 8; boss Lv1-2 non-spell, Lv3-4 spell, Lv5-8
             // non-spell + spell) match ExtraAttack's ins_570 tables and Boss00Boss's rank
             // masks only at rank = pre-raise level.
-            Some(Level::Extra) => {
+            Level::Extra => {
                 let rank=sides[sender].st.extra_level.min(7);
                 sides[sender].st.extra_level=(rank+1).min(7);
                 sides[1-sender].st.incoming_extra_level=rank;
-                sides[1-sender].st.request(script_request("ExtraAttack",[0.0,0.0],Some(sender)));
+                sides[1-sender].st.request(script_request("ExtraAttack",[0.0,0.0],Some(owner)));
             // FUN_0050d740 family -> FUN_0050db70: the launch cut-in plays 0x4d at centre pan.
             if crate::sfx::on(crate::sfx::Cat::Release) { sides[sender].st.sounds.push((0x4d, 0)); }
             }
-            Some(Level::Boss) => {
+            Level::Boss => {
                 let rank=sides[sender].st.boss_level.min(7);
                 sides[sender].st.boss_level=(rank+1).min(7);
                 sides[1-sender].st.incoming_boss_level=rank;
-                sides[1-sender].st.request(script_request("BossAttack",[0.0,0.0],Some(sender)));
+                sides[1-sender].st.request(script_request("BossAttack",[0.0,0.0],Some(owner)));
             // FUN_0050d740 family -> FUN_0050db70: the launch cut-in plays 0x4d at centre pan.
             if crate::sfx::on(crate::sfx::Cat::Release) { sides[sender].st.sounds.push((0x4d, 0)); }
             }
             // Marisa's skill sends six laser orbs that curve down to the opponent player's column
             // (FUN_00417b90): tangents of length 600 turned a sixth of a turn apart from straight up.
-            Some(Level::Skill) if sides[sender].player.as_ref().is_some_and(|p| p.character == crate::character::Character::Marisa) => {
+            Level::Skill if character == crate::character::Character::Marisa => {
                 let rank = sides[sender].st.extra_level as i32;
-                let origin = sides[sender].player.as_ref().map_or([0.0; 2], |p| p.pos);
+                let origin = origin_pos;
                 for k in 0..6 {
                     let a = -std::f32::consts::FRAC_PI_2 + k as f32 * std::f32::consts::FRAC_PI_3;
                     let t = [a.cos() * 600.0, a.sin() * 600.0];
                     sides[sender].st.outgoing_reflects.push(crate::reflect::Request { kind: 44, color: 1, speed: 0.0, origin,
-                        target: None, special_rank: Some(rank), owner: sender, script: Some(63), tangents: Some((t, t)), aim_player: true });
+                        target: None, special_rank: Some(rank), owner, script: Some(63), tangents: Some((t, t)), aim_player: true });
                 }
             }
             _ => {}
+        }
+        if slot == 1 {
+            let s = &mut sides[sender];
+            std::mem::swap(&mut s.st.extra_level, &mut s.partner_levels[0]);
+            std::mem::swap(&mut s.st.boss_level, &mut s.partner_levels[1]);
         }
     }
     // Requests the events above made go out on the next frame's pass.
