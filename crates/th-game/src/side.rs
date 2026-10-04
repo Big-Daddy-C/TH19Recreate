@@ -109,6 +109,8 @@ pub struct SideState {
     pub spell_start_effect: Option<th_anm::VmId>,
     /// ECL 525 requested destroying this field's enemies.
     pub clear_enemies: bool,
+    /// Remove the enemies flagged 0x100 (see ECL 512 with slot -1).
+    pub clear_overrides: bool,
     /// `ghost.anm` (kill explosions).
     pub ghost_anm: Option<usize>,
     /// `ascii.anm`, for the combo counter.
@@ -428,6 +430,7 @@ impl Side {
                 cancel_bullets: false,
                 spell_background: None, spell_start_effect: None,
                 clear_enemies: false,
+                clear_overrides: false,
                 ghost_anm: None,
                 ascii_anm: None,
                 combo_shown: 0,
@@ -778,6 +781,14 @@ impl Side {
             self.enemies[i].update(&progs[owner], &mut self.st, world, lib);
             if std::mem::take(&mut self.st.clear_enemies) {
                 self.clear_enemies();
+            }
+            if std::mem::take(&mut self.st.clear_overrides) {
+                for e in &mut self.enemies {
+                    if !e.data.delete && e.data.flags & 0x100 != 0 && e.data.boss_slot.is_none() {
+                        e.data.item = -1;
+                        e.data.killed = true;
+                    }
+                }
             }
             let (id, member) = (self.enemies[i].data.id, self.enemies[i].data.wave_member);
             if let Some(a) = self.st.alive.iter_mut().find(|a| a.0 == id) {

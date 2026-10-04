@@ -1661,6 +1661,33 @@ fn ran_ex_talismans_target_the_opponent_field_edges() {
 }
 
 
+
+/// Ran's BossB clones spawn with flag 0x20 (spared by the boss's 525) for their first 60 ticks;
+/// if the boss is defeated in that window they must still disappear with it.
+#[test]
+fn ran_boss_clones_do_not_outlive_the_boss() {
+    use th_game::character::Character;
+    let Some(mut g)=setup() else{return};use_next_character(&mut g,0,Character::Ran);
+    g.sides[1].player.as_mut().unwrap().godmode=true;
+    g.sides[0].st.boss_level=7;
+    g.sides[0].player.as_mut().unwrap().instant_charge(Level::Boss);
+    let mut killed_at=None;
+    for t in 0..4000 {
+        g.tick([0;2]);
+        let young=g.sides[1].enemies.iter().any(|e|e.data.sub=="BossB"&&e.data.flags&0x100==0);
+        if young {
+            let b=g.sides[1].enemies.iter().position(|e|e.data.sub=="Boss00Boss").unwrap();
+            let d=&mut g.sides[1].enemies[b].data; let hp=d.hp; d.damage(hp*8+100,[0.0,200.0]);
+            killed_at=Some(t);
+            break;
+        }
+    }
+    assert!(killed_at.is_some(),"a BossB clone in its first second");
+    for _ in 0..600 {g.tick([0;2]);}
+    let left:Vec<_>=g.sides[1].enemies.iter().filter(|e|!e.data.delete).map(|e|e.data.sub.clone()).collect();
+    assert!(left.is_empty(),"left behind after the boss: {left:?}");
+}
+
 /// Original pl03 ANM11 copies four different parent angles and scales its offsets.
 #[test]
 fn ran_scope_draws_four_native_cross_arms() {

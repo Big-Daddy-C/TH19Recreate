@@ -953,7 +953,14 @@ impl EnemyHost<'_> {
                 let slot=i!(0); self.st.boss_ids.retain(|&id| id!=self.e.id);
                 self.e.boss_slot=(slot>=0).then_some(slot);
                 if slot>=0 { self.st.boss_ids.push(self.e.id); self.e.flags|=flag::NO_DEATH; }
-                else { self.e.flags&=!flag::NO_DEATH; }
+                else {
+                    self.e.flags&=!flag::NO_DEATH;
+                    // APPROX (observed in the original, not traced to code): clearing the boss
+                    // slot at the end of BossDead also removes enemies flagged 0x100 that the
+                    // 525 at its start spared because they still carried 0x20 (Ran's BossB clones
+                    // spawned in the last second of her fight).
+                    self.st.clear_overrides = true;
+                }
             }
             513 => self.e.phase_time=0,
             // Wait while one of this field's boss slots is occupied (FUN_0040b4b0 per slot;
