@@ -85,3 +85,22 @@ fn sound_table_files_parse() {
     }
     assert!(playable > 60, "only {playable} sounds resolved");
 }
+
+/// The stage of every character, and a theme track that exists for each.
+#[test]
+fn stage_music_data() {
+    let Some(path) = dat_path() else { return };
+    let exe = th_formats::exe::Exe::parse(std::fs::read(path.with_file_name("th19.exe")).unwrap()).unwrap();
+    let stages = th_formats::music::character_stages(&exe);
+    assert_eq!(stages, [0, 5, 3, 1, 12, 3, 9, 4, 15, 8, 6, 11, 13, 16, 10, 14, 7, 13, 0]);
+    let mut dat = Archive::open(path).unwrap();
+    let tracks = bgm::parse_fmt(&dat.read("thbgm.fmt").unwrap()).unwrap();
+    for t in th_formats::music::CHARACTER_THEMES {
+        assert!(tracks.iter().any(|x| x.name == format!("{t}.wav")), "{t}");
+    }
+    use th_formats::music::stage_themes;
+    assert_eq!(stage_themes(&stages, 3), ["th19_13", "th19_04"], "Sanae and Nazrin share a stage");
+    assert_eq!(stage_themes(&stages, 13), ["th19_20", "th19_11"]);
+    assert_eq!(stage_themes(&stages, 0), ["th19_02", "th19_12"]);
+    assert!(stage_themes(&stages, 2).is_empty(), "no character uses stage 2 (world03)");
+}

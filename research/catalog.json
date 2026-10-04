@@ -993,6 +993,18 @@
     "sound_request": {
       "address": "004bb8d0",
       "decompile_sha256": "acf890ab9a78d81f7a93a2d4bca67cc1568519781476637ce1dff814f3bd4cd9"
+    },
+    "music_volume": {
+      "address": "004bb970",
+      "decompile_sha256": "d2718b320c40c06966bd43113a1bd834568f910ff1bd454f16ad91d45bb0556b"
+    },
+    "sound_command_queue": {
+      "address": "004babe0",
+      "decompile_sha256": "37e4131f8432a0210c7d9707539a2551eb1f7b55dc855561016ebd0ee0cbab6a"
+    },
+    "stage_select": {
+      "address": "00412d90",
+      "decompile_sha256": "02e00a0ddc1e07061840521055a798d98e3d264ba71ad8cb21df13ab535b3b74"
     }
   },
   "features": {
@@ -2404,7 +2416,10 @@
         "bullet_contact_tick",
         "segment_closest_point",
         "ran_ex_special_update",
-        "sound_request"
+        "sound_request",
+        "music_volume",
+        "sound_command_queue",
+        "stage_select"
       ],
       "code": [
         "crates/th-game/src/character.rs",
@@ -2633,6 +2648,15 @@
           "text": "Enemy damage flash and sound share one gate in FUN_00509980: the hold counter +0x5104 (set to 4 by the damaged branch) is tested BEFORE that branch (if nonzero: tint off, decrement, skip), so a continuously damaged enemy flashes and plays 0x22/0x23 once every 5 ticks, and only when the enemy has its main VM (+0x134). The port played the sound on every damaged tick (a 60 Hz buzz under Marisa's beam); now gated with the flash. Charge-shot hit callbacks 3/9 (0054c5f0, 0054a7b0) play 0x41 only inside the branch that creates an explosion collider (FUN_005200f0/00520240 succeed); the port plays it unconditionally on a callback 3/4/9 hit (APPROX, those collider explosions are not ported). Sound groups can be muted at run time with F1-F12 / Shift+F1-F12 (th_game::sfx).",
           "sources": [
             "sound_request"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Music: thbgm.fmt (in th19.dat) lists 24 raw 44.1 kHz 16-bit stereo tracks in thbgm.dat (offset, intro bytes, total bytes; play once, then loop from offset+intro). Volume: FUN_004bb970 gives DirectSound (-5000 - trunc((1-(1-b/100)^4) * -5000)) * 9 / 10 hundredths of a dB for BGM setting b (th19.cfg byte 0xca, 100 shipped; the code also forces -10000 when the SE setting at 0xcb is 0, a quirk the port does not copy). Stage music: each character row (0x20 bytes at 0x5c5c24, last int +0x1c) holds that character's stage; FUN_00412d90 indexes stage records at 0x5c5e80 + stage*0x10, whose name pointers are world01.std.. (stage n = world(n+1)). Characters (identified by the boss_* texture in each plNNb.anm): pl00 Reimu, 01 Marisa, 02 Sanae, 03 Ran, 04 Aunn, 05 Nazrin, 06 Seiran, 07 Orin, 08 Tsukasa, 09 Mamizou, 10 Yachie, 11 Saki, 12 Yuuma, 13 Suika, 14 Biten, 15 Enoko, 16 Chiyari, 17 Hisami, 18 Zanmu; stages 0,5,3,1,12,3,9,4,15,8,6,11,13,16,10,14,7,13,0. Shared stages: 0 (Reimu, Zanmu), 3 (Sanae, Nazrin), 13 (Yuuma, Hisami); stage 2 (world03) is used by no character. Themes come from the music room comments (musiccmt.txt in th19.dat): Reimu th19_02, Marisa 03, Sanae 13, Ran 14, Aunn 06, Nazrin 04, Seiran 05, Orin 15, Tsukasa 16, Mamizou 17, Yachie 18, Saki 19, Yuuma 20, Suika 07, Biten 08, Enoko 09, Chiyari 10, Hisami 11, Zanmu 12. The viewer plays the theme of a character on the stage (random when several share it, as the user specified). NOT VERIFIED against the original: that the original picks stage music this way (the BGM command FUN_004babe0(1, 0, name) is issued by the message/story scripts, not found for VS stages); boss/ending/title music, fades and the pause-menu volume behaviour. The pause menu (Esc) edits the SE and BGM settings in steps of 10 and stores them in th19-rs-settings.txt, never in th19.cfg.",
+          "sources": [
+            "music_volume",
+            "sound_command_queue",
+            "stage_select"
           ],
           "evidence": "code_checked"
         }

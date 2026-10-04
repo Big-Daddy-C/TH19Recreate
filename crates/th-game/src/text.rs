@@ -24,6 +24,22 @@ pub fn big_text(
     align: Align,
     color: [f32; 3],
 ) -> Vec<VmId> {
+    big_text_at(world, lib, file, text, pos, scale, align, color, DRAW_PRIORITY)
+}
+
+/// [`big_text`] with an explicit draw priority.
+#[allow(clippy::too_many_arguments)]
+pub fn big_text_at(
+    world: &mut World,
+    lib: &AnmLibrary,
+    file: usize,
+    text: &str,
+    pos: [f32; 2],
+    scale: f32,
+    align: Align,
+    color: [f32; 3],
+    priority: i32,
+) -> Vec<VmId> {
     let glyph = |c: u8| 0x120 + c as i32;
     let advance = |sprite: i32| {
         lib.files[file].sprites.get(sprite as usize).map_or(0.0, |s| s.size[0]) * scale
@@ -38,7 +54,7 @@ pub fn big_text(
     for c in text.bytes() {
         let sprite = glyph(c);
         if c != b' ' {
-            out.push(world.spawn_sprite(file, sprite, [x, y], [scale; 2], color, DRAW_PRIORITY));
+            out.push(world.spawn_sprite(file, sprite, [x, y], [scale; 2], color, priority));
         }
         x += advance(sprite);
     }

@@ -36,7 +36,10 @@ Right now the `th19` binary is an **ANM + stage viewer** used to validate the pi
 | 0–9 | send interrupt N to every VM (except 1–4 in game mode) |
 | Space / `.` | pause / single-step a frame |
 | F | fast-forward ×8 |
-| R / Esc | restart / quit |
+| R | restart |
+| Esc | in a game: pause menu (↑ ↓ choose, ← → change the sound-effect / music volume by 10 %, Z or Enter select, Esc resume); Shift+Esc quits a game; elsewhere quits |
+| F1–F12 (Shift for more) | mute / unmute a sound group (development) |
+| L (game mode) | development: the opponent does nothing |
 
 Other tools:
 

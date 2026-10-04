@@ -22,6 +22,7 @@ pub mod bgm;
 pub mod ecl;
 pub mod exe;
 pub mod msg;
+pub mod music;
 pub mod sht;
 pub mod stage;
 pub mod wav;

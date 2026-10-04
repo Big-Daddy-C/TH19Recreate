@@ -61,8 +61,27 @@ struct Game {
     round: th_game::round::Round,
 }
 
+/// Draw priority of the pause menu's text; the dimming layer sits just below it.
+const MENU_PRIORITY: i32 = 200;
+
+/// The pause menu: the highlighted entry and its text sprites.
+struct Menu {
+    sel: usize,
+    vms: Vec<th_anm::VmId>,
+}
+
 struct Viewer {
     audio: Option<audio::Audio>,
+    /// The pause menu (Esc in a game), with its text sprites.
+    menu: Option<Menu>,
+    /// Set by the menu's Quit entry; the event loop exits.
+    quit: bool,
+    /// Where the volume settings are saved (not the game's own th19.cfg).
+    settings_path: std::path::PathBuf,
+    /// Each character's stage (`th_formats::music::character_stages`) and the stage whose music
+    /// is playing.
+    character_stages: Vec<u32>,
+    music_stage: Option<usize>,
     mode: Mode,
     /// Overlay the playfield divider on the stage background.
     show_fields: bool,
@@ -115,6 +134,11 @@ impl Viewer {
         stage_files.sort();
         let mut v = Self {
             audio: None,
+            menu: None,
+            quit: false,
+            settings_path: std::path::PathBuf::from("th19-rs-settings.txt"),
+            character_stages: Vec::new(),
+            music_stage: None,
             mode: Mode::Anm,
             show_fields: true,
             stage: None,
@@ -184,7 +208,26 @@ impl Viewer {
         self.game = None;
         if self.mode == Mode::Game {
             self.game = self.load_game();
+            self.start_music();
         }
+    }
+
+    /// The stage's music: the theme of a character who uses this stage, chosen at random when
+    /// several do (`th_formats::music`). A stage nobody uses stays silent. It keeps playing across
+    /// rounds of the same stage.
+    fn start_music(&mut self) {
+        let Some(audio) = &mut self.audio else { return };
+        if self.music_stage == Some(self.stage_idx) {
+            return;
+        }
+        self.music_stage = Some(self.stage_idx);
+        let themes = th_formats::music::stage_themes(&self.character_stages, self.stage_idx as u32);
+        if themes.is_empty() {
+            audio.stop_music();
+            return;
+        }
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos());
+        audio.play_music(themes[nanos as usize % themes.len()]);
     }
 
     /// Load the ECL scripts and their sprites and start both sides' stage scripts.
@@ -264,6 +307,10 @@ impl Viewer {
                 self.debug_extra_attack();
             }
             self.debug_spawn();
+            // Development: `TH19_DEBUG_MENU=frame` opens the pause menu (for screenshots).
+            if std::env::var("TH19_DEBUG_MENU").ok().and_then(|v| v.parse::<u64>().ok()) == Some(self.frames) {
+                self.open_menu();
+            }
             // Development: `TH19_DEBUG_SPECIAL=frame` loads player 2's dot and special counters.
             if std::env::var("TH19_DEBUG_SPECIAL").ok().and_then(|v| v.parse::<u64>().ok()) == Some(self.frames) {
                 if let Some(g) = &mut self.game {
@@ -399,7 +446,13 @@ impl Viewer {
             for side in &g.sides { for laser in &side.st.lasers {
                 if let Some(batch)=laser.curve_batch(&self.world,&self.lib,side.st.field) {list.push(batch);}
             }}
-            list.extend(self.world.draw_priority_range(&self.lib,th_anm::Pass::Ui,priority+1,i32::MAX));
+            list.extend(self.world.draw_priority_range(&self.lib,th_anm::Pass::Ui,priority+1,MENU_PRIORITY-1));
+            if self.menu.is_some() {
+                let mut dim = th_anm::DrawBatch::solid_rect([0.0, 0.0, 640.0, 480.0], [0.0, 0.0, 0.0, 0.65]);
+                dim.blend = th_anm::BlendMode::Normal;
+                list.push(dim);
+            }
+            list.extend(self.world.draw_priority_range(&self.lib,th_anm::Pass::Ui,MENU_PRIORITY-1,i32::MAX));
             for side in &g.sides { for spark in &side.st.sparks {
                 if let Some(batch)=spark.batch(side.st.field) {list.push(batch);}
             }}
@@ -450,10 +503,10 @@ impl Viewer {
                     .collect();
                 return format!(
                     "th19-rs - {name}{}{} - {} - {} VMs{}{} - points {}:{} {:?}",
-                    self.audio.as_ref().map_or(String::new(), |a| {
+                    {
                         let muted = th_game::sfx::muted();
-                        format!(" - VOL {:.0}%{}", a.volume() * 100.0, if muted.is_empty() { String::new() } else { format!(" (muted: {})", muted.join(", ")) })
-                    }),
+                        if muted.is_empty() { String::new() } else { format!(" (muted: {})", muted.join(", ")) }
+                    },
                     format!("{}{}{}{}", if self.godmode { " - GODMODE" } else { "" }, if self.full_charge { " - FULLCHARGE" } else { "" }, if self.opponent_idle { " - IDLE" } else if self.bot_ai { " - BOT" } else { " - DUMMY" }, if self.player_bot_ai { " - P1 AI" } else { "" }),
                     n.join(" | "),
                     self.world.len(),
@@ -511,7 +564,136 @@ impl Viewer {
         bits
     }
 
+    /// Esc in a game: pause and show the menu. FUN_00539470 (opening the pause menu) plays 0xe.
+    fn open_menu(&mut self) {
+        self.paused = true;
+        self.menu = Some(Menu { sel: 0, vms: Vec::new() });
+        if th_game::sfx::on(th_game::sfx::Cat::Pause) {
+            if let Some(a) = &mut self.audio {
+                a.play(0xe, 0);
+            }
+        }
+        self.draw_menu();
+    }
+
+    fn close_menu(&mut self) {
+        if let Some(m) = self.menu.take() {
+            for id in m.vms {
+                self.world.delete(id);
+            }
+        }
+        self.paused = false;
+    }
+
+    /// Rebuild the menu's text sprites.
+    fn draw_menu(&mut self) {
+        let Some(ascii) = self.load_anm("ascii.anm") else { return };
+        let (se, bgm) = self.audio.as_ref().map_or((0, 0), |a| (a.se_setting(), a.bgm_setting()));
+        // (label, value shown right-aligned)
+        let lines = [("Resume", String::new()), ("Sound effects", format!("{se}%")), ("Music", format!("{bgm}%")), ("Quit", String::new())];
+        let Some(menu) = &mut self.menu else { return };
+        for id in menu.vms.drain(..) {
+            self.world.delete(id);
+        }
+        let sel = menu.sel;
+        let mut vms = Vec::new();
+        vms.extend(th_game::text::big_text_at(&mut self.world, &self.lib, ascii, "- Menu -", [200.0, 150.0], 1.0,
+            th_game::text::Align::Left, [180.0, 205.0, 255.0], MENU_PRIORITY));
+        for (i, (label, value)) in lines.iter().enumerate() {
+            let (mark, color) = if i == sel { ("> ", [255.0, 230.0, 100.0]) } else { ("  ", [255.0, 255.0, 255.0]) };
+            let y = 200.0 + i as f32 * 36.0;
+            vms.extend(th_game::text::big_text_at(&mut self.world, &self.lib, ascii, &format!("{mark}{label}"),
+                [200.0, y], 1.0, th_game::text::Align::Left, color, MENU_PRIORITY));
+            if !value.is_empty() {
+                vms.extend(th_game::text::big_text_at(&mut self.world, &self.lib, ascii, value, [470.0, y], 1.0,
+                    th_game::text::Align::Right, color, MENU_PRIORITY));
+            }
+        }
+        if let Some(menu) = &mut self.menu {
+            menu.vms = vms;
+        }
+    }
+
+    /// Menu input: Up / Down choose, Left / Right change a volume by 10%, Z or Enter activates,
+    /// Esc resumes.
+    fn menu_key(&mut self, code: KeyCode) {
+        let Some(sel) = self.menu.as_ref().map(|m| m.sel) else { return };
+        // The cursor and value sounds use the menu ids 10 (select00) and 9 (cancel00) seen in the
+        // menu code (FUN_004e0f60); which one the original plays for which action is not traced.
+        let beep = |v: &mut Viewer, id: u32| {
+            if let Some(a) = &mut v.audio {
+                a.play(id, 0);
+            }
+        };
+        match code {
+            KeyCode::Escape => {
+                beep(self, 9);
+                return self.close_menu();
+            }
+            KeyCode::ArrowUp | KeyCode::ArrowDown => {
+                let next = if code == KeyCode::ArrowUp { (sel + 3) % 4 } else { (sel + 1) % 4 };
+                if let Some(m) = &mut self.menu {
+                    m.sel = next;
+                }
+                beep(self, 10);
+            }
+            KeyCode::ArrowLeft | KeyCode::ArrowRight if matches!(sel, 1 | 2) => {
+                let step: i32 = if code == KeyCode::ArrowLeft { -10 } else { 10 };
+                if let Some(a) = &mut self.audio {
+                    let cur = if sel == 1 { a.se_setting() } else { a.bgm_setting() } as i32;
+                    let new = (cur + step).clamp(0, 100) as u8;
+                    if sel == 1 {
+                        a.set_se_setting(new);
+                    } else {
+                        a.set_bgm_setting(new);
+                    }
+                }
+                self.save_settings();
+                beep(self, 10);
+            }
+            KeyCode::KeyZ | KeyCode::Enter => match sel {
+                0 => {
+                    beep(self, 9);
+                    return self.close_menu();
+                }
+                3 => self.quit = true,
+                _ => {}
+            },
+            _ => return,
+        }
+        self.draw_menu();
+    }
+
+    /// Volume settings are kept in `th19-rs-settings.txt` (`se=N`, `bgm=N`), never in the game's
+    /// own th19.cfg.
+    fn load_settings(&mut self) {
+        let Some(a) = &mut self.audio else { return };
+        let Ok(text) = std::fs::read_to_string(&self.settings_path) else { return };
+        for line in text.lines() {
+            let Some((key, value)) = line.split_once('=') else { continue };
+            let Ok(v) = value.trim().parse::<u8>() else { continue };
+            let v = (v.min(100) + 5) / 10 * 10;
+            match key.trim() {
+                "se" => a.set_se_setting(v),
+                "bgm" => a.set_bgm_setting(v),
+                _ => {}
+            }
+        }
+    }
+
+    fn save_settings(&self) {
+        let Some(a) = &self.audio else { return };
+        let text = format!("se={}\nbgm={}\n", a.se_setting(), a.bgm_setting());
+        if let Err(e) = std::fs::write(&self.settings_path, text) {
+            log::warn!("{}: {e}", self.settings_path.display());
+        }
+    }
+
+
     fn key(&mut self, code: KeyCode) {
+        if self.menu.is_some() {
+            return self.menu_key(code);
+        }
         // In game mode the arrows steer the player; PageUp/PageDown change stage.
         let code = match (self.mode, code) {
             (Mode::Game, KeyCode::ArrowLeft | KeyCode::ArrowRight | KeyCode::ArrowUp | KeyCode::ArrowDown) => return,
@@ -527,6 +709,12 @@ impl Viewer {
                     Mode::Game => Mode::Anm,
                 };
                 self.stage = None;
+                if self.mode != Mode::Game {
+                    if let Some(a) = &mut self.audio {
+                        a.stop_music();
+                    }
+                    self.music_stage = None;
+                }
                 self.restart();
             }
             KeyCode::KeyF => self.fast = !self.fast,
@@ -560,14 +748,6 @@ impl Viewer {
             KeyCode::KeyL if self.mode == Mode::Game => {
                 self.opponent_idle = !self.opponent_idle;
                 log::info!("opponent idle {}", self.opponent_idle);
-            }
-            // Sound volume: `-` / `+` (also the numpad keys) in steps of 5%.
-            KeyCode::Minus | KeyCode::NumpadSubtract | KeyCode::Equal | KeyCode::NumpadAdd => {
-                let delta = if matches!(code, KeyCode::Minus | KeyCode::NumpadSubtract) { -0.05 } else { 0.05 };
-                if let Some(a) = &mut self.audio {
-                    a.adjust_volume(delta);
-                    log::info!("volume {:.0}%", a.volume() * 100.0);
-                }
             }
             // Development full-charge mode: all tiers always available, no meter cost.
             KeyCode::KeyM if self.mode == Mode::Game => {
@@ -631,13 +811,7 @@ impl Viewer {
             }
             KeyCode::KeyR => self.restart(),
             KeyCode::Space => self.paused = !self.paused,
-            KeyCode::Escape if self.mode == Mode::Game => {
-                self.paused = !self.paused;
-                // FUN_00539470 (opening the pause menu) plays 0xe at centre pan.
-                if self.paused && th_game::sfx::on(th_game::sfx::Cat::Pause) {
-                    if let Some(a) = &mut self.audio { a.play(0xe, 0); }
-                }
-            }
+            KeyCode::Escape if self.mode == Mode::Game => self.open_menu(),
             KeyCode::Period if self.paused => {
                 let fast = std::mem::replace(&mut self.fast, false);
                 self.tick();
@@ -794,6 +968,9 @@ impl ApplicationHandler for App {
                 }
                 let before = (self.viewer.file_idx, self.viewer.stage_idx, self.viewer.mode);
                 self.viewer.key(code);
+                if self.viewer.quit {
+                    event_loop.exit();
+                }
                 if before != (self.viewer.file_idx, self.viewer.stage_idx, self.viewer.mode) {
                     if let Some(r) = &mut self.renderer {
                         r.forget_textures();
@@ -860,8 +1037,8 @@ fn main() {
     println!(
         "Controls: Tab = switch ANM viewer / stage viewer / game, Left/Right = file or stage, Up/Down = single script,\n\
          A = all scripts, C = toggle centre origin, F = fast-forward x8, V = toggle field divider,\n\
-         R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (1 shot / 2 skill / 3 EX / 4 boss), M = toggle full-charge practice, C = bomb, B = clear fields, T = rain on the opponent (Shift+T on you), G = godmode, 1-4 = instant charge tier (4 = boss; Shift+1-4 = opponent's), Shift = focus, [ / ] = bot character (Shift for player), K = opponent bot/dummy, L = opponent does nothing, Shift+K = player AI/manual, - / + = volume, F1-F12 (Shift for more) = mute a sound group, PgUp/PgDn = stage,\n\
-         . = step frame, 0-9 = send interrupt, Esc = pause in a game (Shift+Esc quits; elsewhere Esc quits)"
+         R = restart, Space = pause. Game: arrows = move, Z = shot, X = hold/release charge (1 shot / 2 skill / 3 EX / 4 boss), M = toggle full-charge practice, C = bomb, B = clear fields, T = rain on the opponent (Shift+T on you), G = godmode, 1-4 = instant charge tier (4 = boss; Shift+1-4 = opponent's), Shift = focus, [ / ] = bot character (Shift for player), K = opponent bot/dummy, L = opponent does nothing, Shift+K = player AI/manual, Esc = menu (sound / music volume), F1-F12 (Shift for more) = mute a sound group, PgUp/PgDn = stage,\n\
+         . = step frame, 0-9 = send interrupt, Space = pause (Shift+Esc quits a game; elsewhere Esc quits)"
     );
 
     let mut viewer = Viewer::new(dat);
@@ -871,7 +1048,14 @@ fn main() {
         Ok(exe) => {
             viewer.bullet_types = std::rc::Rc::new(th_formats::exe::bullet_types(&exe));
             if !std::env::args().any(|a| a == "--no-audio") {
-                viewer.audio = audio::Audio::new(&exe, &mut viewer.dat, &exe_path.with_file_name("th19.cfg"));
+                viewer.audio = audio::Audio::new(
+                    &exe,
+                    &mut viewer.dat,
+                    &exe_path.with_file_name("th19.cfg"),
+                    &exe_path.with_file_name("thbgm.dat"),
+                );
+                viewer.character_stages = th_formats::music::character_stages(&exe);
+                viewer.load_settings();
             }
         }
         Err(e) => log::warn!("{}: {e} (enemy bullets disabled)", exe_path.display()),

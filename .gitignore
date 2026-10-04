@@ -6,3 +6,4 @@
 # Local Python lookup-tool caches
 __pycache__/
 *.pyc
+th19-rs-settings.txt
