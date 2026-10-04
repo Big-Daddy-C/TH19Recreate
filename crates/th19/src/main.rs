@@ -743,6 +743,7 @@ impl Viewer {
                 a.play(id, 0);
             }
         };
+        let mut reloaded = false;
         let delta: i32 = match code {
             KeyCode::ArrowLeft | KeyCode::Comma => -1,
             KeyCode::ArrowRight | KeyCode::Period => 1,
@@ -789,11 +790,13 @@ impl Viewer {
                     self.chars[i] = self.chars[i].shifted(delta);
                     beep(self, 10);
                     self.load_stage();
+                    reloaded = true;
                 }
                 Row::Mode => {
                     self.team_size = if self.team_size == 1 { 2 } else { 1 };
                     beep(self, 10);
                     self.load_stage();
+                    reloaded = true;
                 }
                 _ => return,
             },
@@ -809,8 +812,11 @@ impl Viewer {
         }
         // Changing characters or the mode reloads the match, which clears the world (and the menu's
         // sprites); the menu stays open on top of it.
-        if let Some(m) = &mut self.menu {
-            m.vms.clear();
+        // Only then are the old ids stale; otherwise draw_menu deletes them itself.
+        if reloaded {
+            if let Some(m) = &mut self.menu {
+                m.vms.clear();
+            }
         }
         self.draw_menu();
     }
