@@ -101,9 +101,19 @@ fn setup() -> Option<Game> {
         eprintln!("Original assets unavailable; skipped");
         return None;
     }
-    let types = Rc::new(bullet_types(
-        &Exe::parse(std::fs::read(path.with_file_name("th19.exe")).unwrap()).unwrap(),
-    ));
+    // The executable next to th19.dat, or (development) the memory image in TH19_EXE_IMAGE.
+    let exe = match std::fs::read(path.with_file_name("th19.exe")) {
+        Ok(b) => Exe::parse(b).unwrap(),
+        Err(_) => {
+            let Some(image) = std::env::var_os("TH19_EXE_IMAGE").map(std::path::PathBuf::from) else {
+                eprintln!("th19.exe unavailable; skipped");
+                return None;
+            };
+            let map = std::fs::read_to_string(image.with_extension("mem.map")).unwrap();
+            Exe::from_image(std::fs::read(&image).unwrap(), &map).unwrap()
+        }
+    };
+    let types = Rc::new(bullet_types(&exe));
     let mut dat = Archive::open(path).unwrap();
     let prog = th_ecl::Program::load("pl00.ecl", |name| dat.read(name).ok()).unwrap();
     let prog2 = th_ecl::Program::load("pl00.ecl", |name| dat.read(name).ok()).unwrap();

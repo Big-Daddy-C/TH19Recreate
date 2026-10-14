@@ -59,6 +59,7 @@ struct Game {
     progs: Vec<th_ecl::Program>,
     sides: Vec<th_game::Side>,
     round: th_game::round::Round,
+    hud: Option<th_game::hud::Hud>,
 }
 
 /// Draw priority of the pause menu's text; the dimming layer sits just below it.
@@ -133,6 +134,10 @@ struct Viewer {
     team_size: usize,
     /// The song chosen in the menu (an index into thbgm.fmt), overriding the stage and boss music.
     music_override: Option<usize>,
+    /// The round to continue with on the next load (the match score), and each side's
+    /// [first player, partner] EX/boss levels at the end of the last round.
+    next_round: Option<th_game::round::Round>,
+    carry_levels: Option<Vec<[[u8; 2]; 2]>>,
     /// The theme of the stage's characters, chosen when the stage loads.
     stage_theme: Option<&'static str>,
     /// Development full-charge mode (M): every tier is always available and costs nothing.
@@ -189,6 +194,8 @@ impl Viewer {
             chars: [th_game::character::Character::Reimu; 4],
             team_size: 1,
             music_override: None,
+            next_round: None,
+            carry_levels: None,
             stage_theme: None,
             full_charge: false,
             bot: th_game::bot::Bot::new(),
@@ -332,8 +339,35 @@ impl Viewer {
                 }
             }
         }
-        sides[0].st.boss_level = self.start_boss_level;
-        Some(Game { progs, sides, round: Default::default() })
+        // The round carried over from the last one, or a new match. A new VS match starts every
+        // EX/boss level at the table value for the difficulty (0x5aa5a0: 0 on Normal); each
+        // later round of the match lowers the previous round's levels by 2 (FUN_005177a0).
+        let round = self.next_round.take().unwrap_or_default();
+        if let Some(carry) = self.carry_levels.take().filter(|_| round.rounds > 0) {
+            for (i, s) in sides.iter_mut().enumerate() {
+                let [ex, boss] = carry[i][0];
+                s.st.extra_level = ex.saturating_sub(2).min(7);
+                s.st.boss_level = boss.saturating_sub(2).min(7);
+                s.partner_levels = carry[i][1].map(|l| l.saturating_sub(2).min(7));
+            }
+        } else {
+            sides[0].st.boss_level = self.start_boss_level;
+        }
+        let files = match (self.load_anm("front.anm"), aura, ascii) {
+            (Some(front), Some(aura), Some(ascii)) => Some(th_game::hud::Files { front, aura, ascii }),
+            _ => None,
+        };
+        // The option bits 0x38 of each player's handicap byte (th19.cfg +0xf4/+0xf8, 9 as shipped)
+        // enable the meter-bar flash.
+        let hud = files.map(|f| th_game::hud::Hud::new(&mut self.world, &self.lib, f, &sides, round.points, [9 & 0x38 != 0; 2]));
+        if let Some(f) = files {
+            // FUN_0050efc0: the round banner, once per field (interrupt 7 = left, 8 = right).
+            for n in [7, 8] {
+                let id = self.world.spawn(&self.lib, f.front, round.banner_script(), [0.0; 2]);
+                self.world.interrupt_now(&self.lib, id, n);
+            }
+        }
+        Some(Game { progs, sides, round, hud })
     }
 
     /// Load an `.anm` from the archive once and return its library id.
@@ -408,19 +442,48 @@ impl Viewer {
                     s.st.sounds.clear();
                 }
                 th_game::side::dispatch_charges(&mut g.sides);
-                // A team is out when both teammates are out of hearts.
-                let defeated = std::array::from_fn(|i| g.sides[i].defeated());
-                g.round.resolve(defeated);
-                // APPROX: after a KO, hold briefly, then start the next round on fresh
-                // fields with the score kept (the original transition is not ported yet).
+                // FUN_00546320: a player out of hearts ends the round when its death finishes
+                // (state 2 at 30 frames); in 2 vs 2 a team is out when both teammates are.
+                // FUN_00516450: the time limit decides the round otherwise.
+                let time_up = g.round.tick_time();
+                if g.round.outcome.is_none() && (time_up || g.sides.iter().any(|s| s.defeated())) {
+                    let tally = |s: &th_game::Side| th_game::round::Tally {
+                        lives: s.players().map(|p| p.lives).max().unwrap_or(0),
+                        deaths: s.players().map(|p| p.deaths).sum(),
+                        ex_sent: s.st.ex_sent,
+                        boss_sent: s.st.boss_sent,
+                        meter: s.players().map(|p| p.meter).max().unwrap_or(0),
+                    };
+                    g.round.decide([tally(&g.sides[0]), tally(&g.sides[1])]);
+                    // FUN_00515540 clears both fields' enemies, bullets and lasers.
+                    for s in &mut g.sides { s.round_end_clear(&mut self.world, &self.lib); }
+                    log::info!("round over at frame {}: {:?} (points {:?})", self.frames, g.round.outcome, g.round.points);
+                }
+                if let Some(hud) = &mut g.hud {
+                    hud.update(&mut self.world, &self.lib, &g.sides, (g.round.rules.time_limit > 0).then_some(g.round.time_left));
+                }
+                // FUN_00512fd0: 120 frames after the result each field shows its banner and the
+                // winner gets a round-win star.
+                if g.round.outcome.is_some() && g.round.ko_frames + 1 == th_game::round::BANNER_FRAME {
+                    if let Some(hud) = &mut g.hud {
+                        let front = hud.files.front;
+                        for side in 0..2 {
+                            if let Some(script) = g.round.result_script(side) {
+                                let id = self.world.spawn(&self.lib, front, script, [0.0; 2]);
+                                self.world.interrupt(id, side as i32 + 7);
+                            }
+                        }
+                        if let Some(th_game::round::Outcome::Winner(w, _)) = g.round.outcome {
+                            hud.add_win_star(&mut self.world, &self.lib, w, g.round.points[w]);
+                        }
+                    }
+                }
                 if g.round.hold() {
-                    let round = g.round.next();
+                    self.next_round = Some(g.round.next());
+                    self.carry_levels = Some(g.sides.iter().map(|s| [s.levels(0), s.levels(1)]).collect());
                     let fast = self.fast;
                     self.load_stage();
                     self.fast = fast;
-                    if let Some(g) = &mut self.game {
-                        g.round = round;
-                    }
                     log::info!("next round");
                     continue;
                 }
@@ -515,36 +578,12 @@ impl Viewer {
         } else {list.extend(self.world.draw_list(&self.lib,th_anm::Pass::Ui));}
         if let Some(g) = &self.game {
             for (side, field) in g.sides.iter().zip(FIELDS) {
-                // Provisional: hearts of each player in the top margin (partner on the right).
-                for (k, p) in side.players().enumerate() {
-                    for h in 0..p.lives.max(0) {
-                        let hx = if k == 0 { field[0] + 8.0 * h as f32 } else { field[0] + field[2] - 8.0 * (h + 1) as f32 };
-                        list.push(th_anm::DrawBatch::solid_rect([hx, 1.0, 6.0, 4.0], [0.95, 0.2, 0.3, 1.0]));
-                    }
-                }
-                if let Some(p) = &side.partner {
-                    let [x, _, w, _] = field;
-                    list.push(th_anm::DrawBatch::solid_rect([x, 6.0, w*(if p.free_charge {2500} else {p.meter}) as f32/2500.0, 3.0], [0.15, 0.45, 0.95, 1.0]));
-                    let ready = p.charge.value >= p.charge_settings.attack;
-                    let color = if ready { [1.0, 0.8, 0.2, 1.0] } else { [0.7, 0.7, 0.8, 1.0] };
-                    list.push(th_anm::DrawBatch::solid_rect([x, 10.0, w*p.charge.value as f32/2500.0, 4.0], color));
-                }
-                if let Some(p) = &side.player {
-                    // Provisional HUD, outside the playfield. Top row = available meter;
-                    // bottom row = held charge. Original front.anm HUD remains to be ported.
+                if side.player.is_some() {
+                    // Provisional boss HP line until the original life bar is ported.
                     let [x, _, w, _] = field;
                     for e in side.enemies.iter().filter(|e|e.data.boss_slot.is_some() && e.data.max_hp>0) {
                         let ratio=(e.data.hp as f32/e.data.max_hp as f32).clamp(0.0,1.0);
                         list.push(th_anm::DrawBatch::solid_rect([x,field[1],w*ratio,3.0],[0.95,0.15,0.35,1.0]));
-                    }
-                    list.push(th_anm::DrawBatch::solid_rect([x, 465.0, w, 14.0], [0.04, 0.04, 0.08, 1.0]));
-                    list.push(th_anm::DrawBatch::solid_rect([x, 466.0, w*(if p.free_charge {2500} else {p.meter}) as f32/2500.0, 4.0], [0.15, 0.45, 0.95, 1.0]));
-                    let ready = p.charge.value >= p.charge_settings.attack;
-                    let color = if ready { [1.0, 0.8, 0.2, 1.0] } else { [0.7, 0.7, 0.8, 1.0] };
-                    list.push(th_anm::DrawBatch::solid_rect([x, 472.0, w*p.charge.value as f32/2500.0, 5.0], color));
-                    for threshold in [p.charge_settings.attack,p.charge_settings.skill,p.charge_settings.extra,p.charge_settings.boss] {
-                        let marker=(x+w*threshold as f32/2500.0).min(x+w-1.0);
-                        list.push(th_anm::DrawBatch::solid_rect([marker,466.0,1.0,12.0],[1.0,1.0,1.0,1.0]));
                     }
                 }
             }
@@ -1201,7 +1240,17 @@ fn main() {
     let mut viewer = Viewer::new(dat);
     // Bullet sprite types live in th19.exe, next to th19.dat.
     let exe_path = dat_path.with_file_name("th19.exe");
-    match std::fs::read(&exe_path).map_err(|e| e.to_string()).and_then(|b| th_formats::exe::Exe::parse(b).map_err(|e| e.to_string())) {
+    // Development: `TH19_EXE_IMAGE=path` reads the tables from a memory image (`path` plus
+    // `path.map`) when th19.exe itself is unavailable.
+    let image = std::env::var_os("TH19_EXE_IMAGE").map(PathBuf::from);
+    let loaded = match &image {
+        Some(p) => std::fs::read(p).map_err(|e| e.to_string()).and_then(|b| {
+            let map = std::fs::read_to_string(p.with_extension("mem.map")).map_err(|e| e.to_string())?;
+            th_formats::exe::Exe::from_image(b, &map).map_err(|e| e.to_string())
+        }),
+        None => std::fs::read(&exe_path).map_err(|e| e.to_string()).and_then(|b| th_formats::exe::Exe::parse(b).map_err(|e| e.to_string())),
+    };
+    match loaded {
         Ok(exe) => {
             viewer.bullet_types = std::rc::Rc::new(th_formats::exe::bullet_types(&exe));
             if !std::env::args().any(|a| a == "--no-audio") {
@@ -1361,9 +1410,10 @@ mod charge_input_tests {
         let game = viewer.game.as_ref().unwrap();
         assert_eq!(game.sides[0].player.as_ref().unwrap().charge.value, 500);
         assert!(game.sides[0].enemies.is_empty(), "X must no longer inject debug ExtraAttack");
-        let (list, _, _, _) = viewer.frame();
-        assert!(list.iter().any(|batch| batch.vertices.iter().any(|v| v.color == [1.0, 0.8, 0.2, 1.0])),
-            "ready charge must produce a gold HUD bar");
+        // The gauge's charge bar (aura.anm script 4) shows 500 / 2500.
+        let root = game.hud.as_ref().unwrap().sides[0].players[0].gauge.root;
+        let bar = viewer.world.find_descendant(root, 4).unwrap();
+        assert!((viewer.world.get(bar).unwrap().scale[0] - 0.2).abs() < 1e-6);
         viewer.held.remove(&KeyCode::KeyX);
         viewer.tick();
         let game = viewer.game.as_ref().unwrap();

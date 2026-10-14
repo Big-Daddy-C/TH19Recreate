@@ -12,6 +12,17 @@ fn dat_path() -> Option<PathBuf> {
     p.is_file().then_some(p)
 }
 
+/// The executable next to th19.dat, or (development) the memory image named by
+/// `TH19_EXE_IMAGE`; `None` skips the test.
+fn exe(dat: &std::path::Path) -> Option<th_formats::exe::Exe> {
+    if let Ok(b) = std::fs::read(dat.with_file_name("th19.exe")) {
+        return th_formats::exe::Exe::parse(b).ok();
+    }
+    let image = PathBuf::from(std::env::var_os("TH19_EXE_IMAGE")?);
+    let map = std::fs::read_to_string(image.with_extension("mem.map")).ok()?;
+    th_formats::exe::Exe::from_image(std::fs::read(&image).ok()?, &map).ok()
+}
+
 #[test]
 fn every_file_parses() {
     let Some(path) = dat_path() else {
@@ -68,7 +79,7 @@ fn every_file_parses() {
 #[test]
 fn sound_table_files_parse() {
     let Some(path) = dat_path() else { return };
-    let exe = th_formats::exe::Exe::parse(std::fs::read(path.with_file_name("th19.exe")).unwrap()).unwrap();
+    let Some(exe) = exe(&path) else { eprintln!("th19.exe not found; skipping"); return };
     let table = th_formats::exe::sound_table(&exe);
     for id in [0usize, 2, 3, 4, 9, 10, 0x22, 0x26, 0x2c, 0x31, 0x2a, 0x40] {
         eprintln!("sound {id:#x} -> {:?}", table[id]);
@@ -90,7 +101,7 @@ fn sound_table_files_parse() {
 #[test]
 fn stage_music_data() {
     let Some(path) = dat_path() else { return };
-    let exe = th_formats::exe::Exe::parse(std::fs::read(path.with_file_name("th19.exe")).unwrap()).unwrap();
+    let Some(exe) = exe(&path) else { eprintln!("th19.exe not found; skipping"); return };
     let stages = th_formats::music::character_stages(&exe);
     assert_eq!(stages, [0, 5, 3, 1, 12, 3, 9, 4, 15, 8, 6, 11, 13, 16, 10, 14, 7, 13, 0]);
     let mut dat = Archive::open(path).unwrap();

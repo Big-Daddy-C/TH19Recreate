@@ -69,8 +69,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 for sc in &e.scripts {
                     println!("   script {}", sc.id);
                     for i in &sc.instrs {
-                        let ints: Vec<i32> = (0..i.args.len() / 4).map(|n| i.arg_i32(n)).collect();
-                        println!("      t={:<4} op={:<4} mask={:#x} {:?}", i.time, i.opcode, i.param_mask, ints);
+                        // Values that read as ordinary floats are shown as floats (`f` suffix).
+                        let args: Vec<String> = (0..i.args.len() / 4).map(|n| {
+                            let v = i.arg_i32(n);
+                            let f = f32::from_bits(v as u32);
+                            if v.unsigned_abs() > 0x0100_0000 && f.is_finite() && (1e-4..1e6).contains(&f.abs()) { format!("{f}f") } else { v.to_string() }
+                        }).collect();
+                        println!("      t={:<4} op={:<4} mask={:#x} [{}]", i.time, i.opcode, i.param_mask, args.join(", "));
                     }
                 }
             }

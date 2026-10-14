@@ -34,6 +34,8 @@ pub struct SpriteDef {
     pub uv: [f32; 4],
     /// Size in game pixels.
     pub size: [f32; 2],
+    /// From a "lowres scale" entry: `size` is half the sprite's texture-pixel size.
+    pub lowres: bool,
 }
 
 pub struct LoadedAnm {
@@ -129,13 +131,14 @@ impl AnmLibrary {
                 if sprites.len() <= idx {
                     sprites.resize(
                         idx + 1,
-                        SpriteDef { texture: u32::MAX, uv: [0.0; 4], size: [0.0; 2] },
+                        SpriteDef { texture: u32::MAX, uv: [0.0; 4], size: [0.0; 2], lowres: false },
                     );
                 }
                 sprites[idx] = SpriteDef {
                     texture: tex_id,
                     uv: [x / w, y / h, (x + s.w) / w, (y + s.h) / h],
                     size: [s.w * px_to_game, s.h * px_to_game],
+                    lowres: entry.lowres_scale,
                 };
             }
             for si in 0..entry.scripts.len() {

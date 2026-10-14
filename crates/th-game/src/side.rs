@@ -158,6 +158,9 @@ pub struct SideState {
     /// Development rain (frames left): bullets and spirits fall on this field.
     pub rain: i32,
     pub sent_spirits_pending: usize,
+    /// EX and boss attacks this field sent this round (status +0x4c / +0x50).
+    pub ex_sent: u32,
+    pub boss_sent: u32,
 }
 
 /// The explosion a destroyed enemy leaves (GhostCtrl, th19.exe `FUN_0051d4e0` /
@@ -418,6 +421,11 @@ impl Side {
         self.players().find(|p| !out(p)).or(self.player.as_ref()).map_or([0.0, 400.0], |p| p.pos)
     }
 
+    /// Player `slot`'s EX and boss levels.
+    pub fn levels(&self, slot: usize) -> [u8; 2] {
+        if slot == 0 { [self.st.extra_level, self.st.boss_level] } else { self.partner_levels }
+    }
+
     /// Every player on this field has lost all hearts.
     pub fn defeated(&self) -> bool {
         self.player.is_some() && self.players().all(|p| p.state == crate::player::State::GameOver)
@@ -474,6 +482,8 @@ impl Side {
                 spirit_credit: 0, spirit_origin: [0.0;2], spirit_pressure: 0, spirit_frames: 0,
                 outgoing_spirits: Vec::new(), pending_spirits: Vec::new(), outgoing_reflects: Vec::new(), pending_reflects: Vec::new(), arrived_reflects: Vec::new(), rain: 0, dot_counter: 0, special_counter: 0, special_sequence: 0, last_credit_pos: [0.0; 2], last_special_pos: [0.0; 2],
                 sent_spirits_pending: 0,
+                ex_sent: 0,
+                boss_sent: 0,
             },
             enemies: Vec::new(),
             stage: None,
@@ -1086,6 +1096,7 @@ pub fn dispatch_charges(sides: &mut [Side]) {
             let rank = sides[sender].st.extra_level.min(7);
             sides[1 - sender].st.incoming_extra_level = rank;
             sides[1 - sender].st.request(script_request("ExtraAttack", [0.0, 0.0], Some(sender)));
+            sides[sender].st.ex_sent += 1;
             // FUN_0050d740 family -> FUN_0050db70: the launch cut-in plays 0x4d at centre pan.
             if crate::sfx::on(crate::sfx::Cat::Release) { sides[sender].st.sounds.push((0x4d, 0)); }
         }
@@ -1093,6 +1104,7 @@ pub fn dispatch_charges(sides: &mut [Side]) {
             let rank = sides[sender].st.boss_level.min(7);
             sides[1 - sender].st.incoming_boss_level = rank;
             sides[1 - sender].st.request(script_request("BossAttack", [0.0, 0.0], Some(sender)));
+            sides[sender].st.boss_sent += 1;
             // FUN_0050d740 family -> FUN_0050db70: the launch cut-in plays 0x4d at centre pan.
             if crate::sfx::on(crate::sfx::Cat::Release) { sides[sender].st.sounds.push((0x4d, 0)); }
         }
@@ -1191,6 +1203,7 @@ pub fn dispatch_charges(sides: &mut [Side]) {
                 sides[sender].st.extra_level=(rank+1).min(7);
                 sides[1-sender].st.incoming_extra_level=rank;
                 sides[1-sender].st.request(script_request("ExtraAttack",[0.0,0.0],Some(owner)));
+            sides[sender].st.ex_sent += 1;
             // FUN_0050d740 family -> FUN_0050db70: the launch cut-in plays 0x4d at centre pan.
             if crate::sfx::on(crate::sfx::Cat::Release) { sides[sender].st.sounds.push((0x4d, 0)); }
             }
@@ -1199,6 +1212,7 @@ pub fn dispatch_charges(sides: &mut [Side]) {
                 sides[sender].st.boss_level=(rank+1).min(7);
                 sides[1-sender].st.incoming_boss_level=rank;
                 sides[1-sender].st.request(script_request("BossAttack",[0.0,0.0],Some(owner)));
+            sides[sender].st.boss_sent += 1;
             // FUN_0050d740 family -> FUN_0050db70: the launch cut-in plays 0x4d at centre pan.
             if crate::sfx::on(crate::sfx::Cat::Release) { sides[sender].st.sounds.push((0x4d, 0)); }
             }
@@ -1236,6 +1250,43 @@ impl Side {
             }
         }
     }
+    /// `FUN_00515540` at a round's result: every enemy is destroyed through the death path
+    /// with its drops cleared (`FUN_0050ca70`), every bullet is cancelled (`FUN_004edf90(0)`)
+    /// and the lasers are removed (`FUN_00530bd0(1)`). The fields stop updating afterwards,
+    /// so this finishes at once.
+    pub fn round_end_clear(&mut self, world: &mut World, lib: &AnmLibrary) {
+        // FUN_0050ca70 spares flags 0x20/0x80/0x400 unless 0x100 is set.
+        let mut kept = Vec::new();
+        for mut e in std::mem::take(&mut self.enemies) {
+            let f = e.data.flags;
+            if e.data.delete || !(f & 0xa0 == 0 && f & 0x400 == 0 || f & 0x100 != 0) {
+                kept.push(e);
+                continue;
+            }
+            e.data.item = -1;
+            Self::kill(&mut self.st, &mut e.data, world, lib);
+            e.remove_sprites(world);
+            self.st.alive.retain(|a| a.0 != e.data.id);
+            self.st.boss_ids.retain(|&id| id != e.data.id);
+        }
+        self.enemies = kept;
+        let field = self.st.field;
+        let types = self.st.bullet_types.clone();
+        let anm = self.st.anm_files[0];
+        for mut b in std::mem::take(&mut self.st.bullets) {
+            if let Some(id) = b.vm { world.delete(id); }
+            b.cancel();
+            let script = types.get(b.kind.max(0) as usize).and_then(|ty| b.cancel_script(ty));
+            if let (Some(anm), Some(script)) = (anm, script.filter(|&s| s >= 0)) {
+                let at = crate::enemy::field_to_canvas(field, b.pos);
+                world.spawn_clipped(lib, anm, script as usize, at, field);
+            }
+        }
+        for mut l in std::mem::take(&mut self.st.lasers) {
+            l.delete(world);
+        }
+    }
+
     /// Frames a development rain lasts.
     pub const RAIN_FRAMES: i32 = 600;
 

@@ -35,6 +35,8 @@ pub struct Bomb {
     ring: VmId,
     flash: VmId,
     pub current_radius: f32,
+    /// The meter when the bomb started (BombInf +0x88), drained to 0 over the duration.
+    meter_start: i32,
 }
 
 impl Bomb {
@@ -58,7 +60,7 @@ impl Bomb {
         let ring = world.spawn_clipped(lib, file, 18, at, field);
         let mut radius = Interp::default();
         radius.start([1.0], [meter as f32 * 64.0 / 4000.0 + 16.0], duration, 4);
-        Self { column: true, cross: false, locked: true, column_pos, time: 0, duration, radius, squash: Interp::default(), ring, flash, current_radius: 1.0 }
+        Self { column: true, cross: false, locked: true, column_pos, time: 0, duration, radius, squash: Interp::default(), ring, flash, current_radius: 1.0, meter_start: meter }
     }
 
     /// `FUN_0053c7d0`: a flash (pl00.anm script 19) and the ring (script 16) at the player.
@@ -72,7 +74,7 @@ impl Bomb {
         radius.start([1.0], [meter as f32 * 224.0 / 4000.0 + 128.0], duration, 4);
         let mut squash = Interp::default();
         squash.start([1.0], [meter as f32 * 32.0 / 4000.0 + 16.0], duration, 4);
-        Self { column: false, cross: false, locked: false, column_pos: [0.0; 2], time: 0, duration, radius, squash, ring, flash, current_radius: 1.0 }
+        Self { column: false, cross: false, locked: false, column_pos: [0.0; 2], time: 0, duration, radius, squash, ring, flash, current_radius: 1.0, meter_start: meter }
     }
 
     /// BombSanaeInf00417f10 and BombRanInf00418e60 use a fixed launch position.
@@ -88,7 +90,7 @@ impl Bomb {
         radius.start([1.0],[if cross {meter as f32/2500.0*64.0+32.0} else {meter as f32/2500.0*224.0+128.0}],duration,4);
         let mut squash=Interp::default();
         if !cross {squash.start([1.0],[meter as f32/2500.0*32.0+16.0],duration,4);}
-        Self {column:false,cross,locked:true,column_pos:pos,time:0,duration,radius,squash,ring,flash,current_radius:1.0}
+        Self {column:false,cross,locked:true,column_pos:pos,time:0,duration,radius,squash,ring,flash,current_radius:1.0,meter_start:meter}
     }
 
     /// One frame (`FUN_0053c510`). Returns false once the bomb has finished.
@@ -138,9 +140,38 @@ impl Bomb {
         true
     }
 
+    /// The meter this frame (FUN_00403250, mode 0 at BombInf +0x88): linear from the starting
+    /// meter to 0 over the duration, truncated.
+    pub fn meter(&self) -> i32 {
+        drained_meter(self.meter_start, self.time, self.duration)
+    }
+
     /// Frames elapsed and the frame count the circle lasts.
     pub fn progress(&self) -> (i32, i32) { (self.time, self.duration) }
 
     /// Whether the circle is still growing (the player is protected meanwhile).
     pub fn protecting(&self) -> bool { self.time < self.duration }
+}
+
+/// FUN_00403250 mode 0 from `start` to 0: `(int)((0 - start) * t / duration + start)`, 0 once
+/// the duration has passed.
+pub fn drained_meter(start: i32, time: i32, duration: i32) -> i32 {
+    if time >= duration || duration <= 0 {
+        return 0;
+    }
+    let f = time as f32 / duration as f32;
+    ((0 - start) as f32 * f + start as f32) as i32
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn meter_drains_linearly_over_the_bomb() {
+        use super::drained_meter;
+        assert_eq!(drained_meter(2500, 1, 250), 2490);
+        assert_eq!(drained_meter(2500, 125, 250), 1250);
+        assert_eq!(drained_meter(2500, 249, 250), 10);
+        assert_eq!(drained_meter(2500, 250, 250), 0);
+        assert_eq!(drained_meter(1000, 60, 120), 500);
+    }
 }

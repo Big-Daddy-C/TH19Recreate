@@ -179,6 +179,12 @@ pub struct Player {
     /// Hearts left (status +0x54) and heart slots (status +0x58, at most 7).
     pub lives: i32,
     pub max_lives: i32,
+    /// Bomb stock (status +0x68, at most +0x74 = 7): three at the start of every round
+    /// (`FUN_005177a0`), one spent per bomb (`FUN_004ed7d0`).
+    pub bombs: i32,
+    pub max_bombs: i32,
+    /// Hearts lost this round (status +0x64, counted by `FUN_00549830`).
+    pub deaths: u32,
     /// Bullets within this radius of the player should be cancelled this frame.
     pub cancel_radius: Option<f32>,
     /// The death effect (script 21): a glow that bursts on interrupt 1.
@@ -202,6 +208,10 @@ pub enum Barrier {
 
 /// Starting hearts: TH19's default match setting (configurable in the game's options).
 pub const DEFAULT_LIVES: i32 = 2;
+/// Bombs at the start of each round and the stock cap (status +0x68 = 3, +0x74 = 7 in
+/// `FUN_005177a0`).
+pub const START_BOMBS: i32 = 3;
+pub const MAX_BOMBS: i32 = 7;
 
 impl Player {
     pub fn new(sht: ShtFile, anm_file: usize) -> Self {
@@ -244,6 +254,9 @@ impl Player {
             hits: 0,
             lives: DEFAULT_LIVES,
             max_lives: DEFAULT_LIVES,
+            bombs: START_BOMBS,
+            max_bombs: MAX_BOMBS,
+            deaths: 0,
             cancel_radius: None,
             death_vm: None,
             godmode: false,
@@ -298,6 +311,7 @@ impl Player {
     fn die(&mut self, world: &mut World, lib: &AnmLibrary, field: [f32; 4]) {
         self.death_vm = Some(world.spawn_clipped(lib, self.anm_file, 21, field_to_canvas(field, self.pos), field));
         self.lives -= 1;
+        self.deaths += 1;
         self.just_died = true;
         self.state = State::Dead;
         self.state_time = 0;
@@ -464,12 +478,16 @@ impl Player {
             alive
         });
         // The bomb button (FUN_00546320 states 1 and 4): pressing it starts the bomb, and during
-        // the 8-frame hit window it also cancels the death (a deathbomb). Practice economy: no
-        // stock is used and the meter counts as full (FUN_004ed6d0/FUN_004ed7d0 spend one bomb
-        // and read the meter, both deferred).
+        // the 8-frame hit window it also cancels the death (a deathbomb). FUN_004ed6d0 needs a
+        // bomb in stock and none running; FUN_004ed7d0 spends one and the bomb reads the meter.
+        // Full-charge practice keeps the stock and counts the meter as full.
         let bomb_pressed = keys & input::BOMB != 0 && !self.bomb_prev;
         self.bomb_prev = keys & input::BOMB != 0;
-        if bomb_pressed && self.bomb.is_none() && matches!(self.state, State::Normal | State::Hit) {
+        if bomb_pressed && self.bomb.is_none() && matches!(self.state, State::Normal | State::Hit)
+            && (self.free_charge || self.bombs > 0) {
+            if !self.free_charge {
+                self.bombs = (self.bombs - 1).max(0).min(self.max_bombs.clamp(0, 7));
+            }
             if self.state == State::Hit {
                 self.state = State::Normal;
                 self.state_time = 0;
@@ -487,7 +505,14 @@ impl Player {
         }
         if let Some(b) = &mut self.bomb {
             let protecting = b.protecting();
-            if !b.tick_character(self.pos, world, field, &mut self.cancel_circles, &mut self.cancel_columns, &mut self.cancel_rects, &mut self.damage_circles) {
+            let alive = b.tick_character(self.pos, world, field, &mut self.cancel_circles, &mut self.cancel_columns, &mut self.cancel_rects, &mut self.damage_circles);
+            // Every bomb update writes its draining meter (FUN_00403250 at bomb +0x88: the meter
+            // at the start -> 0, linear, over the duration) and, 10 frames after the end, resets
+            // the meter to the attack threshold (status +0x28).
+            if !self.free_charge {
+                self.meter = if alive { b.meter() } else { self.charge_settings.attack.clamp(0, crate::bomb::MAX_METER) };
+            }
+            if !alive {
                 // The update functions end by stopping 0x31 and playing 0x2c (centre pan).
                 if crate::sfx::on(crate::sfx::Cat::Bomb) { self.sounds.push((0x31, Some(crate::sfx::STOP))); self.sounds.push((0x2c, Some(0))); }
                 self.bomb = None;

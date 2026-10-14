@@ -295,8 +295,11 @@ enum RunState {
 pub enum Primitive {
     Rect { w: f32, h: f32, rotated: bool, gradient: bool },
     RectBorder { w: f32, h: f32 },
-    Poly { radius: f32, segments: i32, border: bool },
+    /// `elliptic`: ANM617 (draw type 0x1f, FUN_004c3850) takes the X and Y scales separately.
+    Poly { radius: f32, segments: i32, border: bool, elliptic: bool },
     Ring { radius: f32, thickness: f32, segments: i32 },
+    /// ANM618 (draw type 0x20): one D3D point (a single screen pixel) in colour 1.
+    Point,
 }
 
 #[derive(Clone, Debug)]
@@ -337,6 +340,8 @@ pub struct Vm {
     pub rotation_mode: u8,
     /// ANM318: scale child position by the root parent scale (00404050).
     inherit_position_scale: bool,
+    /// ANM313 resolution mode (VM +0x4ce), when the script set one.
+    res_mode: Option<u8>,
     pub render_mode: i32,
     pub layer: i32,
     pub visible: bool,
@@ -424,6 +429,7 @@ impl Vm {
             z_write_disable: false,
             rotation_mode: 0,
             inherit_position_scale: false,
+            res_mode: None,
             render_mode: 0,
             layer: 0,
             visible: true,
@@ -561,6 +567,59 @@ impl World {
                 vm.effect_interrupt(n);
             }
         }
+    }
+
+    /// Interrupt one VM only (the HUD's `FUN_0040b7e0` / `FUN_0040b840` write +0x454 of a
+    /// single VM).
+    pub fn interrupt_one(&mut self, id: VmId, n: i32) {
+        if let Some(vm) = self.get_mut(id) {
+            vm.pending_interrupt = Some(n);
+            vm.effect_interrupt(n);
+        }
+    }
+
+    /// `FUN_004cb7a0`: interrupt a VM and its direct children and run them at once.
+    pub fn interrupt_now(&mut self, lib: &AnmLibrary, id: VmId, n: i32) {
+        self.interrupt(id, n);
+        let children: Vec<VmId> = self
+            .slots
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.vm.as_ref().is_some_and(|v| v.parent == Some(id)))
+            .map(|(i, s)| VmId { index: i as u32, generation: s.generation })
+            .collect();
+        if self.get(id).is_some() {
+            self.run(lib, id);
+        }
+        for c in children {
+            if self.get(c).is_some() {
+                self.run(lib, c);
+            }
+        }
+    }
+
+    /// `FUN_004cb0a0`: the first descendant of `id` running `script` (children in spawn order,
+    /// depth first).
+    pub fn find_descendant(&self, id: VmId, script: usize) -> Option<VmId> {
+        let mut children: Vec<(u64, VmId)> = self
+            .slots
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| {
+                let v = s.vm.as_ref()?;
+                (v.parent == Some(id)).then_some((v.order, VmId { index: i as u32, generation: s.generation }))
+            })
+            .collect();
+        children.sort_by_key(|c| c.0);
+        for (_, c) in children {
+            if self.get(c).is_some_and(|v| v.script == script) {
+                return Some(c);
+            }
+            if let Some(d) = self.find_descendant(c, script) {
+                return Some(d);
+            }
+        }
+        None
     }
 
     /// Draw a VM and its current children at a fixed draw-chain priority (later children
@@ -1099,8 +1158,32 @@ fn randf01(rng: &mut u32) -> f32 {
     (next_rand(rng) >> 8) as f32 / (1u32 << 24) as f32
 }
 
+/// The window's scale over the 640x480 game space (`DAT_0062eeb0`), fixed at the 1280x960 setting.
+pub const RESOLUTION_SCALE: f32 = 2.0;
+
+/// ANM313 position scale (FUN_00404050), in game units: modes 1/3 position in game units
+/// (x R on screen), 2/4 in half-scale units (x R/2), others in screen pixels.
+fn res_pos_factor(mode: Option<u8>) -> f32 {
+    match mode {
+        None | Some(1 | 3) => 1.0,
+        Some(2 | 4) => 0.5,
+        Some(_) => 1.0 / RESOLUTION_SCALE,
+    }
+}
+
+/// ANM313 sprite size scale (FUN_004c6910): modes 1/5 x R, 2/6 x R/2, others unscaled screen
+/// pixels; returned in game units for a sprite's texture-pixel size.
+fn res_size_factor(mode: u8) -> f32 {
+    match mode {
+        1 | 5 => 1.0,
+        2 | 6 => 0.5,
+        _ => 1.0 / RESOLUTION_SCALE,
+    }
+}
+
 fn world_pos(world: &World, vm: &Vm) -> [f32; 3] {
-    let mut p = [vm.pos[0] + vm.origin[0], vm.pos[1] + vm.origin[1], vm.pos[2] + vm.origin[2]];
+    let f = res_pos_factor(vm.res_mode);
+    let mut p = [vm.pos[0] * f + vm.origin[0], vm.pos[1] * f + vm.origin[1], vm.pos[2] * f + vm.origin[2]];
     if vm.inherit_position_scale {
         let mut root = vm.parent.and_then(|id| world.get(id));
         for _ in 0..32 {
@@ -1115,8 +1198,9 @@ fn world_pos(world: &World, vm: &Vm) -> [f32; 3] {
     let mut depth = 0;
     while let (Some(pid), true) = (parent, depth < 32) {
         let Some(pv) = world.get(pid) else { break };
+        let f = res_pos_factor(pv.res_mode);
         for i in 0..3 {
-            p[i] += pv.pos[i] + pv.origin[i];
+            p[i] += pv.pos[i] * f + pv.origin[i];
         }
         parent = pv.parent;
         depth += 1;
@@ -1452,7 +1536,9 @@ fn exec(
         304 => vm.layer = i!(0),
         305 => vm.z_write_disable = i!(0) != 0,
         318 => vm.inherit_position_scale = i!(0) != 0,
-        306 | 307 | 311 | 312 | 313 | 314 | 315 | 316 | 317 | 319 => {} // no visual effect modelled yet
+        // ANM313 (0x4c0d63) stores the resolution mode in +0x4ce.
+        313 => vm.res_mode = Some(i!(0) as u8),
+        306 | 307 | 311 | 312 | 314 | 315 | 316 | 317 | 319 => {} // no visual effect modelled yet
         308 => vm.scale[0] = -vm.scale[0],
         309 => vm.scale[1] = -vm.scale[1],
         310 => vm.visible = i!(0) != 0,
@@ -1570,11 +1656,13 @@ fn exec(
         606 => vm.primitive = Some(Primitive::Rect { w: f!(0), h: f!(1), rotated: true, gradient: true }),
         607 => vm.primitive = Some(Primitive::Rect { w: f!(0), h: f!(1), rotated: true, gradient: false }),
         608 => vm.primitive = Some(Primitive::Rect { w: f!(0), h: f!(1), rotated: true, gradient: true }),
-        604 => vm.primitive = Some(Primitive::Poly { radius: f!(0), segments: i!(1), border: false }),
-        605 => vm.primitive = Some(Primitive::Poly { radius: f!(0), segments: i!(1), border: true }),
+        604 => vm.primitive = Some(Primitive::Poly { radius: f!(0), segments: i!(1), border: false, elliptic: false }),
+        605 => vm.primitive = Some(Primitive::Poly { radius: f!(0), segments: i!(1), border: true, elliptic: false }),
+        617 => vm.primitive = Some(Primitive::Poly { radius: f!(0), segments: i!(1), border: false, elliptic: true }),
         // 611, 615 and 616 all draw rings (draw types 0x13 / 0x1d / 0x1e -> FUN_004c3b60).
         611 | 615 | 616 => vm.primitive = Some(Primitive::Ring { radius: f!(0), thickness: f!(1), segments: i!(2) }),
         612 => vm.primitive = Some(Primitive::RectBorder { w: f!(0), h: f!(1) }),
+        618 => vm.primitive = Some(Primitive::Point),
 
         op => *unknown.entry(op).or_default() += 1,
     }
@@ -1782,8 +1870,9 @@ fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, camera: Option<&Camera>, out: 
         // Primitive draw types use rotation independently of the sprite render mode.
         // 603/606 dispatch to 004c4d20 with the angle from 00404f70.
         let pl = Placer { rot: [0.0, 0.0, vm.rot[2] + vm.inherited_rot], ..pl };
-        let sx = vm.scale[0] * vm.scale2[0] * ps[0];
-        let sy = vm.scale[1] * vm.scale2[1] * ps[1];
+        let rf = vm.res_mode.map_or(1.0, res_size_factor);
+        let sx = vm.scale[0] * vm.scale2[0] * ps[0] * rf;
+        let sy = vm.scale[1] * vm.scale2[1] * ps[1] * rf;
         let rect = |out: &mut Vec<Vertex>, x0: f32, y0: f32, x1: f32, y1: f32, l: [f32; 4], r: [f32; 4]| {
             pl.quad(out, [(x0, y0), (x1, y0), (x1, y1), (x0, y1)], [z; 4], [l, r, r, l]);
         };
@@ -1811,11 +1900,24 @@ fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, camera: Option<&Camera>, out: 
                     rect(out, x0, y0, x1, y1, c1, c1);
                 }
             }
-            Primitive::Poly { radius, segments, border } => {
+            Primitive::Poly { radius, segments, border, elliptic } => {
                 let n = segments.clamp(3, 256);
-                let r = radius * sx;
+                // ANM617 (FUN_004c3850): local x radius = the scale2 x chain (+0x5c, not
+                // resolution-scaled), local y radius = scale x chain * radius (+0x54 * +0x74),
+                // vertex angles start at the rotation.
+                let (r, ry, start) = if elliptic {
+                    let pscale2 = vm.parent.and_then(|p| world.get(p)).map_or(1.0, |p| p.scale2[0]);
+                    let pscale = vm.parent.and_then(|p| world.get(p)).map_or(1.0, |p| p.scale[0]);
+                    (vm.scale2[0] * pscale2, radius * vm.scale[0] * pscale * rf, vm.rot[2] + vm.inherited_rot)
+                } else {
+                    (radius * sx, radius * sx, 0.0)
+                };
+                let pt = |k: i32, rr: f32, rry: f32| {
+                    let t = start + k as f32 / n as f32 * std::f32::consts::TAU;
+                    (t.cos() * rr, t.sin() * rry)
+                };
                 for k in 0..n {
-                    let (b0, b1) = (ring_pt(k, n, r), ring_pt(k + 1, n, r));
+                    let (b0, b1) = (pt(k, r, ry), pt(k + 1, r, ry));
                     if border {
                         let (a0, a1) = (ring_pt(k, n, r - 1.0), ring_pt(k + 1, n, r - 1.0));
                         pl.quad(out, [a0, b0, b1, a1], [z; 4], [c1; 4]);
@@ -1823,6 +1925,10 @@ fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, camera: Option<&Camera>, out: 
                         pl.tri(out, [(0.0, 0.0, z, c1), (b0.0, b0.1, z, c2), (b1.0, b1.1, z, c2)]);
                     }
                 }
+            }
+            Primitive::Point => {
+                let h = 0.5 / RESOLUTION_SCALE;
+                Placer { rot: [0.0; 3], ..pl }.quad(out, [(-h, -h), (h, -h), (h, h), (-h, h)], [z; 4], [c1; 4]);
             }
             Primitive::Ring { radius, thickness, segments } => {
                 let n = segments.clamp(3, 256);
@@ -1879,7 +1985,14 @@ fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, camera: Option<&Camera>, out: 
             if o[0] != 0.0 { o[0] } else { sprite.size[0] },
             if o[1] != 0.0 { o[1] } else { sprite.size[1] },
         ],
-        _ => sprite.size,
+        _ => match vm.res_mode {
+            // Sizes follow the resolution mode from the sprite's texture-pixel size.
+            Some(m) => {
+                let px = if sprite.lowres { 2.0 } else { 1.0 };
+                [sprite.size[0] * px * res_size_factor(m), sprite.size[1] * px * res_size_factor(m)]
+            }
+            None => sprite.size,
+        },
     };
     let w = base[0] * vm.scale[0] * vm.scale2[0] * ps[0];
     let h = base[1] * vm.scale[1] * vm.scale2[1] * ps[1];

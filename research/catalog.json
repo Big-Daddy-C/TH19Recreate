@@ -1005,6 +1005,114 @@
     "stage_select": {
       "address": "00412d90",
       "decompile_sha256": "02e00a0ddc1e07061840521055a798d98e3d264ba71ad8cb21df13ab535b3b74"
+    },
+    "front_hud_start": {
+      "address": "005140b0",
+      "decompile_sha256": "a349c6ffff75193f8fdfce8430a34a9b1e65ff53d85783e7c51283b97fe754bd"
+    },
+    "front_side_show": {
+      "address": "005142f0",
+      "decompile_sha256": "341abf89bcb84860fb3db891ae3bce6a0a3f72461c812d0d89caf816280710af"
+    },
+    "front_side_create": {
+      "address": "005145f0",
+      "decompile_sha256": "8cd99601f24553a9f99fa7d91a6181d0507ff69728d92966270328534bc83ddf"
+    },
+    "front_hearts_refresh": {
+      "address": "005141c0",
+      "decompile_sha256": "c652d8e6f2092a208ff4b85d2eb7d6353a5102bbac5100be17aca03fbaf39fec"
+    },
+    "front_bombs_refresh": {
+      "address": "00515200",
+      "decompile_sha256": "97641c6fe31ba4b72db7f749f92a8b50369da15c62560857eb96bb0072da62e7"
+    },
+    "front_side_update": {
+      "address": "00512fd0",
+      "decompile_sha256": "aa6326a061be5c4ac33d320c3d900829570d393029845f2f41811bac4c205c12"
+    },
+    "round_banner": {
+      "address": "0050efc0",
+      "decompile_sha256": "060ef128f0576087202ac7089e40756e7997ecc87ed79574b7858d958051e250"
+    },
+    "round_result": {
+      "address": "00515540",
+      "decompile_sha256": "bf3f4e7862a27c68a802e829db40113d8b42b58fb3a0a31013dfcb11b28584c1"
+    },
+    "game_frame": {
+      "address": "00516450",
+      "decompile_sha256": "a5a0d036cc870c309c900d91f9296cd7af1a257782c03932a70775e121733e70"
+    },
+    "time_limit_text": {
+      "address": "00512d20",
+      "decompile_sha256": "9fc29cbd5f411f5a6c3bae95f005ee78a6464c9a8d84479088470792dd3c77f9"
+    },
+    "game_init": {
+      "address": "005177a0",
+      "decompile_sha256": null
+    },
+    "gauge_create": {
+      "address": "004e9740",
+      "decompile_sha256": "d542ac7a2127b93e2a14a972e8e29ac269ffb7c8cee8804b1e73262d9f3ff916"
+    },
+    "gauge_update": {
+      "address": "004e8a20",
+      "decompile_sha256": "7c3e2be5e1a904c1991307cc63155a7338a8d6770fb64afab070d6283a4000dd"
+    },
+    "gauge_marker": {
+      "address": "004e95c0",
+      "decompile_sha256": "fbd7de446c6f60ddadf4bb9b807690b6685d4b88eaed661f4a6505793af6527f"
+    },
+    "anm_find_descendant": {
+      "address": "004cb0a0",
+      "decompile_sha256": "c3ba25870808f49fdc7e928ecb00ced4fc2040b0a542d763a2d120271c3b9af4"
+    },
+    "anm_interrupt_run": {
+      "address": "004cb7a0",
+      "decompile_sha256": "e4fcca534992ceeb76ee9d30dd7b6fb58a33665864af73d180357593aed4eb95"
+    },
+    "anm_interrupt": {
+      "address": "004cb830",
+      "decompile_sha256": "dab57120cf18629b4f904733b1a9c6713def503223a18369904f4b296e48e534"
+    },
+    "anm_res_position": {
+      "address": "00404050",
+      "decompile_sha256": "13cbf071026d4c4b5a13a62ba5ca3a7128907c550a8f857d5f222a8bce5399ef"
+    },
+    "anm_poly_scaled": {
+      "address": "004c3850",
+      "decompile_sha256": "c668766b2a6ca404a224a991e1b22ac99a0c047eba8e26d43a85a0c78b9f5bd5"
+    },
+    "anm_draw_primitive": {
+      "address": "004c50f0",
+      "decompile_sha256": "fa9e71acfcf96d925fef9117d3532561d1a9080b8e074e56548003f738cdde71"
+    },
+    "text_object_init": {
+      "address": "004e7430",
+      "decompile_sha256": "e8f5e5a6f5a0fdb582ede45d01f50ed385b683d300f737fbd3b2095d7e63b77d"
+    },
+    "text_layer_draw": {
+      "address": "004e6b60",
+      "decompile_sha256": "5c8f0c85bc77f596a3337daf6552a644695fe44291b2c100df4b158e76fdfa44"
+    },
+    "text_draw": {
+      "address": "004e5850",
+      "decompile_sha256": "0035e396e033270290a8b69fbb0f90abb3038442aef389ea57edf937fee8a466"
+    },
+    "text_defaults": {
+      "address": "0040a320",
+      "decompile_sha256": "0e077644da1d5f536b7e7d3c0cae71b50b7a1212118b606f6501ab5f6206ca58"
+    },
+    "bomb_allowed": {
+      "address": "004ed6d0",
+      "decompile_sha256": "a3a19f5d621298bde14d6c5d0512b865a742c5e412e5d383cbcea060160bd915"
+    },
+    "bomb_set_stock": {
+      "address": "00537820",
+      "decompile_sha256": "c30c816dc18b8a294b703059d2bf2645e16f6d206c79bc25fce1ebaa70f9e677"
+    },
+    "pressure_tick": {
+      "address": "0051afe0",
+      "decompile_sha256": "05a7c9dbc3bbf5b16796f11796c085cd868a43fffdd3c150803c7ac204e6389d"
     }
   },
   "features": {
@@ -2111,6 +2219,23 @@
           "text": "Not found / not ported: orbs dropped by focusing spirits (no focus-dependent drop was found; the player's focus flag only scales the hit circle in FUN_00549e00), ECL-controlled orb rate ops (FUN_0040f1e0 callers), cancel-to-orb conversion (ECL op 1000 passes mode 1 to FUN_004ee0d0; all other cancels pass 0), item types other than 9..14, and the status meter's starting value (the code keeps the earlier starting meter = attack threshold).",
           "sources": [],
           "evidence": "assumption"
+        },
+        {
+          "text": "Bombs (FUN_004ed6d0 / FUN_004ed7d0): a bomb needs stock (status +0x68 > 0, clamped 0..10), none running and the round active; starting one spends a stock (cap +0x74 = 7) and refreshes the HUD stars. Every bomb update (Reimu 0053c510, Marisa 0053d9b0, Sanae 00418190, Ran 00419000) writes the meter from an int interpolation at BombInf +0x88 (start = meter when the bomb began, end 0, linear, over the bomb duration), so the meter drains during the bomb; 10 frames after the duration the meter becomes the attack threshold (status +0x28). Previously the port neither used stock nor drained the meter (bombs were free). The bomb duration percent status +0x90 is 100.",
+          "sources": [
+            "bomb_allowed",
+            "bomb_start",
+            "reimu_bomb_update",
+            "bomb_set_stock"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Investigation of the reported 'spirit kept in the focus shadow drops blue meter orbs': every caller of the orb spawner FUN_00521d60 / orb-rate adder FUN_00521c60 was traced (enemy death FUN_0050c1f0 / item counts FUN_0050c6d0, ECL 556 via FUN_0040f880, bullet cancel drops FUN_004ee9b0, and graze FUN_00549fb0 from bullet graze FUN_004f5130, laser graze FUN_0052b250/FUN_00527bb0/FUN_0052dd30 and the enemy-body graze in FUN_00509980). The body graze needs ECL flag 0x200, which only some EX attacks set (pl03/04/05/09/14 ExtraAttack); default.ecl's spirits never set it, and a spirit inside the scope (FUN_00509030) is only switched once to its Disable sub (GhostPureDisable: ANM reset 318, push upward). No code path was found that drops orbs for a spirit inside the scope or the focus marker, so nothing was added.",
+          "sources": [
+            "enemy_body_graze"
+          ],
+          "evidence": "code_checked"
         }
       ],
       "checks": {
@@ -2682,6 +2807,123 @@
         "Shared native reward path under1041 currently suppresses credit gain; explosion/chain behavior under flag needs separate audit. Bot does not yet avoid lasers.",
         "Compare Sanae/Ran normal shots, hit colliders, skill/focus/bombs and all attack ranks against synchronized original footage.",
         "Graze sound 0x2a, laser graze segment arguments (hidden registers at 0052b250 etc.) and the pool-spawn tick order relative to bullet update remain unverified; ECL 1037 landing positions are tested only for edge placement, not for arrival timing against the original."
+      ]
+    },
+    "hud_rounds": {
+      "implementation": "partial",
+      "summary": "Original VS HUD (front.anm frame, hearts, bomb stars, round-win stars; aura.anm charge gauge with text labels; time limit) and round/match flow (result, banners, best-of-3, level carry-over).",
+      "symbols": [
+        "front_hud_start",
+        "front_side_show",
+        "front_side_create",
+        "front_hearts_refresh",
+        "front_bombs_refresh",
+        "front_side_update",
+        "round_banner",
+        "round_result",
+        "game_frame",
+        "time_limit_text",
+        "game_init",
+        "gauge_create",
+        "gauge_update",
+        "gauge_marker",
+        "anm_find_descendant",
+        "anm_interrupt_run",
+        "anm_interrupt",
+        "anm_res_position",
+        "anm_poly_scaled",
+        "anm_draw_primitive",
+        "text_object_init",
+        "text_layer_draw",
+        "text_draw",
+        "text_defaults",
+        "bomb_allowed",
+        "bomb_start",
+        "reimu_bomb_update",
+        "bomb_set_stock",
+        "pressure_tick",
+        "player_death"
+      ],
+      "code": [
+        "crates/th-game/src/hud.rs",
+        "crates/th-game/src/round.rs",
+        "crates/th-game/src/text.rs",
+        "crates/th-anm/src/vm.rs",
+        "crates/th19/src/main.rs"
+      ],
+      "tests": [
+        "crates/th-game/src/round.rs",
+        "crates/th-game/src/bomb.rs",
+        "crates/th19/src/main.rs"
+      ],
+      "findings": [
+        {
+          "text": "Match settings (FUN_005177a0, the GameInf init that Ghidra left undefined at 005177a0; decompiled by creating the function in a read-only session): option byte DAT_0062bb10 = th19.cfg +0xf0 (0x54 shipped): time limit = table 0x5a85c0[option & 0xf] = {0,10800,18000,25200,36000,54000,72000} frames (0x54 -> 36000 = 10 minutes per round, DAT_0062bb1c/bb20, reset every round), wins needed DAT_0062bb24 = ((option>>4)&3)+1 = 2. Per player (status base 0x62b0c0 + side*200; handicap byte DAT_0062bb14[side] = cfg +0xf4/+0xf8 = 9): hearts +0x54 and max +0x58 = (h&7)+1 = 2, bombs +0x68 = 3 with cap +0x74 = 7, +0x40 = 200, +0x44 = 0, +0x5c/+0x60/+0x6c/+0x80 = 0, +0x84/+0x88/+0x8c/+0x90/+0x98 = 100, +0xa0/+0xa4 from tables 0x5a85b0/0x5a85a0[(h>>3)&7]. EX/boss levels (+0x38/+0x3c) in VS: a new match takes table 0x5aa5a0 {0,0,2,4}[difficulty DAT_0062b250] (Normal 0); a later round of the match (flag 2 in DAT_0062b0ac) lowers each by 2, clamped 0..7. A new match also picks the stage at random from the two players' characters (DAT_006389cc = rand & 1). Pressure DAT_0062b260 starts at row[1] of the difficulty table 0x5c5f90 (Normal: 0) with cap row[2] (60) and interval row[3] (360); FUN_0051afe0 adds 1 every interval and after 10800 frames of a VS round raises the cap to 200 (100 on Easy) with interval 240.",
+          "sources": [
+            "game_init",
+            "pressure_tick"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Round result FUN_00515540 (from the player state machine when a player with no hearts finishes state 2 at 30 frames, or from FUN_00516450 when the time limit DAT_0062bb20 reaches 0): clears both fields (FUN_0050ca70 enemies, FUN_004edf90(0) bullets, FUN_00530bd0(1) lasers); P1 out and P2 not: P2 wins; both out: draw (VS); time out: fewer hearts lost (+0x64) wins, then more EX+boss sends (+0x4c/+0x50, counted by FUN_0050e820/FUN_0050e7d0), then the larger meter (+0x24), else draw. A winner with no hearts lost gets 'complete' (0x100000), a time-out 'decision' (0x200000). The winner's wins (+0xbc) rise by one (cap 9). FUN_00512fd0 at 120 frames after the result spawns per field the front.anm banner 0x14e/0x151/0x154 (Victory/Complete/Decision) or 0x157/0x158/0x159 (Defeat ...) or 0x15a (Draw), positioned by interrupt side+7 ((328|952, 424) in mode 2), and the winner's new round-win star (script 0x12); after 320 frames the next round starts (DAT_0062c450 = 0x16) unless a side reached the wins needed. Round start (FUN_005140b0 -> FUN_0050efc0): front script 3 (frame) and, per field, the round banner 0x15f/0x163/0x16f (Round 1, Round 2, Final Round for option style 1; style 0 'Let's Fire!' 0x15b) spawned twice with interrupts 7 and 8.",
+          "sources": [
+            "round_result",
+            "game_frame",
+            "front_side_update",
+            "round_banner",
+            "front_hud_start"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "FrontInf per-side HUD (blocks of 0x6c at FrontInf+0x10, front.anm = FrontInf+0x41c loaded in FUN_00514bd0): hearts = script 0x10 x max hearts at (centre - 8*max + 16*i, 16) (centre 164/476); FUN_005141c0 sends 2 (white heart, sprite 13) to hearts below the count, 3 (empty, sprite 10) to the rest, and 7 (red flash) to heart 0 when one is left. Bomb stars = script 0x11 x7 at (centre + 140, 464 - 8k); FUN_00515200 sends 0x14 then 2 to the first 'bombs' stars, 7 to the next while a bomb runs, 0x11+pieces for bomb pieces (Mamizou, not used here), 3 to the rest; FUN_00512fd0 fades them (interrupt 9) while the player is at x >= 112 and y >= 416 and restores them (8) at x < 112 and y < 416. Round-win stars = script 0x12 at screen (2*(16+16i), 16) / (2*(624-16i), 16), i.e. canvas (16+16i, 8) on the 2x window. All are shown with interrupt 4 run at once (FUN_004cb7a0) by FUN_005142f0. The global time limit text (FUN_00512d20) is '%d' of (frames left + 59) / 60 in text style 4 at (318, 0), centred.",
+          "sources": [
+            "front_side_create",
+            "front_side_show",
+            "front_hearts_refresh",
+            "front_bombs_refresh",
+            "front_side_update",
+            "time_limit_text"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Charge gauge (AuraCtrl, aura.anm = AuraCtrl+0x10): FUN_004e9740 spawns script 0 at (164|476, 456) with children 1-12, runs FUN_004e8a20 once and interrupt 4 at once. FUN_004e8a20 every frame: children are found by script number (FUN_004caed0 -> FUN_004cb0a0, depth first); marker pairs 5/6, 7/8, 9/10, 11/12 at x = threshold*224/2500 - 112 for attack/skill/EX/boss, state 1 (above meter: interrupt 5 via FUN_0040b7e0), 2 (reachable: 3), 3 (charged past: 2), sent only on change; meter bar (script 3) and charge bar (script 4) scale x = value/2500; while charging a cursor (script 13) sits at the charge bar's position + charge*224/2500, 4 screen px lower; labels (text style 0, centred, top-aligned, layer 0) 'Ex.Attack Lv%d' 0xffffff80 / 'Skill' 0xff80d0ff / 'Boss Lv%d' 0xffff8080 at (centre + marker x, 448) for the reached tier, and grey (0xffc0c0c0) 'Lv%d' (boss / EX level + 1) at y 461 under the markers not yet reached; while a bomb runs a cursor (script 15) marks the meter; with handicap bits 0x38 set the meter bar flashes (interrupt 2 via FUN_0040b840) once the meter reaches the EX threshold and resets (3) otherwise.",
+          "sources": [
+            "gauge_create",
+            "gauge_update",
+            "gauge_marker",
+            "anm_find_descendant"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "ANM313 (handler 0x4c0d63) stores a resolution mode in VM +0x4ce. Positions (FUN_00404050): modes 1/3 x R, 2/4 x R/2, others unscaled screen pixels; sprite and primitive sizes (FUN_004c6910, FUN_004c50f0): modes 1/5 x R, 2/6 x R/2, others unscaled (R = DAT_0062eeb0: 1, 1.5 or 2 by window size). UI layers (20-36, 43-51) default to mode 1 unless the script set one (FUN_004d0b30). The 'lowres' entry flag only halves the texture when R < 2 (FUN_004cf130); sprite rectangles stay in texture pixels. Ported with R = 2 (the 1280x960 window): canvas position factor 1 / 0.5 / 0.5 and size factor 1 / 0.5 / 0.5 from texture pixels, applied only to VMs whose script set ANM313. ANM617 = draw type 0x1f (FUN_004c3850): a triangle fan with local x radius = the scale2 x chain (+0x5c, not resolution-scaled) and y radius = scale x chain * radius (+0x54 * +0x74), vertex angles starting at the rotation; ANM618 = draw type 0x20: one D3D point in colour 1.",
+          "sources": [
+            "anm_res_position",
+            "anm_draw_primitive",
+            "anm_poly_scaled"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Correction: the text object's strings are drawn by layer (+0x1979c, stored per string at +300): FUN_004e7430 registers draw callbacks at priorities 100 (layer 0), 0x3b (1), 0x52 (2), 0x49 (3), 0x53 (4) plus an update at 8; the combo counter and the gauge labels use layer 0, so they draw at 100, not 0x1f as recorded earlier. Text defaults (FUN_0040a320): colour white, shadow black, style 0, advance 9, scale 1, horizontal alignment 1 (left), vertical 1 (top). Style 0 draws glyph sprite char - 0x20 of the first ascii.anm entry (14x14) advancing 9; style 4 glyph 0xef + char - '0' (16x16) advancing 12. The game picks ascii_960.anm / ascii1280.anm at R > 1.1 / 1.6; the port keeps ascii.anm in canvas units.",
+          "sources": [
+            "text_object_init",
+            "text_layer_draw",
+            "text_draw",
+            "text_defaults"
+          ],
+          "evidence": "code_checked"
+        }
+      ],
+      "checks": {},
+      "next": [
+        "Compare HUD placement and the round transition with original footage (no recording available).",
+        "The timer digits FrontInf +0x44/+0x48 (ascii.anm scripts 2/3, countdown sounds 0xb/0xc) and the per-side net-play text in FUN_00512d20 are not ported.",
+        "Match end in the original goes to a results/continue screen (FUN_00515050); the port starts a new match.",
+        "2 vs 2 HUD placement (teammate hearts below, gauge above, bomb stars on the left) is port-only."
       ]
     }
   }

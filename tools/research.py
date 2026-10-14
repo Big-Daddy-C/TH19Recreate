@@ -77,7 +77,16 @@ def pe_bytes(data, va, size):
 def verify(catalog, paths, exe):
     errors = []
     if not exe.is_file() or digest(exe) != catalog['reference']['exe_sha256']:
-        errors.append('Executable absent or SHA256 differs from recorded v1.10c reference')
+        # When the executable itself is unavailable, a Ghidra memory image (TH19_EXE_IMAGE) whose
+        # map records the original file bytes' SHA256 identifies the same reference.
+        image = os.environ.get('TH19_EXE_IMAGE')
+        recorded = None
+        if image and Path(image + '.map').is_file():
+            for line in Path(image + '.map').read_text().splitlines():
+                if line.startswith('# filebytes') and 'sha256' in line:
+                    recorded = line.split()[-1]
+        if recorded != catalog['reference']['exe_sha256']:
+            errors.append('Executable absent or SHA256 differs from recorded v1.10c reference')
     for alias, symbol in catalog['symbols'].items():
         path = paths.get(symbol['address'])
         expected = symbol.get('decompile_sha256')

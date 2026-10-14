@@ -37,6 +37,20 @@ impl Exe {
         Ok(Self { data, image_base, sections })
     }
 
+    /// A memory image (e.g. a Ghidra export of the loaded program) laid out as consecutive blocks.
+    /// `map` lines are `name va_hex size_hex offset_hex`; `#` lines are ignored. Development aid
+    /// for when the executable itself is unavailable.
+    pub fn from_image(data: Vec<u8>, map: &str) -> Result<Self> {
+        let mut sections = Vec::new();
+        for line in map.lines().filter(|l| !l.starts_with('#') && !l.trim().is_empty()) {
+            let f: Vec<&str> = line.split_whitespace().collect();
+            let hex = |s: &str| u32::from_str_radix(s, 16).map_err(|_| Error::Format(format!("bad image map line: {line}")));
+            let (va, size, pos) = (hex(f.get(1).copied().unwrap_or(""))?, hex(f.get(2).copied().unwrap_or(""))?, hex(f.get(3).copied().unwrap_or(""))?);
+            sections.push((va - 0x40_0000, size, pos, size));
+        }
+        Ok(Self { data, image_base: 0x40_0000, sections })
+    }
+
     /// File bytes backing `len` bytes at virtual address `va` (only initialised data).
     pub fn bytes(&self, va: u32, len: usize) -> Option<&[u8]> {
         let rva = va.checked_sub(self.image_base)?;

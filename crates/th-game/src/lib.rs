@@ -30,3 +30,4 @@ pub mod beam;
 pub mod character;
 pub mod item;
 pub mod text;
+pub mod hud;
