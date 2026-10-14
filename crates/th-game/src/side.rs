@@ -107,6 +107,12 @@ pub struct SideState {
     /// Spell card background VM (ECL 522 / 523).
     pub spell_background: Option<th_anm::VmId>,
     pub spell_start_effect: Option<th_anm::VmId>,
+    /// `text.anm` (the run-time text surfaces, `DAT_0062c484`).
+    pub text_anm: Option<usize>,
+    /// The declared spell card's name bar and name (SpellcardInf +0x14 / +0x18).
+    pub spell_ui: Option<SpellUi>,
+    /// A spell name the viewer must render into the name VM's texture (`FUN_004cd480`).
+    pub spell_text: Option<(th_anm::VmId, String)>,
     /// ECL 525 requested destroying this field's enemies.
     pub clear_enemies: bool,
     /// Remove the enemies flagged 0x100 (see ECL 512 with slot -1).
@@ -390,6 +396,55 @@ impl SideState {
     }
 }
 
+/// The spell card name display (SpellcardInf: `FUN_004f67c0` declares it, `FUN_004f6e90`
+/// fades it while the player is near the top, `FUN_004f6730` removes it).
+#[derive(Clone, Copy, Debug)]
+pub struct SpellUi {
+    pub bar: th_anm::VmId,
+    pub name: th_anm::VmId,
+    /// SpellcardInf +0x28: frames since the declaration.
+    pub time: i32,
+    /// SpellcardInf +0x7c & 4.
+    pub faded: bool,
+}
+
+impl SpellUi {
+    /// `FUN_004f6e90`: from 120 frames on, the bar and name fade (interrupt 3) while the player
+    /// is above y 96 and come back (2) once it is below y 128.
+    pub fn tick(&mut self, player_y: f32, world: &mut World) {
+        self.time += 1;
+        if self.time < 0x78 {
+            return;
+        }
+        if !self.faded && player_y < 96.0 {
+            self.faded = true;
+            for id in [self.bar, self.name] { world.interrupt(id, 3); }
+        } else if self.faded && player_y > 128.0 {
+            self.faded = false;
+            for id in [self.bar, self.name] { world.interrupt(id, 2); }
+        }
+    }
+
+    /// `FUN_004f6730`: interrupt 1 sends both away.
+    pub fn end(self, world: &mut World) {
+        for id in [self.bar, self.name] { world.interrupt(id, 1); }
+    }
+}
+
+/// The spell card name in ECL 522 (case 0x43 of FUN_004fecc0): bytes XORed with a key that
+/// starts at 0x77 and grows by a step that starts at 7 and grows by 0x10 per byte. Shift-JIS.
+pub fn decode_spell_name(raw: &[u8]) -> Vec<u8> {
+    let (mut key, mut step) = (0x77u8, 7u8);
+    let mut out: Vec<u8> = raw.iter().map(|&b| {
+        let c = b ^ key;
+        key = key.wrapping_add(step);
+        step = step.wrapping_add(0x10);
+        c
+    }).collect();
+    if let Some(end) = out.iter().position(|&b| b == 0) { out.truncate(end); }
+    out
+}
+
 pub struct Side {
     pub st: SideState,
     pub enemies: Vec<Enemy>,
@@ -464,6 +519,7 @@ impl Side {
                 bullet_types: Rc::new(Vec::new()),
                 cancel_bullets: false,
                 spell_background: None, spell_start_effect: None,
+                text_anm: None, spell_ui: None, spell_text: None,
                 clear_enemies: false,
                 clear_overrides: false,
                 ghost_anm: None,
@@ -883,6 +939,8 @@ impl Side {
         }
         self.st.player_pos = self.target_pos();
         self.update_scope();
+        let player_y = self.st.player_pos[1];
+        if let Some(ui) = &mut self.st.spell_ui { ui.tick(player_y, world); }
         self.update_bullets(world, lib);
         self.update_lasers(world, lib);
         self.update_explosions(world);
@@ -1285,6 +1343,7 @@ impl Side {
         for mut l in std::mem::take(&mut self.st.lasers) {
             l.delete(world);
         }
+        if let Some(ui) = self.st.spell_ui.take() { ui.end(world); }
     }
 
     /// Frames a development rain lasts.

@@ -4,6 +4,7 @@
 //! Currently this binary is the ANM viewer used to validate the formats, VM and renderer.
 
 mod render;
+mod font;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -137,6 +138,8 @@ struct Viewer {
     /// The round to continue with on the next load (the match score), and each side's
     /// [first player, partner] EX/boss levels at the end of the last round.
     next_round: Option<th_game::round::Round>,
+    /// The Windows font for run-time text surfaces (spell card names).
+    text_font: Option<font::TextFont>,
     carry_levels: Option<Vec<[[u8; 2]; 2]>>,
     /// The theme of the stage's characters, chosen when the stage loads.
     stage_theme: Option<&'static str>,
@@ -195,6 +198,7 @@ impl Viewer {
             team_size: 1,
             music_override: None,
             next_round: None,
+            text_font: font::TextFont::load(),
             carry_levels: None,
             stage_theme: None,
             full_charge: false,
@@ -319,9 +323,11 @@ impl Viewer {
         let ghost = self.load_anm("ghost.anm");
         let aura = self.load_anm("aura.anm");
         let ascii = self.load_anm("ascii.anm");
+        let text = self.load_anm("text.anm");
         for (i, s) in sides.iter_mut().enumerate() {
             s.st.bullet_types = self.bullet_types.clone();
             s.st.ascii_anm = ascii;
+            s.st.text_anm = text;
             s.st.ghost_anm = ghost;
             s.start(&progs[i]);
             for slot in 0..team {
@@ -438,6 +444,16 @@ impl Viewer {
                         p.free_charge = self.full_charge;
                     }
                     s.tick(&g.progs, k, &mut self.world, &self.lib);
+                    // A declared spell card's name is drawn into its text.anm surface.
+                    if let Some((vm, name)) = s.st.spell_text.take() {
+                        let size = self.world.get(vm).and_then(|v| self.lib.files.get(v.file)?.sprites.get(v.sprite.max(0) as usize).map(|d| d.size));
+                        if let (Some(font), Some([w, h])) = (&self.text_font, size) {
+                            let (w, h) = (w as u32, h as u32);
+                            let rgba = font.render(&name, w, h);
+                            let tex = self.lib.add_texture("spell name", w, h, rgba);
+                            if let Some(v) = self.world.get_mut(vm) { v.texture_override = Some(tex); }
+                        }
+                    }
                     if let Some(a) = &mut self.audio { a.play_all(&s.st.sounds); }
                     s.st.sounds.clear();
                 }

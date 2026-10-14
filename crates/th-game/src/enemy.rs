@@ -927,6 +927,21 @@ impl EnemyHost<'_> {
             522 => {
                 // FUN_004f67c0 plays 0x21 at centre pan.
                 if crate::sfx::on(crate::sfx::Cat::Spell) { self.st.sounds.push((0x21, 0)); }
+                // The name: three ints, then a length-prefixed obfuscated Shift-JIS string. The
+                // declaration shows ascii.anm script 0 (the name bar) and text.anm script
+                // side + 2 (the name) at the field's top centre, (164|476, 16).
+                let len = ins.args.get(12..16).map_or(0, |b| u32::from_le_bytes(b.try_into().unwrap()) as usize);
+                let raw = ins.args.get(16..16 + len).unwrap_or(&[]);
+                let name = crate::side::decode_spell_name(raw);
+                let (name, _, _) = encoding_rs::SHIFT_JIS.decode(&name);
+                if let Some(ui) = self.st.spell_ui.take() { ui.end(self.world); }
+                let at = [self.st.field[0] + self.st.field[2] / 2.0, 16.0];
+                if let (Some(ascii), Some(text)) = (self.st.ascii_anm, self.st.text_anm) {
+                    let bar = self.world.spawn(self.lib, ascii, 0, at);
+                    let name_vm = self.world.spawn(self.lib, text, self.st.index + 2, at);
+                    self.st.spell_ui = Some(crate::side::SpellUi { bar, name: name_vm, time: 0, faded: false });
+                    self.st.spell_text = Some((name_vm, name.into_owned()));
+                }
                 self.e.spell_hp7=Some(self.e.hp*7);
                 if let Some(old)=self.st.spell_start_effect.take() {self.world.delete(old);}
                 if let Some(file)=self.st.anm_files[1] {
@@ -946,6 +961,7 @@ impl EnemyHost<'_> {
             523 => {
                 // 005030f6 calls 0040f7a0(enemy+5008, 0): clear spell damage mode.
                 self.e.spell_hp7=None;
+                if let Some(ui) = self.st.spell_ui.take() { ui.end(self.world); }
                 if let Some(id)=self.st.spell_background.take() {self.world.delete(id);}
                 if let Some(id)=self.st.spell_start_effect.take() {self.world.delete(id);}
             },

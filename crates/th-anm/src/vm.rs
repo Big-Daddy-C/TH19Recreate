@@ -372,6 +372,9 @@ pub struct Vm {
     /// Draw the sprite at this size instead of its own (STD quads specify their size).
     /// A zero component keeps the sprite's own size on that axis; negative mirrors.
     pub size_override: Option<[f32; 2]>,
+    /// A texture made at run time for this VM's sprite (the text object's rendered strings):
+    /// drawn over the whole texture instead of the sprite's own texture rectangle.
+    pub texture_override: Option<u32>,
     /// 2D sprite belonging to the stage background (drawn in [`Pass::Backdrop`]).
     pub backdrop: bool,
     /// Built-in effect attached by `effectNew`, drawn instead of the sprite.
@@ -454,6 +457,7 @@ impl Vm {
             origin: [0.0; 3],
             space_3d: false,
             size_override: None,
+            texture_override: None,
             backdrop: false,
             effect: None,
             charge: None,
@@ -1947,7 +1951,11 @@ fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, camera: Option<&Camera>, out: 
     }
 
     let file = lib.files.get(vm.file)?;
-    let sprite = *file.sprites.get(usize::try_from(vm.sprite).ok()?)?;
+    let mut sprite = *file.sprites.get(usize::try_from(vm.sprite).ok()?)?;
+    if let Some(t) = vm.texture_override {
+        sprite.texture = t;
+        sprite.uv = [0.0, 0.0, 1.0, 1.0];
+    }
     if sprite.texture == u32::MAX {
         return None;
     }

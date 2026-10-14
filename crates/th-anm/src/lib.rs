@@ -83,6 +83,12 @@ impl std::fmt::Display for LoadError {
 impl std::error::Error for LoadError {}
 
 impl AnmLibrary {
+    /// Add a texture made at run time (e.g. rendered text) and return its id.
+    pub fn add_texture(&mut self, name: &str, width: u32, height: u32, rgba: Vec<u8>) -> u32 {
+        self.textures.push(TextureImage { name: name.to_string(), width, height, rgba });
+        self.textures.len() as u32 - 1
+    }
+
     pub fn file_id(&self, name: &str) -> Option<usize> {
         self.by_name.get(&name.to_ascii_lowercase()).copied()
     }

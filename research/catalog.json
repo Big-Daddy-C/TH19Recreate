@@ -1113,6 +1113,42 @@
     "pressure_tick": {
       "address": "0051afe0",
       "decompile_sha256": "05a7c9dbc3bbf5b16796f11796c085cd868a43fffdd3c150803c7ac204e6389d"
+    },
+    "spell_update": {
+      "address": "004f6e90",
+      "decompile_sha256": "fcfa240364802c386a84fa01771c5ad5d5fa1eba591d8ba84b6af9c4a6299dbb"
+    },
+    "text_surface": {
+      "address": "004cd480",
+      "decompile_sha256": "2189d2c4f9ec1cda2f1a567a118bb58a97fac1570e6ae96888e65b187f91f1d1"
+    },
+    "text_surface_draw": {
+      "address": "004b2a50",
+      "decompile_sha256": "2d599e5cba6e55e3355c85f6e6bc43e3e16921f284f04379435168a627d7d210"
+    },
+    "font_create": {
+      "address": "004b2f40",
+      "decompile_sha256": "46c09f716b713e2faafd2cef85e2345a469021d96925da049d6fa76f334f2971"
+    },
+    "font_probe": {
+      "address": "004b3630",
+      "decompile_sha256": "adedee0a0896a7bc974b6514f223cb78ba8aabdbaef98f5a473dcd433abeecbe"
+    },
+    "screen_effect": {
+      "address": "004b9d40",
+      "decompile_sha256": "126b3f0f66ca50f4ebc7dea61eef773451eb42297a984c5a7db4ae78cc16c9d9"
+    },
+    "screen_shake": {
+      "address": "004ba250",
+      "decompile_sha256": "5c9cb774d5b24a43c1189c49269e67879e450e136ca70945ebf2577ce9d1c303"
+    },
+    "boss_timer_update": {
+      "address": "0050b1d0",
+      "decompile_sha256": "e3fc7a339b1514569d62229008b8707ac189cfc61c1a2fc9e8a553b9b0b5aaba"
+    },
+    "front_boss_timer_text": {
+      "address": "00512b60",
+      "decompile_sha256": "acdcbcbb0a14dfdb23149067418eed748acee8f5f5323f707601f6635f465e58"
     }
   },
   "features": {
@@ -1165,7 +1201,17 @@
         "float_interp",
         "laser_cancel",
         "collider_tick",
-        "collider_hit_query"
+        "collider_hit_query",
+        "spell_end",
+        "spell_update",
+        "text_surface",
+        "text_surface_draw",
+        "font_create",
+        "font_probe",
+        "screen_effect",
+        "screen_shake",
+        "boss_timer_update",
+        "front_boss_timer_text"
       ],
       "code": [
         "crates/th-game/src/charge.rs",
@@ -1174,7 +1220,8 @@
         "crates/th-game/src/skill.rs",
         "crates/th-game/src/side.rs",
         "crates/th-game/src/enemy.rs",
-        "crates/th-game/src/bomb.rs"
+        "crates/th-game/src/bomb.rs",
+        "crates/th19/src/font.rs"
       ],
       "tests": [
         "crates/th-game/tests/charge_data.rs",
@@ -1424,6 +1471,29 @@
           "sources": [
             "collider_tick",
             "collider_hit_query"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Spell card name (ECL 522, case 0x43 of FUN_004fecc0): args id, time, bonus, then a length-prefixed string whose bytes are XORed with a key starting at 0x77 whose step starts at 7 and grows by 0x10 per byte (Shift-JIS once decoded; pl00.ecl gives 霊符「乱撃陰陽玉」 / 霊符「蹂躙陰陽玉」). FUN_004f67c0 spawns ascii.anm script 0 (the name bar, sprite 285, anchored right) and text.anm (DAT_0062c484) script side+2 (sprite 13/14, a 640x40 rectangle of the run-time '@' surface) at (164|476, 16), and FUN_004cd480 draws the name into that rectangle with font slot 0: Meiryo 48 px when the system has it (FUN_004b3630 probes 'メイリオ'), else MS Gothic 32 px (FUN_004b2f40), white over a black outline drawn at the eight neighbouring offsets from (x+2, 2), Meiryo read from row 6 (FUN_004b2a50). The scripts start large in the middle (scale 4 -> 0.5/0.75), then from 60 frames slide to the top-right corner (296, 32) in mode 2. FUN_004f6e90 from 120 frames fades them (interrupt 3) while the player is above y 96 and restores them (2) below y 128; FUN_004f6730 (523) sends interrupt 1. APPROX: the original starts the text at x = rect width - 16 * bytes (laid out for the 32 px font); the port right-aligns by the measured Meiryo width.",
+          "sources": [
+            "spell_declare",
+            "spell_end",
+            "spell_update",
+            "text_surface",
+            "text_surface_draw",
+            "font_create",
+            "font_probe"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "ECL 517 (only in default.ecl BossDead: [30, 12, 0]) creates screen effect type 1 (FUN_004b9d40 -> FUN_004ba250): for 30 frames each axis moves by -s, 0 or +s at random (rand % 3; the x case 2 writes +s to the viewport arrays despite storing -s in DAT_0062c414) with s going 12 -> 0, applied to viewport index 2 (+0x44). Not ported: which drawing viewport index 2 offsets was not established. The VS boss timer (FrontInf +0x58/+0x5c, ascii.anm scripts 2/3, FUN_00512b60) only runs after ECL 1018, which no VS script uses.",
+          "sources": [
+            "screen_effect",
+            "screen_shake",
+            "boss_timer_update",
+            "front_boss_timer_text"
           ],
           "evidence": "code_checked"
         }

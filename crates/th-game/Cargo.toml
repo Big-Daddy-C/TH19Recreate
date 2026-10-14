@@ -8,3 +8,4 @@ license.workspace = true
 th-formats = { path = "../th-formats" }
 th-anm = { path = "../th-anm" }
 th-ecl = { path = "../th-ecl" }
+encoding_rs = "0.8.42"
