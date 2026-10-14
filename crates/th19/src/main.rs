@@ -425,6 +425,13 @@ impl Viewer {
             }
             let keys = self.player_keys();
             if let Some(g) = &mut self.game {
+                // The round timer and the match pressure (FUN_0051afe0, both fields).
+                if g.round.outcome.is_none() {
+                    g.round.frames += 1;
+                    let frame = g.round.frames;
+                    g.round.pressure.tick(frame);
+                    for s in &mut g.sides { s.st.spirit_pressure = g.round.pressure.value; }
+                }
                 th_game::side::prepare_charge_targets(&mut g.sides);
                 for (i, s) in g.sides.iter_mut().enumerate().filter(|_| g.round.outcome.is_none()) {
                     // Each AI owns its targeting/charge state; player 1 returns to held

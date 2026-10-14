@@ -71,6 +71,42 @@ pub const BANNER_FRAME: u32 = 120;
 /// Frames after the result when the next round starts (`> 0x13f`).
 pub const NEXT_ROUND_FRAME: u32 = 320;
 
+/// The match pressure `DAT_0062b260` (read by scripts as -9960 / 200 and by the spirit and
+/// reflected-bullet rules). Each round starts from the difficulty table 0x5c5f90 (Normal: 0,
+/// cap 60, every 360 frames); both fields' GhostCtrl updates (`FUN_0051afe0`) raise it by one
+/// on every multiple of the interval, and from 10800 frames on in VS the cap becomes 200 (100
+/// on Easy) and the interval 240.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Pressure {
+    pub value: i32,
+    pub cap: i32,
+    pub interval: i32,
+}
+
+impl Default for Pressure {
+    /// Normal (table row 1: initial 0, cap 60, interval 360).
+    fn default() -> Self {
+        Self { value: 0, cap: 60, interval: 360 }
+    }
+}
+
+impl Pressure {
+    /// One frame: `frame` is the GhostCtrl round timer after its tick; the two fields' updates
+    /// run one after the other.
+    pub fn tick(&mut self, frame: i32) {
+        for _ in 0..2 {
+            let interval = self.interval.clamp(1, 0xea24);
+            if frame % interval == 0 && self.value + 1 <= self.cap {
+                self.value += 1;
+            }
+            if frame > 0x2a2f {
+                self.cap = 200;
+                self.interval = 0xf0;
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Round {
     /// Round wins (status +0xbc, at most 9).
@@ -83,6 +119,9 @@ pub struct Round {
     pub rules: Rules,
     /// Frames left before a decision (`DAT_0062bb20`), when there is a time limit.
     pub time_left: i32,
+    /// Frames of this round (the GhostCtrl timer, +0x28) and the match pressure.
+    pub frames: i32,
+    pub pressure: Pressure,
 }
 
 impl Default for Round {
@@ -93,7 +132,7 @@ impl Default for Round {
 
 impl Round {
     pub fn new(rules: Rules) -> Self {
-        Self { points: [0; 2], outcome: None, ko_frames: 0, rounds: 0, rules, time_left: rules.time_limit }
+        Self { points: [0; 2], outcome: None, ko_frames: 0, rounds: 0, rules, time_left: rules.time_limit, frames: 0, pressure: Pressure::default() }
     }
 
     /// `FUN_00515540`. Called once a player out of hearts finishes dying (`FUN_00546320`
@@ -165,7 +204,7 @@ impl Round {
         if self.match_winner().is_some() {
             return Self::new(self.rules);
         }
-        Self { points: self.points, outcome: None, ko_frames: 0, rounds: self.rounds + 1, rules: self.rules, time_left: self.rules.time_limit }
+        Self { points: self.points, outcome: None, ko_frames: 0, rounds: self.rounds + 1, rules: self.rules, time_left: self.rules.time_limit, frames: 0, pressure: Pressure::default() }
     }
 
     /// The round-start banner script (`FUN_0050efc0`, front.anm): with banner style 1, Round 1,
@@ -201,6 +240,19 @@ impl Round {
 mod tests {
     use super::*;
     fn tally(lives: i32, deaths: u32) -> Tally { Tally { lives, deaths, ..Default::default() } }
+
+    #[test]
+    fn pressure_rises_twice_per_interval_to_the_cap() {
+        let mut p = Pressure::default();
+        for f in 1..360 { p.tick(f); }
+        assert_eq!(p.value, 0);
+        p.tick(360);
+        assert_eq!(p.value, 2, "both fields' updates count");
+        for f in 361..=10800 { p.tick(f); }
+        assert_eq!(p.value, 60);
+        for f in 10801..=10800 + 240 { p.tick(f); }
+        assert_eq!((p.cap, p.interval, p.value), (200, 240, 62));
+    }
 
     #[test]
     fn shipped_option_byte() {

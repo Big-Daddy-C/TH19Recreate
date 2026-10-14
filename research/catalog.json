@@ -2151,6 +2151,13 @@
           "text": "Project rule from the user (2026-10-03): later characters' special-bullet spawning mechanics and the thresholds/rates are difficulty-dependent in the original; implement with Normal assumed everywhere and add difficulty selection last.",
           "sources": [],
           "evidence": "user_observation"
+        },
+        {
+          "text": "Pressure is now ported (round.rs Pressure): DAT_0062b260 is one match-wide value; both fields' GhostCtrl updates (FUN_0051afe0, created per field by the init at 0x51d110) run every frame, so on every multiple of the interval it rises by 2 (Normal: from 0 by 2 every 360 frames to 60), and from 10800 frames the cap is 200 and the interval 240. Each round starts again from the table value. Previously the port held pressure at 0.",
+          "sources": [
+            "pressure_tick"
+          ],
+          "evidence": "code_checked"
         }
       ],
       "checks": {
