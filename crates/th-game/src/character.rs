@@ -8,12 +8,17 @@ pub enum Character {
     Marisa,
     Sanae,
     Ran,
+    Aunn,
+    Nazrin,
+    Seiran,
+    Orin,
 }
 
 impl Character {
-    pub const ALL: [Character; 4] = [Character::Reimu, Character::Marisa, Character::Sanae, Character::Ran];
+    pub const ALL: [Character; 8] = [Character::Reimu, Character::Marisa, Character::Sanae, Character::Ran,
+        Character::Aunn, Character::Nazrin, Character::Seiran, Character::Orin];
 
-    /// Character-select number: Reimu1, Marisa2, Sanae3, Ran4.
+    /// Character-select number: Reimu 1, Marisa 2, Sanae 3, Ran 4, Aunn 5, Nazrin 6, Seiran 7, Orin 8.
     pub fn number(self) -> usize {
         self as usize + 1
     }
@@ -24,6 +29,10 @@ impl Character {
             Character::Marisa => "Marisa",
             Character::Sanae => "Sanae",
             Character::Ran => "Ran",
+            Character::Aunn => "Aunn",
+            Character::Nazrin => "Nazrin",
+            Character::Seiran => "Seiran",
+            Character::Orin => "Orin",
         }
     }
 

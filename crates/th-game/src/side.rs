@@ -142,6 +142,9 @@ pub struct SideState {
     pub scope_circle: Option<([f32; 2], f32)>,
     pub scope_column: bool,
     pub scope_character: crate::character::Character,
+    /// The aura's [7] state for Aunn, Nazrin, Seiran and Orin (whose shapes the fields above
+    /// do not describe); `None` while it is not running.
+    pub scope_probe: Option<crate::scope::Probe>,
     pub spirit_credit: i32,
     pub spirit_origin: [f32;2],
     pub spirit_pressure: i32,
@@ -253,6 +256,7 @@ impl SideState {
     /// (`FUN_00416f10`); the column (`FUN_00417a60`) is a full-height band of half width `w`,
     /// tested here as the body's extent overlapping it.
     pub fn scope_contains(&self, pos: [f32;2], radius: f32) -> bool {
+        if let Some(r) = self.new_scope_test(pos, radius) { return r > 0; }
         if matches!(self.scope_character,crate::character::Character::Sanae|crate::character::Character::Ran) {
             return self.scope_circle.is_some_and(|(centre,r)| crate::scope::bullet_hit(self.scope_character,centre,r,pos,radius));
         }
@@ -262,20 +266,38 @@ impl SideState {
             (pos[0]-centre[0]).powi(2)+(pos[1]-centre[1]).powi(2) < r*r+radius*radius
         })
     }
+    /// The aura [7] result for the characters described by `scope_probe` (`None` for the others).
+    fn new_scope_test(&self, pos: [f32;2], radius: f32) -> Option<i32> {
+        use crate::character::Character::*;
+        if !matches!(self.scope_character, Aunn | Nazrin | Seiran | Orin) { return None; }
+        Some(self.scope_probe.filter(|p| p.running()).map_or(0, |p| p.test(pos, radius)))
+    }
+    /// `FUN_00509030`'s aura test for an enemy body (radius: half its +0x120 size): positive when
+    /// scoped, -2 inside Orin's skill circle (spirits only react to it), 0 otherwise.
     /// Ran's body callback 00419620 tests the oriented body against both cross rectangles.
-    pub fn scope_body(&self,body:&crate::enemy::EnemyData)->bool {
+    pub fn scope_body(&self,body:&crate::enemy::EnemyData)->i32 {
+        if let Some(r) = self.new_scope_test(body.pos, body.hitbox[0]*0.5) { return r; }
         if self.scope_character==crate::character::Character::Ran {
             return self.scope_circle.is_some_and(|(c,r)| {
                 let angle=body.delta[1].atan2(body.delta[0]);
                 [[r,7.0*r],[7.0*r,r]].into_iter().any(|size|
                     crate::laser::rect_rect(body.pos,body.hitbox,angle,c,size))
-            });
+            }) as i32;
         }
-        self.scope_contains(body.pos,body.hitbox[0]*0.5)
+        self.scope_contains(body.pos,body.hitbox[0]*0.5) as i32
     }
     /// The bullet callback: Reimu's circle again, Marisa's column by x alone (`FUN_00417a10`).
+    /// `FUN_004f5130` slows a bullet only for a positive result.
     pub fn scope_bullet(&self, pos: [f32;2], radius: f32) -> bool {
-        self.scope_circle.is_some_and(|(c,r)| crate::scope::bullet_hit(self.scope_character,c,r,pos,radius))
+        Self::scope_bullet_with(self.scope_circle, self.scope_character, self.scope_probe, pos, radius)
+    }
+    fn scope_bullet_with(circle: Option<([f32;2],f32)>, character: crate::character::Character,
+        probe: Option<crate::scope::Probe>, pos: [f32;2], radius: f32) -> bool {
+        use crate::character::Character::*;
+        if matches!(character, Aunn | Nazrin | Seiran | Orin) {
+            return probe.filter(|p| p.running()).is_some_and(|p| p.test(pos, radius) > 0);
+        }
+        circle.is_some_and(|(c,r)| crate::scope::bullet_hit(character,c,r,pos,radius))
     }
     /// `FUN_00548bc0`: feed the white dot counter (cap 1400) and remember where it happened.
     pub fn add_dots(&mut self, n: i32, pos: [f32; 2]) {
@@ -534,7 +556,7 @@ impl Side {
                 sounds: Vec::new(),
                 explosions: Vec::new(),
                 scope_circle: None,
-                scope_column: false, scope_character: Default::default(),
+                scope_column: false, scope_character: Default::default(), scope_probe: None,
                 spirit_credit: 0, spirit_origin: [0.0;2], spirit_pressure: 0, spirit_frames: 0,
                 outgoing_spirits: Vec::new(), pending_spirits: Vec::new(), outgoing_reflects: Vec::new(), pending_reflects: Vec::new(), arrived_reflects: Vec::new(), rain: 0, dot_counter: 0, special_counter: 0, special_sequence: 0, last_credit_pos: [0.0; 2], last_special_pos: [0.0; 2],
                 sent_spirits_pending: 0,
@@ -631,13 +653,13 @@ impl Side {
         let mut grazes: Vec<([f32; 2], u32)> = Vec::new();
         let ps: Vec<&Player> = self.player.iter().chain(self.partner.iter()).collect();
         let radii: Vec<f32> = ps.iter().map(|p| p.hitbox_radius()).collect();
-        let (scope, scope_character) = (st.scope_circle, st.scope_character);
+        let scope = (st.scope_circle, st.scope_character, st.scope_probe);
         'bullets: for b in st.bullets.iter_mut() {
             // Original contact callback applies its factor to the following movement tick.
             let dt = b.scope_time_scale;
             b.update_scaled(&mut ctx, dt);
             st.sounds.extend(b.sounds.drain(..));
-            let slowed = b.state == 1 && b.hitbox > 0.0 && scope.is_some_and(|(c,r)| crate::scope::bullet_hit(scope_character,c,r,b.pos,b.hitbox));
+            let slowed = b.state == 1 && b.hitbox > 0.0 && SideState::scope_bullet_with(scope.0, scope.1, scope.2, b.pos, b.hitbox);
             // The graze ring counts as contact too (iVar6 == 2 from FUN_00549e00); a hit does not.
             let d2_of = |b: &bullet::Bullet, p: &Player| (b.pos[0] - p.pos[0]).powi(2) + (b.pos[1] - p.pos[1]).powi(2);
             let reach2 = |b: &bullet::Bullet| (3.0 + 40.0f32.max(b.hitbox / 2.5)).powi(2) + b.hitbox * b.hitbox;
@@ -662,6 +684,10 @@ impl Side {
                 b.invuln==0 && matches!(b.state,1|2) && crate::scope::rect_circle(pos,size,b.pos,b.hitbox))) { b.cancel(); continue; }
             if ps.iter().any(|p| p.cancel_circles.iter().any(|(pos,r)|
                 b.intersects_cancel(*pos,*r,ctx.world,ctx.lib))) { b.cancel(); continue; }
+            if ps.iter().any(|p| p.cancel_ellipses.iter().any(|&(pos,a,e,theta)|
+                b.intersects_cancel_ellipse(pos,a,e,theta,ctx.world,ctx.lib))) { b.cancel(); continue; }
+            if ps.iter().any(|p| p.cancel_orects.iter().any(|&(pos,size,angle)|
+                b.intersects_cancel_box(pos,size,angle,ctx.world,ctx.lib))) { b.cancel(); continue; }
             // FUN_00549e00: hit when d^2 < player_r^2 + bullet_r^2.
             let hit_by = if b.state == 1 && !b.delete {
                 ps.iter().zip(&radii).position(|(p, &r)| r > 0.0 && d2_of(b, p) < r * r + b.hitbox * b.hitbox)
@@ -719,7 +745,14 @@ impl Side {
             if let Some(rank) = a.special {
                 // EXOnmyoInf: the flying yin-yang becomes ExtraAttack00 (FUN_0053bc50).
                 st.incoming_extra_level = rank.clamp(0, 7) as u8;
-                st.request(SpawnRequest { id: 0, difficulty: 0, sub: if matches!(a.character,crate::character::Character::Sanae|crate::character::Character::Ran) {"ExAttack"} else {"ExtraAttack00"}.into(), pos: a.pos, hp: 200, score: 0,
+                use crate::character::Character::*;
+                // Aunn's, Nazrin's and Seiran's flights (FUN_0053f150, FUN_0041b2e0) play 0x3e on
+                // arrival, panned to the receiving field's side.
+                if matches!(a.character, Aunn | Nazrin | Seiran) && crate::sfx::on(crate::sfx::Cat::Release) {
+                    let pan = if st.field[0] < 320.0 { -100.0 } else { 100.0 };
+                    st.sounds.push((0x3e, (pan * 1000.0 / 192.0) as i32));
+                }
+                st.request(SpawnRequest { id: 0, difficulty: 0, sub: if matches!(a.character,Reimu|Marisa) {"ExtraAttack00"} else {"ExAttack"}.into(), pos: a.pos, hp: 200, score: 0,
                     item: -1, mirrored: false, ivars: [0; 4], fvars: [0.0; 8], owner: Some(a.owner) });
                 continue;
             }
@@ -771,10 +804,15 @@ impl Side {
             }
             _ => -std::f32::consts::FRAC_PI_2,
         };
-        if let Some(file) = st.anm_files[1] {
+        // ECL 323 replaces the effect's sprite slot and script (a negative script: none).
+        let effect = match e.death_effect_override {
+            Some((slot, script)) => st.anm_set(e.owner).get(slot).copied().flatten().zip((script >= 0).then_some(script as usize)),
+            None => st.anm_files[1].map(|file| (file, e.death_effect())),
+        };
+        if let Some((file, script)) = effect {
             let at = crate::enemy::field_to_canvas(st.field, e.pos);
             // The angle is the effect's rotation from its very first instruction.
-            world.spawn_rotated(lib, file, e.death_effect(), at, st.field, angle);
+            world.spawn_rotated(lib, file, script, at, st.field, angle);
         }
         // The kill explosion.
         let mut interp = th_anm::interp::Interp::<1>::default();
@@ -810,7 +848,7 @@ impl Side {
             st.items.spawn(e.item, e.pos, -std::f32::consts::FRAC_PI_2, 2.2);
         }
         if st.chain > 5 {
-            let orbs = (st.chain / 12 + 1).min(3);
+            let orbs = if e.survives_death { 1 } else { (st.chain / 12 + 1).min(3) };
             for _ in 0..orbs {
                 let mut seed = st.rand() | 1;
                 st.items.drop_orbs(e.pos, || {
@@ -852,10 +890,12 @@ impl Side {
         }
     }
 
-    /// The scope of the first player whose scope is active (else the first player's character).
+    /// The scope of the first player whose aura test runs (scope held, or Orin's skill circle),
+    /// else the first player's character.
     fn update_scope(&mut self) {
-        let scoped = self.player.iter().chain(self.partner.iter()).find(|p| p.scope.active()).or(self.player.as_ref());
+        let scoped = self.player.iter().chain(self.partner.iter()).find(|p| p.scope.probe().running()).or(self.player.as_ref());
         let st = &mut self.st;
+        st.scope_probe = scoped.map(|p| p.scope.probe()).filter(|p| p.running());
         st.scope_circle = scoped.filter(|p| p.scope.active()).map(|p| (p.scope.pos, p.scope.radius));
         st.scope_column = scoped.is_some_and(|p| p.character == crate::character::Character::Marisa);
         st.scope_character = scoped.map_or(Default::default(), |p| p.character);
@@ -947,6 +987,16 @@ impl Side {
         for e in &mut self.enemies {
             if std::mem::take(&mut e.data.killed) && !e.data.delete {
                 Self::kill(&mut self.st, &mut e.data, world, lib);
+                // FUN_0050c1f0 ends by switching to the ECL 550 sub; with ECL 1038 set the
+                // enemy then lives on in it.
+                if let Some(name) = e.data.death_sub.take() {
+                    if let Some(sub) = progs[e.data.owner].sub(&name) {
+                        let mut ctx = th_ecl::Context::new(sub);
+                        ctx.rank_bit = 1 << e.data.script_rank.unwrap_or(self.st.difficulty).min(7);
+                        e.threads = th_ecl::Threads::new(ctx);
+                        if e.data.survives_death { e.data.delete = false; }
+                    }
+                }
             }
         }
         self.tick_chain();
@@ -1026,6 +1076,8 @@ impl Side {
             areas.extend(p.cancel_circles.iter().map(|&(pos,radius)| crate::laser::CancelArea::Circle {pos,radius}));
             areas.extend(p.cancel_rects.iter().map(|&(pos,size)| crate::laser::CancelArea::Rect {pos,size}));
             areas.extend(p.cancel_columns.iter().map(|&(x,half_width)| crate::laser::CancelArea::Column {x,half_width}));
+            areas.extend(p.cancel_orects.iter().map(|&(pos,size,angle)| crate::laser::CancelArea::ORect {pos,size,angle}));
+            areas.extend(p.cancel_ellipses.iter().map(|&(pos,a,b,angle)| crate::laser::CancelArea::Ellipse {pos,a,b,angle}));
         }
         for area in areas { self.st.cancel_lasers(area, true, world, lib); }
         let mut lasers = std::mem::take(&mut self.st.lasers);
@@ -1191,18 +1243,21 @@ pub fn dispatch_charges(sides: &mut [Side]) {
         // Special bullets: threshold 100/90/90/80 by difficulty (Normal assumed), limited.
         // Reimu's special bullet is a yin-yang (EXOnmyoInf); Marisa's a laser orb (EXLaserInf,
         // bullet.anm script 63). Both land as ExtraAttack00 of the sender's program.
-        let threshold=if character==crate::character::Character::Ran {65} else {90};
+        // EX class [11] tables at Normal: Ran 65, Aunn 45 (0x59df78), Nazrin, Seiran and Orin
+        // 90 (0x59e228, 0x59e4c8, 0x59e720).
+        use crate::character::Character as C;
+        let threshold = match character { C::Ran => 65, C::Aunn => 45, _ => 90 };
         while st.special_counter >= threshold {
             st.special_counter -= threshold;
             if active >= crate::reflect::special_limit(frames) { break; }
             active += 1;
             let target = match character {
-                crate::character::Character::Sanae => {
+                C::Sanae => {
                     let k=st.special_sequence;st.special_sequence+=1;
                     let x=if k%2==0 {-148.0+st.randf()*32.0} else {148.0-st.randf()*32.0};
                     [x,st.randf()*20.0]
                 }
-                crate::character::Character::Ran => {
+                C::Ran => {
                     let k=st.special_sequence%11;st.special_sequence+=1;
                     match k {
                         0|3|7 => [st.randf2()*132.0,0.0],
@@ -1210,11 +1265,27 @@ pub fn dispatch_charges(sides: &mut [Side]) {
                         _ => [if matches!(k,1|6|9) {-148.0} else {148.0},st.randf()*416.0+16.0],
                     }
                 }
-                _ => [st.randf2()*160.0,st.randf()*60.0],
+                // FUN_0041d1b0: x within 132 of the middle, y in 0..160.
+                C::Orin => [st.randf2()*132.0,st.randf()*160.0],
+                _ => {
+                    let t = [st.randf2()*160.0,st.randf()*60.0];
+                    // The EX class [10] then replaces it: Aunn FUN_0053eeb0 (y 40..240),
+                    // Nazrin FUN_00540620 (130..340), Seiran FUN_00541690 (120..300), x within 120.
+                    match character {
+                        C::Aunn => [st.randf2()*120.0,st.randf()*200.0+40.0],
+                        C::Nazrin => [st.randf2()*120.0,st.randf()*210.0+130.0],
+                        C::Seiran => [st.randf2()*120.0,st.randf()*180.0+120.0],
+                        _ => t,
+                    }
+                }
+            };
+            let script = match character {
+                C::Reimu => None, C::Marisa => Some(63), C::Sanae => Some(61), C::Ran => Some(14),
+                C::Aunn => Some(17), C::Nazrin => Some(11), C::Seiran => Some(15), C::Orin => Some(31),
             };
             st.outgoing_reflects.push(crate::reflect::Request { kind: 44, color: 1, speed: 0.0,
                 origin: st.last_special_pos, target: Some(target), special_rank: Some(rank), owner: sender,
-                script: match character {crate::character::Character::Reimu=>None,crate::character::Character::Marisa=>Some(63),crate::character::Character::Sanae=>Some(61),crate::character::Character::Ran=>Some(14)}, tangents: None, aim_player: false });
+                script, tangents: None, aim_player: false });
         }
     }
     // Bullets cancelled by a kill explosion fly to the opponent's field and fire there.

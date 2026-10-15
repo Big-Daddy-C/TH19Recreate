@@ -116,6 +116,19 @@ pub struct EnemyData {
     /// Frames the bot skips this enemy as a target (+0x63ac, set to 10 when it reverses).
     pub bot_cooldown: i32,
     pub scope_disable_sub: Option<String>,
+    /// ECL 547: the damage sound instead of 0x22/0x23 (+0x510c, -1 = none).
+    pub hurt_sound: Option<u32>,
+    /// ECL 550: a sub the death routine switches to (+0x55e8, `FUN_0050c1f0`).
+    pub death_sub: Option<String>,
+    /// ECL 1038: internal flag 0x8000000 - with a death sub the enemy keeps living, and a
+    /// chain beyond 5 drops exactly one orb.
+    pub survives_death: bool,
+    /// ECL 323: the death effect's sprite slot and script (+0x6330 / +0x632c).
+    pub death_effect_override: Option<(usize, i32)>,
+    /// ECL 624: the per-frame callback (+0x5648, table 0x5994f8; 1 = `FUN_004fc120`).
+    pub frame_callback: u8,
+    /// Damage received since the callback last looked (+0x501c, added even while invincible).
+    pub damage_taken: i32,
 }
 
 pub struct Enemy {
@@ -148,13 +161,14 @@ impl Enemy {
 
     /// One frame: script, movement, sprites, off-field check.
     pub fn update(&mut self, prog: &Program, st: &mut SideState, world: &mut World, lib: &AnmLibrary) {
-        // FUN_00509030: ordinary enemies get movement drag; spirits switch once to
-        // the disable sub registered by ECL 514. Their ECL handles HP and movement.
+        // FUN_00509030: ordinary enemies get movement drag (a positive aura result); spirits
+        // switch once to the disable sub registered by ECL 521 on any non-zero result (Orin's
+        // skill circle gives -2). Their ECL handles HP and movement.
         if self.data.spirit_kind == 0 {
-            let drag = if self.data.flags & flag::HIDDEN == 0 && st.scope_body(&self.data) { 0.5 } else { 0.0 };
+            let drag = if self.data.flags & flag::HIDDEN == 0 && st.scope_body(&self.data) > 0 { 0.5 } else { 0.0 };
             self.data.abs.pv.drag = drag;
             self.data.rel.pv.drag = drag;
-        } else if !self.data.spirit_disabled && st.scope_body(&self.data) {
+        } else if !self.data.spirit_disabled && st.scope_body(&self.data) != 0 {
             if let Some(name) = self.data.scope_disable_sub.clone() {
                 if let Some(sub) = prog.sub(&name) {
                     let mut ctx = Context::new(sub);
@@ -180,6 +194,16 @@ impl Enemy {
             self.data.delete = true;
         }
         let e = &mut self.data;
+        // Callback 1 (FUN_004fc120), after the script in FUN_00509030: a hit this frame pushes
+        // the enemy 1 pixel straight away from the player.
+        if e.frame_callback == 1 && e.damage_taken != 0 {
+            let p = st.player_pos;
+            let d = [p[0] - e.pos[0], p[1] - e.pos[1]];
+            let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
+            let n = if len.abs() >= 0.01 { [d[0] / len, d[1] / len] } else { d };
+            e.abs.pv.pos = [e.abs.pv.pos[0] - n[0], e.abs.pv.pos[1] - n[1]];
+            e.damage_taken = 0;
+        }
         e.time += 1;
         if let Some(mesh) = &mut e.boss_mesh { mesh.tick(); }
 
@@ -220,7 +244,7 @@ impl Enemy {
         // counter (+0x5104) is zero is tinted 0xff0000ff, sets the hold to 4 and plays a damage
         // sound panned by its x; while the hold counts down (4 more ticks) neither happens, so a
         // continuously hit enemy flashes and sounds once every 5 ticks. The sound's override
-        // +0x510c is -1 at creation and never written. 0x22 normally; 0x23 for a boss (script
+        // +0x510c is -1 at creation (ECL 547 sets it; it replaces the choice below). 0x22 normally; 0x23 for a boss (script
         // flags 0x4080: ECL 512 with a slot sets 0x80, 511 then 0x4000) whose health above its HP
         // interrupt (+0x6240 = HP - the first set interrupt threshold, set by 0050d080 / ECL phase
         // interrupt; plain HP without one) is below 900, or below 200 while a spell card is active
@@ -242,7 +266,7 @@ impl Enemy {
                     let boss = st.boss_ids.contains(&e.id);
                     let to_interrupt = e.hp - e.phase_interrupt.as_ref().map_or(0, |(hp, _, _)| (*hp).max(0));
                     let low = if e.spell_hp7.is_some() { 200 } else { 900 };
-                    hurt_sound = Some(if boss && to_interrupt < low { 0x23 } else { 0x22 });
+                    hurt_sound = Some(e.hurt_sound.unwrap_or(if boss && to_interrupt < low { 0x23 } else { 0x22 }));
                 }
             } else {
                 vm.color_mode = 0;
@@ -292,6 +316,8 @@ impl Enemy {
 impl EnemyData {
     /// Apply shot damage (the hit handling in th19.exe `FUN_00509980`).
     pub fn damage(&mut self, amount: i32, from: [f32; 2]) {
+        // FUN_00509980 adds every hit to +0x501c, invincible or not.
+        self.damage_taken += amount;
         if self.flags & flag::INVINCIBLE != 0 || self.invuln_time>0 {
             return;
         }
@@ -782,6 +808,21 @@ impl EnemyHost<'_> {
                     if slot<self.e.vms.len() {set_vm(self.e,self.world,self.lib,self.st.field,slot,file,script);}
                 }
             }
+            // FUN_004fecc0 case 0xc (004ff549): slot 0 gets the main sprite's base script again
+            // (from its file slot), the direction resets to still and flag 0x10 clears.
+            318 => {
+                if let Some(main) = self.e.main {
+                    let file = self.st.anm_set(self.e.owner).get(main.anm_slot).copied().flatten().unwrap_or(main.file);
+                    set_vm(self.e, self.world, self.lib, self.st.field, 0, file, main.base_script);
+                    if let Some(m) = self.e.main.as_mut() { if m.dir != i32::MIN { m.dir = 0; } }
+                }
+            }
+            // Case 0x10: the death effect's sprite slot (+0x6330) and script (+0x632c).
+            323 => self.e.death_effect_override = Some((i!(0).max(0) as usize, i!(1))),
+            // Case 0x58: the damage sound (+0x510c).
+            547 => self.e.hurt_sound = (i!(0) >= 0).then_some(i!(0) as u32),
+            // Case 0x5b: the death sub's name (+0x55e8, 64 bytes).
+            550 => self.e.death_sub = ins.arg_str(0).map(|(name, _)| name),
             336 => {let slot=i!(0).max(0) as usize;let mode=i!(1);if let Some(v)=self.e.vms.get(slot).copied().flatten().and_then(|id|self.world.get_mut(id)) {v.render_mode=mode;} }
             1041 => self.e.suppress_kill_rewards=i!(0)!=0,
             317 => { let slot=i!(0).max(0) as usize; let label=i!(1); if let Some(id)=self.e.vms.get(slot).copied().flatten() { self.world.interrupt(id,label); } }
@@ -1047,9 +1088,10 @@ impl EnemyHost<'_> {
                 ctx.set_float_var(ins, 0, v, self);
             }
             600..=620 | 700 | 701 | 702 | 703 | 711 => self.et_op(ctx, ins),
-            // Marisa's spell clears the optional per-frame enemy callback. Table 005994f8
-            // entry zero is null; nonzero callback IDs remain explicitly unsupported.
-            624 if i!(0) == 0 => {},
+            // The optional per-frame enemy callback (+0x5648 from table 005994f8, case 0x84).
+            // Entry 0 is null (Marisa's spell clears it); 1 is FUN_004fc120 (Nazrin's
+            // ExAttack). Other entries remain unsupported.
+            624 if matches!(i!(0), 0 | 1) => self.e.frame_callback = i!(0) as u8,
             621 => {
                 let radius = f!(0);
                 let color = i!(1) as u32;
@@ -1095,6 +1137,8 @@ impl EnemyHost<'_> {
             1032 => self.e.rewards.e = i!(0),
             1033 => self.e.rewards.f = i!(0),
             1039 => self.e.wave_member = i!(0) != 0,
+            // Case 0xbf: internal flag 0x8000000.
+            1038 => self.e.survives_death = i!(0) & 1 != 0,
             _ => *self.st.unknown_ops.entry(op).or_default() += 1,
         }
         Flow::Next

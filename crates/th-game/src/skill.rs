@@ -10,6 +10,11 @@ pub struct DamageCircle {
     pub growth: f32,
     /// A full-height column of this size centred on `pos` (Marisa's bomb) instead of a circle.
     pub rect: Option<[f32; 2]>,
+    /// An ellipse (axis along the angle, axis across, angle) instead (collider type 5,
+    /// `FUN_0051f4e0`: Aunn's bomb).
+    pub ellipse: Option<(f32, f32, f32)>,
+    /// A box (size along / across the angle, angle) instead (`FUN_0051f320`: Orin's bomb).
+    pub orect: Option<([f32; 2], f32)>,
 }
 pub struct Skill {
     pub time: i32,
@@ -92,7 +97,7 @@ impl Skill {
                         radius: 64.0,
                         damage: 4,
                         remaining: 1,
-                        growth: 0.0, rect: None,
+                        growth: 0.0, rect: None, ellipse: None, orect: None,
                     });
                 }
             }
@@ -103,7 +108,7 @@ impl Skill {
                 radius: 64.0,
                 damage: 1,
                 remaining: 24,
-                growth: 1.0, rect: None,
+                growth: 1.0, rect: None, ellipse: None, orect: None,
             });
         }
         self.time += 1;

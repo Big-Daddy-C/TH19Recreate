@@ -1149,6 +1149,282 @@
     "front_boss_timer_text": {
       "address": "00512b60",
       "decompile_sha256": "acdcbcbb0a14dfdb23149067418eed748acee8f5f5323f707601f6635f465e58"
+    },
+    "aura_aunn_start": {
+      "address": "0041a280",
+      "decompile_sha256": "a391e50b6c5962d04386fdd901d07a74fe63d51159c796812b43bda54c3fdac0"
+    },
+    "aura_aunn_update": {
+      "address": "0041a4b0",
+      "decompile_sha256": "6e5f60309f72290f2c4e96c735c4139e9bae575ff909e0ecbba7e7d86dc9aea2"
+    },
+    "aura_aunn_test": {
+      "address": "0041a830",
+      "decompile_sha256": "5e93a0cdf4177473c06f1e1eac2f2e2b40083c122c6ef84bbd6fd747e845d458"
+    },
+    "aura_nazrin_start": {
+      "address": "0041aba0",
+      "decompile_sha256": "0a4f2e5a587d761a4ec900a75f686e767211ece89d3f94772e52211a64dae373"
+    },
+    "aura_nazrin_update": {
+      "address": "0041ad00",
+      "decompile_sha256": "0bc64b84e9ae88a2ac2b7650905cb0283e03ef02f8007fb01398372d66c658cb"
+    },
+    "aura_seiran_start": {
+      "address": "0041b920",
+      "decompile_sha256": "091da24ac8f0a412477a67b8eba53997def9e1227d6d51461674fb19e9947be1"
+    },
+    "aura_seiran_update": {
+      "address": "0041ba80",
+      "decompile_sha256": "25dcb74a004c6531d62bad33291735428e0b941c371f649f8d17153189a6df6d"
+    },
+    "aura_orin_start": {
+      "address": "0041c530",
+      "decompile_sha256": "09fedc43f9398a5c01d1656f6aaaa4315a6e4510e3c60f24ccb1fea01aff78f7"
+    },
+    "aura_orin_update": {
+      "address": "0041c770",
+      "decompile_sha256": "177c43af7b2206dcc10fd284c75aa0e09ec27e014ce84702e8ca286a5ded9585"
+    },
+    "aura_orin_circle": {
+      "address": "0041c9c0",
+      "decompile_sha256": "904d462de948c330d80f479230092a9682290681c1097ce65d0383be1eada999"
+    },
+    "aura_orin_test": {
+      "address": "0041ca40",
+      "decompile_sha256": "34b903bccb8ab93d88abae6b98d4ad3e8b1317a918df80d49e5f3a5545b9f1ec"
+    },
+    "aura_circle_sum": {
+      "address": "00418690",
+      "decompile_sha256": "21c22ffc4446c72b51e5025c8ced4bbc5a281e952ee55b92768e6b585b3d4af9"
+    },
+    "ellipse_circle": {
+      "address": "004d4020",
+      "decompile_sha256": "ca0e57154de1e3b71d0bd48eaf2b9b826e4b6469b5af59762437a17266606160"
+    },
+    "rect_circle": {
+      "address": "004d44e0",
+      "decompile_sha256": "851f24b92f89c4bc9d09efe33694ef6dabc1d7b346a52e59a27d021ef707f199"
+    },
+    "nearest_spirit": {
+      "address": "00508420",
+      "decompile_sha256": "3052e781489c93c8bd7fd21cc5221a7296a4cde0919cbb4aa04e2a2be0acd1a4"
+    },
+    "nearest_enemy": {
+      "address": "00508530",
+      "decompile_sha256": "95d7bb69ef24bfcedcdf65299c771f7182e4c6221b92446d77d7a378d8ebee73"
+    },
+    "aura_body_test": {
+      "address": "00509030",
+      "decompile_sha256": "a448279bbebd68cbe5e9cae3ce2cf1a625d51604cd70a97b634401770083b11c"
+    },
+    "aura_bullet_test": {
+      "address": "004e78e0",
+      "decompile_sha256": "781348b211cabc0dde4d2236479cece2a5f311b2d72b9e6f23d9bd4371a860c6"
+    },
+    "charge_release": {
+      "address": "004e79e0",
+      "decompile_sha256": "7079c366cbb0976aaa3304648690b397a5b6010acf985f2e99555e101c181371"
+    },
+    "ex_basic_shared": {
+      "address": "00418c90",
+      "decompile_sha256": "c08b905db323770f272113ca316c69e535defb64d09267f4900b499fdf4e9e10"
+    },
+    "ex_aunn_basic": {
+      "address": "0041a920",
+      "decompile_sha256": "a88d9f971107f12e5f3d9dccfc6a3855586ff7ec53f383ee2f804b4352e2705c"
+    },
+    "ex_aunn_skill": {
+      "address": "0041a9b0",
+      "decompile_sha256": "0113a3047f38838c8b5abeec63e9b10971aeb2b64e3a287bbee46abf5e882453"
+    },
+    "ex_aunn_update": {
+      "address": "0053eb60",
+      "decompile_sha256": "88d7ac0390434311bc13a9b0160bc395ffc4413a3ef846115978b3ccef0e5d23"
+    },
+    "ex_nazrin_skill": {
+      "address": "0041b420",
+      "decompile_sha256": "53d6f46fc798600abbb7b8ba505f728cca01508f312c3300bb8cb04f9de7ae1d"
+    },
+    "ex_nazrin_update": {
+      "address": "005402e0",
+      "decompile_sha256": "8e93f80b556a37047312f1ccdb82b185c27bb37feb9a441d1d05748fed7ba2ac"
+    },
+    "ex_seiran_skill": {
+      "address": "0041bec0",
+      "decompile_sha256": "5dcc04a4141fd48c0c5bb5a908053bf56fb26245a1e0eed7caaea5145360bc34"
+    },
+    "ex_seiran_update": {
+      "address": "00541330",
+      "decompile_sha256": "0747ef05c3829118d45b5f06404970ba54e3f132819a54a65df6c1ca6c926c55"
+    },
+    "ex_orin_skill": {
+      "address": "0041d020",
+      "decompile_sha256": "94b70e1d7dfbd173e97964647d18c9a663a211ab0e75b8019370514430cc2ba9"
+    },
+    "ex_orin_update": {
+      "address": "0041d1b0",
+      "decompile_sha256": "1f2f832dbc8d6da57b67cdf804de63ff9a55fa6bf2557598c98c78c3a49bf2c1"
+    },
+    "ex_sanae_update": {
+      "address": "0053df80",
+      "decompile_sha256": "ea2854b51d3d7eb56ce9a97aa9a98766aeae17ce4d22e14d92fb1cb3021f3f65"
+    },
+    "ex_aunn_send": {
+      "address": "0053eeb0",
+      "decompile_sha256": "4d2485b4662f429be2b66b8d6f02b0dd763ca5e7ee4ca138c7e6768bc858b807"
+    },
+    "ex_nazrin_send": {
+      "address": "00540620",
+      "decompile_sha256": "2057c452a79e1d29424225d8be18997ecf85e2f53e4d9b220331c476343f2b49"
+    },
+    "ex_seiran_send": {
+      "address": "00541690",
+      "decompile_sha256": "b7968fa25e28177e1ff79d748558ac2c2b252020071265b99c5cddd3006c872c"
+    },
+    "ex_orin_send": {
+      "address": "0041d530",
+      "decompile_sha256": "7c3c530e5d1c24191c6c188a82c68fdc6ba9133605b789fc788f482df75d8f99"
+    },
+    "exi_aunn_init": {
+      "address": "0053f2c0",
+      "decompile_sha256": "ac51736c30444b79b2931dddc2837ea548f91c23405ae8148589e75ce6ede7ff"
+    },
+    "exi_aunn_update": {
+      "address": "0053f150",
+      "decompile_sha256": "fcaf0f78f5aa7c36da20fe2639d64ac61683787fffb2d870f398313a002bc77a"
+    },
+    "exi_nazrin_init": {
+      "address": "0041af40",
+      "decompile_sha256": "523cb26c14cc15af89057baec9d67adb14c378282a56b7ed45522af408c3bddc"
+    },
+    "exi_seiran_init": {
+      "address": "0041bb20",
+      "decompile_sha256": "697d2b0efc4f50de5a4df649d0cc660a6d48168a6b3f8ab219ded7af0fed1bf7"
+    },
+    "exi_ns_update": {
+      "address": "0041b2e0",
+      "decompile_sha256": "fe933a8c05da3499dd7dc8747f8132186b80b182e25b5b12fc2ee1164411f598"
+    },
+    "exi_orin_init": {
+      "address": "0041cbb0",
+      "decompile_sha256": "d0604e66c30d296ce33b43f0be9eeccc0bbb339e61e4ac4c470544d5b6bef7de"
+    },
+    "exi_orin_update": {
+      "address": "0041cf10",
+      "decompile_sha256": "607a6a09932af9f74e75836df833111dc43ad8aa2fff42c108c864b24226f784"
+    },
+    "exi_sanae_init": {
+      "address": "004186e0",
+      "decompile_sha256": "f02b5a62bf400f5d37c666ee2a3ad11706c3487c3f2e8d24a4c6c81602d56946"
+    },
+    "bomb_aunn_start": {
+      "address": "0053fe30",
+      "decompile_sha256": "be6f3bde892efd2966f1efd61dc91be776a8d731b21aa4184cc774cf81f056db"
+    },
+    "bomb_aunn_update": {
+      "address": "0053fac0",
+      "decompile_sha256": "c03097f4dcdfa26edbe850d53aa9b2332fc7f3692126af6b9a57718398f31546"
+    },
+    "bomb_nazrin_start": {
+      "address": "00540f00",
+      "decompile_sha256": "6bf6f82598de2cb66010a870fe732442146c22b4408657b810b7d889d2464813"
+    },
+    "bomb_nazrin_update": {
+      "address": "00540aa0",
+      "decompile_sha256": "4f46c66b420a960922bedf692ad65078e6dd8b84c71e3f3744dee47e2d48cd1b"
+    },
+    "bomb_seiran_start": {
+      "address": "0041b5c0",
+      "decompile_sha256": "64c3c369020abe8fc2662ab2e28a7cca4e2529f32738863cf5b55588fb523d70"
+    },
+    "bomb_seiran_update": {
+      "address": "00541b10",
+      "decompile_sha256": "e13ec8d2947edb10c89c5ea91a4e13a9494d8437682bef7be2c9e19a0e6df3c7"
+    },
+    "bomb_orin_start": {
+      "address": "0041bf70",
+      "decompile_sha256": "0c2668c5259bc86d42bcea8694f6e5aad4d124ccde69295ccf37cd78d3bd5cfb"
+    },
+    "bomb_orin_update": {
+      "address": "0041c200",
+      "decompile_sha256": "2ba596dea2635283cd7a5615bbf8fb08606bf85f6700ed78ed0386c174f7e5a7"
+    },
+    "bomb_common_init": {
+      "address": "004ed4a0",
+      "decompile_sha256": "6ab2060c9e172dab44a280a50d59f60e0be52434d14bd1f6cb40d945ed8cda1c"
+    },
+    "cancel_ellipse": {
+      "address": "004ee500",
+      "decompile_sha256": "87548b7376034a8630ca703f52419f1ffaa6418e9dd1aaf474f2a7fb2f0c53da"
+    },
+    "cancel_box": {
+      "address": "004ee0d0",
+      "decompile_sha256": "3589d009556dbec50a141f1e22a408c35fb78b4b25f4c666c4ff7193f2748f5b"
+    },
+    "collider_ellipse": {
+      "address": "0051f4e0",
+      "decompile_sha256": "a2e17f07b23350eef777e45e0ae09fdbc8fc427caaaee1811c4ff972971094d9"
+    },
+    "collider_box": {
+      "address": "0051f320",
+      "decompile_sha256": "bea45f7a74ad6fb648d5c22431722bc4ad5a2cd48481a9d1426d28c0df1e1ba6"
+    },
+    "collider_circle": {
+      "address": "005200f0",
+      "decompile_sha256": "f983f0d072b122f646d399e93cd241abae93ed1b6cc48f0284a736cdb10f3e57"
+    },
+    "collider_test": {
+      "address": "0051e670",
+      "decompile_sha256": "0a0ebe62fd33300402aa1d5d229fcf29865751d6859d26ddf205aabbff844927"
+    },
+    "collider_hits": {
+      "address": "00520450",
+      "decompile_sha256": "76913e7f97d07ed2e9232457045ac6c4c4f1d9b282cf76d4da4249fda6ab686f"
+    },
+    "shot_hit_default": {
+      "address": "0054fba0",
+      "decompile_sha256": "76e45d976aa2f97fcf52a13732d2b1ee5c48b3b37c2c6b81431077fd8ee98fd9"
+    },
+    "shot_init_aim": {
+      "address": "0054b5c0",
+      "decompile_sha256": "58303faba482a6d5c97096df3f6c82e9aa0f51987ed3041a20a61195d4e2f984"
+    },
+    "shot_init_aim_spread": {
+      "address": "0054b3f0",
+      "decompile_sha256": "1f1f87ba9b57ccd9c461be2324d21359866c02290f39c28f5fd4180d388dd670"
+    },
+    "shot_init_seiran_option": {
+      "address": "0054ba40",
+      "decompile_sha256": "a0af9fb2965ff5d1601678067934fc969b433ad2dd94746890f0fbab1cdac71c"
+    },
+    "shot_init_seiran_skill": {
+      "address": "0054b9a0",
+      "decompile_sha256": "a5f4faee56ad8d2ce199bc3dc4f35fa47e4928b2047b2ca50b230745d91735eb"
+    },
+    "shot_init_orin": {
+      "address": "0054b270",
+      "decompile_sha256": "5eee67a67c5bf158e0a454ece7c514d1c690213d84b3c77621eb7e5b2a849997"
+    },
+    "shot_update_orin": {
+      "address": "0054b0c0",
+      "decompile_sha256": "74cf1cfb923a1512d30ef089ca0285c871b9bed937ee846a16de7d3f998b6721"
+    },
+    "shot_update_orin_column": {
+      "address": "0054adc0",
+      "decompile_sha256": "f01d1bfdc06fc4106fdb7c00121eda7f06210209eebb8a81aa077d4fdfb65655"
+    },
+    "option_build": {
+      "address": "005483d0",
+      "decompile_sha256": "1a7df5c562e3b83eaef003547d2c562eac4c5f70c53fcce3e553d50cc7042e97"
+    },
+    "player_move": {
+      "address": "0042fce0",
+      "decompile_sha256": "be4cc34d1c0a58588851bdb066bf69c7b2890829166cebc8e9a628288112fb2f"
+    },
+    "ecl_dispatch": {
+      "address": "004fecc0",
+      "decompile_sha256": "145bb78a3907254fc4f19360d88f5865d82d3514bf44c3babe91d4219841972a"
     }
   },
   "features": {
@@ -3001,6 +3277,247 @@
         "The timer digits FrontInf +0x44/+0x48 (ascii.anm scripts 2/3, countdown sounds 0xb/0xc) and the per-side net-play text in FUN_00512d20 are not ported.",
         "Match end in the original goes to a results/continue screen (FUN_00515050); the port starts a new match.",
         "2 vs 2 HUD placement (teammate hearts below, gauge above, bomb stars on the left) is port-only."
+      ]
+    },
+    "later_characters": {
+      "implementation": "partial",
+      "summary": "Playable Aunn, Nazrin, Seiran and Orin: scopes, charge shots, skills, bombs, shot callbacks, Seiran options, specials, original EX/boss programs and the ECL ops they need.",
+      "symbols": [
+        "aura_aunn_start",
+        "aura_aunn_update",
+        "aura_aunn_test",
+        "aura_nazrin_start",
+        "aura_nazrin_update",
+        "aura_seiran_start",
+        "aura_seiran_update",
+        "aura_orin_start",
+        "aura_orin_update",
+        "aura_orin_circle",
+        "aura_orin_test",
+        "aura_circle_sum",
+        "ellipse_circle",
+        "rect_circle",
+        "nearest_spirit",
+        "nearest_enemy",
+        "aura_body_test",
+        "aura_bullet_test",
+        "charge_release",
+        "ex_basic_shared",
+        "ex_aunn_basic",
+        "ex_aunn_skill",
+        "ex_aunn_update",
+        "ex_nazrin_skill",
+        "ex_nazrin_update",
+        "ex_seiran_skill",
+        "ex_seiran_update",
+        "ex_orin_skill",
+        "ex_orin_update",
+        "ex_sanae_update",
+        "ex_aunn_send",
+        "ex_nazrin_send",
+        "ex_seiran_send",
+        "ex_orin_send",
+        "exi_aunn_init",
+        "exi_aunn_update",
+        "exi_nazrin_init",
+        "exi_seiran_init",
+        "exi_ns_update",
+        "exi_orin_init",
+        "exi_orin_update",
+        "exi_sanae_init",
+        "bomb_aunn_start",
+        "bomb_aunn_update",
+        "bomb_nazrin_start",
+        "bomb_nazrin_update",
+        "bomb_seiran_start",
+        "bomb_seiran_update",
+        "bomb_orin_start",
+        "bomb_orin_update",
+        "bomb_common_init",
+        "cancel_ellipse",
+        "cancel_box",
+        "collider_ellipse",
+        "collider_box",
+        "collider_circle",
+        "collider_test",
+        "collider_hits",
+        "shot_spawn",
+        "shot_update",
+        "shot_hit_default",
+        "shot_init_aim",
+        "shot_init_aim_spread",
+        "shot_init_seiran_option",
+        "shot_init_seiran_skill",
+        "shot_init_orin",
+        "shot_update_orin",
+        "shot_update_orin_column",
+        "option_update",
+        "option_build",
+        "player_move",
+        "enemy_damage",
+        "enemy_death",
+        "ecl_dispatch"
+      ],
+      "code": [
+        "crates/th-game/src/character.rs",
+        "crates/th-game/src/scope.rs",
+        "crates/th-game/src/player.rs",
+        "crates/th-game/src/bomb.rs",
+        "crates/th-game/src/side.rs",
+        "crates/th-game/src/reflect.rs",
+        "crates/th-game/src/enemy.rs",
+        "crates/th-game/src/laser.rs",
+        "crates/th-game/src/bullet.rs",
+        "crates/th-game/src/skill.rs",
+        "crates/th-anm/src/vm.rs",
+        "crates/th19/src/main.rs"
+      ],
+      "tests": [
+        "crates/th-game/tests/higher_charge.rs",
+        "crates/th-game/src/scope.rs"
+      ],
+      "findings": [
+        {
+          "text": "Aunn (pl04), Nazrin (pl05), Seiran (pl06) and Orin (pl07) are select numbers 5-8. Class tables: aura 0x5a0280, bomb 0x5a02d0, EX 0x5a0320 (EX vtable [3] charge shot, [4] skill, [10] special send, [11] update; aura [2] start, [3] update, [4] extra update, [7] circle test, [9] keeps [7] running). FUN_004e79e0 calls the skill [4] before the charge shot [3], so a skill that sets the class's busy flag blocks the basic shot: Sanae/Aunn/Seiran volleys, Nazrin's skill collider (+0xdc in shared FUN_00418c90).",
+          "sources": [
+            "charge_release",
+            "ex_basic_shared"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Charge timers fire while t < n and stop once the advanced timer exceeds end (port: stop = end+1): Sanae 30/40, volley 60/70 (FUN_0053df80; the port previously stopped one frame early); Aunn 30/40, skill slot 11 90/100 plus 90 frames invulnerability (+0x2078); Nazrin 120/120; Seiran 30/40, skill slot 11 200/210 with sound 0x31; Orin 10/10, slot 11 while armed by her skill (+0xf0), disarmed when that volley ends.",
+          "sources": [
+            "ex_sanae_update",
+            "ex_aunn_update",
+            "ex_aunn_skill",
+            "ex_nazrin_update",
+            "ex_seiran_update",
+            "ex_seiran_skill",
+            "ex_orin_update"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Skills: Nazrin (FUN_0041b420) sound 0x1d panned by x, pl05.anm script 9 at her position, 40 frames invulnerability, and a circle collider (flags 0x2c0) whose radius follows the VM X scale (FUN_005402e0). In FUN_00520450 flag mask 0xc0 selects only spirits (0x700000) that are disabled (0x80000) and 0x200 marks enemy +0x6250 |= 2 instead of damage; FUN_00509980 turns that bit into the death routine (EnemyData +0x5020 & 2). Orin (FUN_0041d020) sound 0x1e, aura circle pl07.anm script 12 at her position, radius 1 -> 500 over 60 frames mode 4, active 60 frames; its [7] (FUN_0041ca40) returns -2 inside it. FUN_00509030 sends spirits to their disable sub for any non-zero result and slows ordinary enemies only for a positive one (the -2 branch for non-spirits requires 0x700000 and is unreachable); FUN_004f5130 slows bullets only for positive results.",
+          "sources": [
+            "ex_nazrin_skill",
+            "collider_hits",
+            "enemy_damage",
+            "ex_orin_skill",
+            "aura_orin_circle",
+            "aura_orin_test",
+            "aura_body_test"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Scopes: Aunn (FUN_0041a4b0) VM scale (w,1), scale2 (h,1); both 1 -> 32 over 30 (mode 3), at t 30 -> 64/192 over 10 (mode 5), at t 40 -> 80/16 over 10 (mode 2); [7] FUN_004d4020(a = h along -pi/2, b = w). Nazrin 1 -> 32/30 mode 6, from t 2 moves 4 px (snap when |d|^2 <= 4) to the nearest active spirit within 320 (FUN_00508420: flags 0x21 and 0x80c00 clear, 0x700000 set). Seiran 1 -> 48/30 mode 6 at y - 160. Nazrin/Seiran [7] = FUN_00418690 ((R + r)^2). Orin: projectile, R 1 -> 50/10 mode 6, speed 1 +0.1 after each move, angle -pi/2 or +-6 degrees when |vx| (+0x20f4, input velocity in 1/128 px from FUN_0042fce0) > 0.1, restarts at her once y < -60; [7] tests an axis-aligned 2R x R box (FUN_004d44e0 angle 0), also with stale values while only the skill circle runs.",
+          "sources": [
+            "aura_aunn_update",
+            "aura_aunn_test",
+            "aura_nazrin_update",
+            "nearest_spirit",
+            "aura_seiran_update",
+            "aura_circle_sum",
+            "aura_orin_start",
+            "aura_orin_update",
+            "player_move"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "FUN_004d4020 (ellipse vs circle): with phi = -theta, a body smaller than both axes is exact against the ellipse shrunk by r; a body larger than both contains it when (r - max)^2 >= d^2; else points are sampled from -pi: max(8,(int)(a+b)/4) on the ellipse when r > max, otherwise max(8,(int)(r/4)) on the body circle. FUN_004d44e0 (box vs circle) hits inside the box widened or heightened by r, or strictly within r of a corner. 404450 is sin, 404420 cos (CRT fsin/fcos fallbacks).",
+          "sources": [
+            "ellipse_circle",
+            "rect_circle"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Bombs: Aunn (FUN_0053fe30/0053fac0) max(120,300m/2500) frames, scripts 0xf/0xc on her, A = 1 -> m*100/4000+128 and B = 1 -> m*400/4000+128 mode 1, VM scale (A,30)/(B,30) rotation -pi/2, bullet cancel FUN_004ee500 and collider type 5 FUN_0051f4e0 (a = B along -pi/2, b = A, damage 10). Nazrin (FUN_00540f00/00540aa0) max(200,370m/2500), 0xe/0xb, R m*80/4000+80, band m*16/4000+16 mode 4, centre moves 3 px (snap within 3) to the nearest active spirit within 320 else her. Seiran (FUN_0041b5c0/00541b10) max(120,300m/2500), 0xf follows her, 0xc fixed at launch y-160, same radii. Orin (FUN_0041bf70/0041c200, FUN_004ed4a0) max(220,320m/2500), 0x11 on her, 0xe thrown: moves first each frame, speed +0.05 while t < 60 then -0.035 while > 0, R 1 -> m/2500*64+64 over 20 frames mode 4, box 2R along the angle x R (FUN_004ee0d0 also requires the bullet to touch the 296x448 field; bullet radius +0x674*+0xfd4), collider FUN_0051f320 damage 20. APPROX: Aunn's laser cancel (FUN_00530180 -> laser vtable +0x3c, FUN_00529820/FUN_004d3c50 step-box sampling) is tested as an 8 px circle per step.",
+          "sources": [
+            "bomb_aunn_start",
+            "bomb_aunn_update",
+            "cancel_ellipse",
+            "collider_ellipse",
+            "collider_test",
+            "bomb_nazrin_start",
+            "bomb_nazrin_update",
+            "bomb_seiran_start",
+            "bomb_seiran_update",
+            "bomb_orin_start",
+            "bomb_orin_update",
+            "bomb_common_init",
+            "cancel_box",
+            "collider_box"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Shot callbacks: init 10/13 (Nazrin) aim at the nearest enemy within 640 of the shot (13 adds +-10 degrees); 14 (Seiran options) -pi/2 +- 0.2pi; 15 (Seiran skill) x += +-32, VM scale 2; 16 (Orin) sets +0x114 (default hit 0054fba0 then never impacts), +-10 degrees; 17 (Orin charge) +0x114 and her 6-degree angle. Update 3 (0054c7a0) +0.3 speed while state 1; 10 (0054b0c0) every 30 frames new turn (+-1 degree) and speed step (+-0.2, negative only at speed >= 2); 11 (0054adc0) +0.1 speed, script-9 child X scale += speed is the length of a (length, 28) collider centred behind the shot along its last velocity, deleted after age 129. Hit 3 (0054c5f0): collider radius 24, +1/frame, life 16, interval 2, moving up 0.3; the shot slows to 0.3. SHT +0x34 lifetime: interrupt 1 and age -999 (FUN_0054df10); kinds 2 and 8 skip the off-field check. The record sound plays after the init callback, panned by the shot's x.",
+          "sources": [
+            "shot_spawn",
+            "shot_update",
+            "shot_hit_default",
+            "shot_init_aim",
+            "shot_init_aim_spread",
+            "shot_init_seiran_option",
+            "shot_init_seiran_skill",
+            "shot_init_orin",
+            "shot_update_orin",
+            "shot_update_orin_column",
+            "collider_circle"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Seiran's option callback FUN_00545b70 (installed by FUN_005483d0 for status +0xc = 6, initial angle index*pi): target = player + R(cos,sin) with R 40 (24 focused), angle += pi/60, x wrapped by +-320 beyond +-160 with a one-frame snap (+0x100 = 1) when wrapping or unwrapping; FUN_00546d10 then moves 30% unless snapping.",
+          "sources": [
+            "option_build",
+            "option_update"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Specials: thresholds at Normal Aunn 45 (0x59df78), Nazrin/Seiran/Orin 90 (0x59e228/0x59e4c8/0x59e720). [11] targets (rand2*160, rand*60) except Orin (rand2*132, rand*160); [10] then replaces Aunn's with (rand2*120, rand*200+40), Nazrin's (rand2*120, rand*210+130), Seiran's (rand2*120, rand*180+120). Flight inits: Aunn/Nazrin/Seiran 60-159 frames default tangents, scripts 17/11/15 of the sender's plNNb.anm (EnemyManager +0x4adc); Orin 70-129 frames, tangents (r100,200),(r100,-300), script 31 with VM +0x4ce = 6. Aunn's flight holds alpha 0xc0 and scale 0.8 like Sanae's; arrivals of Aunn/Nazrin/Seiran play 0x3e panned to the receiving side; all four spawn ExAttack.",
+          "sources": [
+            "ex_aunn_update",
+            "ex_aunn_send",
+            "ex_nazrin_send",
+            "ex_seiran_send",
+            "ex_orin_send",
+            "exi_aunn_init",
+            "exi_aunn_update",
+            "exi_nazrin_init",
+            "exi_seiran_init",
+            "exi_ns_update",
+            "exi_orin_init",
+            "exi_orin_update",
+            "exi_sanae_init"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "ECL (FUN_004fecc0, case = byte table 0x505560[op-300]): 318 (case 0xc) respawns slot 0 with the main sprite's base script, direction 0, clears internal 0x10; 323 (0x10) death effect slot/script (+0x6330/+0x632c, slot 0 = bullet.anm); 547 (0x58) damage sound override +0x510c; 550 (0x5b) death sub name +0x55e8; 1038 (0xbf) internal flag 0x8000000: FUN_0050c1f0 switches to the death sub and keeps the enemy alive, and drops one orb for chains over 5; 624 (0x84) callback 1 = FUN_004fc120: when +0x501c (damage accumulated even while invincible, FUN_00509980) is set, the absolute position moves 1 px away from the player and the accumulator clears.",
+          "sources": [
+            "ecl_dispatch",
+            "enemy_death",
+            "enemy_damage"
+          ],
+          "evidence": "code_checked"
+        }
+      ],
+      "checks": {
+        "date": "2026-10-14",
+        "automated": "cargo test --workspace PASS with TH19_EXE_IMAGE; new tests: later_characters_send_original_special_extra_and_boss_programs (all 8 ranks, no unknown gameplay ops), later_character_scopes_follow_their_natives, later_character_skills_and_charge_volleys, later_character_bombs_have_native_durations_and_shapes, later_character_shot_callbacks, scope unit tests.",
+        "visual": "Not inspected yet."
+      },
+      "next": [
+        "Aunn bomb laser cancel uses an approximation of FUN_004d3c50 sampling.",
+        "Flags 0xc00 of enemies (FUN_00508530/00508420 filters) are not modelled.",
+        "Bodies with flag 0x1000 (rect) against the new ellipse/box colliders fall back to the circle test (no VS script sets 0x1000).",
+        "Visual comparison of the four characters against original footage."
       ]
     }
   }

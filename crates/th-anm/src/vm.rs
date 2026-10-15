@@ -341,7 +341,7 @@ pub struct Vm {
     /// ANM318: scale child position by the root parent scale (00404050).
     inherit_position_scale: bool,
     /// ANM313 resolution mode (VM +0x4ce), when the script set one.
-    res_mode: Option<u8>,
+    pub res_mode: Option<u8>,
     pub render_mode: i32,
     pub layer: i32,
     pub visible: bool,

@@ -48,6 +48,10 @@ pub enum CancelArea {
     Circle { pos: [f32; 2], radius: f32 },
     Column { x: f32, half_width: f32 },
     Rect { pos: [f32;2], size: [f32;2] },
+    /// Orin's bomb box (`FUN_005303f0`): `size[0]` along `angle`.
+    ORect { pos: [f32;2], size: [f32;2], angle: f32 },
+    /// Aunn's bomb ellipse (`FUN_00530180`): `a` along `angle`, `b` across.
+    Ellipse { pos: [f32;2], a: f32, b: f32, angle: f32 },
 }
 
 pub struct CancelContext<'a> {
@@ -281,13 +285,23 @@ impl Laser {
                 CancelArea::Rect {pos,size} => rect_rect(at,[16.0*c,16.0*s],self.angle,pos,size),
                 CancelArea::Column { x, half_width } => rect_rect(
                     at, [16.0*c, 16.0*s], self.angle, [x, 224.0], [2.0*half_width, 448.0]),
+                // FUN_004d2c30 takes the area's angle too: test in the area's frame.
+                CancelArea::ORect { pos, size, angle } => {
+                    let (sa, ca) = angle.sin_cos();
+                    let (dx, dy) = (at[0]-pos[0], at[1]-pos[1]);
+                    rect_rect([dx*ca+dy*sa, -dx*sa+dy*ca], [16.0*c, 16.0*s], self.angle-angle, [0.0, 0.0], size)
+                }
+                // APPROX: the laser's ellipse callback (vtable +0x3c, FUN_00529820) samples the
+                // 16-pixel step box against the ellipse (FUN_004d3c50); this tests the step as
+                // a circle of radius 8 (FUN_004d4020).
+                CancelArea::Ellipse { pos, a, b, angle } => crate::scope::ellipse_circle(at, 8.0, pos, a, b, angle),
             };
             mask.push(hit);
             if hit {
                 let script = match self.sprite_type {
                     0..=17 | 34 | 38 => Some(212 + self.color*2),
                     // The line-rectangle callback uses <31 here; the other callbacks use <32.
-                    31 if self.kind == Kind::Line && matches!(area, CancelArea::Column { .. } | CancelArea::Rect { .. }) => Some(284 + self.color*2),
+                    31 if self.kind == Kind::Line && matches!(area, CancelArea::Column { .. } | CancelArea::Rect { .. } | CancelArea::ORect { .. }) => Some(284 + self.color*2),
                     18..=31 => Some(260 + self.color*2),
                     32..=33 => Some(284 + self.color*2),
                     _ => None,
@@ -702,6 +716,8 @@ impl Laser {
             CancelArea::Circle {pos,radius}=>(n.pos[0]-pos[0]).powi(2)+(n.pos[1]-pos[1]).powi(2)<=radius*radius,
             CancelArea::Rect {pos,size}=>crate::scope::rect_circle(pos,size,n.pos,0.0),
             CancelArea::Column {x,half_width}=>(n.pos[0]-x).abs()<=half_width,
+            CancelArea::ORect {pos,size,angle}=>crate::scope::rect_circle_exact(pos,size,angle,n.pos,0.0),
+            CancelArea::Ellipse {pos,a,b,angle}=>crate::scope::ellipse_circle(n.pos,0.0,pos,a,b,angle),
         }).collect();
         if !mask.iter().any(|&x|x) {return (true,Vec::new());}
         let mut runs=Vec::new();let mut i=0;

@@ -172,6 +172,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
         }
+        "sht-dump" => {
+            let name = args.get(2).ok_or("sht-dump <file.sht>")?;
+            let f = th_formats::sht::ShtFile::parse(&archive.read(name)?)?;
+            println!("speeds {} {} {} {} levels {} option_script {} {} radii {:?}", f.speed, f.speed_focused, f.speed_diagonal, f.speed_focused_diagonal, f.power_levels, f.option_script, f.option_script2, f.radii);
+            for (i, slot) in f.slots.iter().enumerate() {
+                let Some(recs) = slot else { continue };
+                for r in recs {
+                    println!("slot {i:>2} int {} ph {} dmg {} off {:?} hb {:?} ang {:.3} av {} spd {} acc {} org {} kind {} anm {} snd {} alt {}/{} grp {} funcs {:?} life {} raw30 {:02x?}",
+                        r.interval, r.phase, r.damage, r.offset, r.hitbox, r.angle, r.angular_velocity, r.speed, r.acceleration, r.origin, r.kind, r.anm_script, r.sound, r.alt_interval, r.alt_phase, r.group, r.funcs, i32::from_le_bytes(r.raw[0x34..0x38].try_into().unwrap()), &r.raw[0x2e..0x48]);
+                }
+            }
+        }
         "ecl-dump" => {
             // ecl-dump <file.ecl> [sub] [opcode]: instructions with each argument shown as
             // int and float; `$` marks variable references.

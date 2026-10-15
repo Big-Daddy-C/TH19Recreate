@@ -592,6 +592,28 @@ impl Bullet {
     }
 
     /// FUN_004ee770: cancelable live/appearing bullets intersect a circle using half sprite width.
+    /// The bullet's size (+0x674 as the cancels use it): its sprite's width at its scale.
+    fn cancel_width(&self, world: &World, lib: &AnmLibrary) -> f32 {
+        self.vm.and_then(|id| world.get(id)).and_then(|vm|
+            lib.files.get(vm.file).and_then(|f| f.sprites.get(vm.sprite.max(0) as usize))
+                .map(|s| s.size[0] * vm.scale[0].abs())).unwrap_or(0.0)
+    }
+
+    /// `FUN_004ee500`: an ellipse (`a` along `theta`) against half the bullet's size.
+    pub fn intersects_cancel_ellipse(&self, centre: [f32;2], a: f32, b: f32, theta: f32, world: &World, lib: &AnmLibrary) -> bool {
+        if self.invuln != 0 || !matches!(self.state, 1 | 2) { return false; }
+        crate::scope::ellipse_circle(self.pos, self.cancel_width(world, lib) / 2.0, centre, a, b, theta)
+    }
+
+    /// `FUN_004ee0d0`: a box (`size[0]` along `angle`) against the bullet's whole size (times
+    /// its hitbox scale +0xfd4, 1 here); the bullet must also touch the field (296 x 448).
+    pub fn intersects_cancel_box(&self, centre: [f32;2], size: [f32;2], angle: f32, world: &World, lib: &AnmLibrary) -> bool {
+        if self.invuln != 0 || !matches!(self.state, 1 | 2) { return false; }
+        let r = self.cancel_width(world, lib);
+        crate::scope::rect_circle_exact(centre, size, angle, self.pos, r)
+            && crate::scope::rect_circle_exact([0.0, 224.0], [296.0, 448.0], 0.0, self.pos, r)
+    }
+
     pub fn intersects_cancel(&self, pos: [f32;2], radius: f32, world: &World, lib: &AnmLibrary) -> bool {
         if self.invuln != 0 || !matches!(self.state, 1 | 2) { return false; }
         let half_width = self.vm.and_then(|id| world.get(id)).and_then(|vm|

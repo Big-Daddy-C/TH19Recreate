@@ -1715,3 +1715,186 @@ fn ran_scope_draws_four_native_cross_arms() {
         assert!((lo+105.0).abs()<0.02 && (hi-105.0).abs()<0.02,"axis{axis}: {lo}..{hi}");
     }
 }
+
+#[test]
+fn later_characters_send_original_special_extra_and_boss_programs() {
+    use th_game::character::Character;
+    for character in [Character::Aunn,Character::Nazrin,Character::Seiran,Character::Orin] {
+        for rank in 0..8 {
+            for level in [Level::Extra,Level::Boss] {
+                let Some(mut g)=setup() else{return};use_next_character(&mut g,0,character);
+                g.sides[1].player.as_mut().unwrap().godmode=true;
+                g.sides[0].st.extra_level=rank;g.sides[0].st.boss_level=rank;
+                g.sides[0].player.as_mut().unwrap().instant_charge(level);
+                let mut maximum=0;
+                for _ in 0..500 {
+                    g.tick([0;2]);
+                    // Some attacks are moving bodies (Aunn's ExAttack2 dogs) rather than bullets.
+                    let bodies=g.sides[1].enemies.iter().filter(|e|e.data.owner==0 && e.data.sub.starts_with("ExAttack")).count();
+                    maximum=maximum.max(g.sides[1].st.bullets.len()+g.sides[1].st.lasers.len()+bodies);
+                }
+                assert!(maximum>0,"{} {:?} rank{} produces its attack",character.name(),level,rank);
+                assert!(g.sides[1].st.unknown_ops.keys().all(|op|matches!(*op,516|524|527|534)),
+                    "{} {:?} rank{} unknown gameplay opcodes {:?}",character.name(),level,rank,g.sides[1].st.unknown_ops);
+            }
+        }
+        let Some(mut g)=setup() else{return};use_next_character(&mut g,0,character);
+        g.sides[0].st.special_counter=if character==Character::Aunn {45} else {90};
+        g.sides[0].st.last_special_pos=[0.0,200.0];dispatch_charges(&mut g.sides);
+        assert_eq!(g.sides[1].st.pending_reflects.len(),1,"{} sends one special at its threshold",character.name());
+        assert_eq!(g.sides[0].st.special_counter,0);
+        let mut spawned=false;
+        for _ in 0..200 {
+            g.tick([0;2]);
+            spawned|=g.sides[1].enemies.iter().any(|e|e.data.sub=="ExAttack" && e.data.owner==0);
+        }
+        assert!(spawned,"{} special arrivals use ExAttack",character.name());
+        assert!(g.sides[1].st.unknown_ops.keys().all(|op|matches!(*op,516|524|527|534)),"{} {:?}",character.name(),g.sides[1].st.unknown_ops);
+    }
+}
+
+fn body(id: i32, pos: [f32; 2], spirit_disabled: bool) -> th_game::Enemy {
+    th_game::Enemy {
+        threads: th_ecl::Threads::new(th_ecl::Context::new(th_ecl::SubRef { file: 0, sub: 0 })),
+        data: th_game::EnemyData { id, pos, hurtbox: [16.0; 2], hitbox: [16.0; 2], hp: 100,
+            spirit_kind: 1, spirit_disabled, ..Default::default() },
+    }
+}
+
+#[test]
+fn later_character_scopes_follow_their_natives() {
+    use th_game::character::Character;
+    // Aunn (FUN_0041a4b0): both radii 1 -> 32 in 30 frames, then -> (64, 192), then -> (80, 16).
+    let Some(mut g)=setup() else{return};use_next_character(&mut g,0,Character::Aunn);
+    for (frames,w,h) in [(30,32.0,32.0),(11,64.0,192.0),(10,80.0,16.0)] {
+        for _ in 0..frames {g.tick([input::CHARGE,0]);}
+        let p=g.sides[0].player.as_ref().unwrap();
+        assert!((p.scope.radius-w).abs()<0.001 && (p.scope.radius2-h).abs()<0.001,"Aunn {} {}",p.scope.radius,p.scope.radius2);
+        let vm=g.world.get(p.scope.vm.unwrap()).unwrap();
+        assert_eq!((vm.scale,vm.scale2),([w,1.0],[h,1.0]));
+    }
+    let p=g.sides[0].player.as_ref().unwrap();let pos=p.pos;
+    // (80, 16): wide and flat.
+    assert!(g.sides[0].st.scope_bullet([pos[0]+70.0,pos[1]],2.0));
+    assert!(!g.sides[0].st.scope_bullet([pos[0],pos[1]-30.0],2.0));
+    // Nazrin: 1 -> 32 over 30 frames; with no spirit it stays on her.
+    let Some(mut g)=setup() else{return};use_next_character(&mut g,0,Character::Nazrin);
+    for _ in 0..30 {g.tick([input::CHARGE,0]);}
+    let p=g.sides[0].player.as_ref().unwrap();
+    assert!((p.scope.radius-32.0).abs()<0.001);assert_eq!(p.scope.pos,p.pos);
+    // Seiran: 1 -> 48, 160 above her.
+    let Some(mut g)=setup() else{return};use_next_character(&mut g,0,Character::Seiran);
+    for _ in 0..30 {g.tick([input::CHARGE,0]);}
+    let p=g.sides[0].player.as_ref().unwrap();
+    assert!((p.scope.radius-48.0).abs()<0.001);assert_eq!(p.scope.pos,[p.pos[0],p.pos[1]-160.0]);
+    let pos=p.scope.pos;
+    assert!(g.sides[0].st.scope_bullet([pos[0]+50.0,pos[1]],3.0));
+    assert!(!g.sides[0].st.scope_bullet([pos[0]+52.0,pos[1]],3.0));
+    // Orin: a projectile, R 1 -> 50 in 10 frames, speed 1 + 0.1 a frame straight up.
+    let Some(mut g)=setup() else{return};use_next_character(&mut g,0,Character::Orin);
+    for _ in 0..10 {g.tick([input::CHARGE,0]);}
+    let p=g.sides[0].player.as_ref().unwrap();
+    assert!((p.scope.radius-50.0).abs()<0.001);
+    let travelled=(0..10).map(|k|1.0+0.1*k as f32).sum::<f32>();
+    assert!((p.pos[1]-p.scope.pos[1]-travelled).abs()<0.01,"{:?} {:?}",p.pos,p.scope.pos);
+    let c=p.scope.pos;
+    // The box is 2R wide and R tall.
+    assert!(g.sides[0].st.scope_bullet([c[0]+50.0,c[1]],0.5));
+    assert!(!g.sides[0].st.scope_bullet([c[0]+51.0,c[1]],0.5));
+    assert!(!g.sides[0].st.scope_bullet([c[0],c[1]+26.0],0.5));
+}
+
+#[test]
+fn later_character_skills_and_charge_volleys() {
+    use th_game::character::Character;
+    // Aunn: slot 11 for 90 frames and 90 frames of invulnerability.
+    let Some(mut g)=setup() else{return};use_next_character(&mut g,0,Character::Aunn);
+    g.sides[0].player.as_mut().unwrap().instant_charge(Level::Skill);
+    g.tick([0;2]);
+    assert!(g.sides[0].player.as_ref().unwrap().invuln>=88);
+    let mut fired=0;
+    for _ in 0..110 {g.tick([0;2]);fired=fired.max(g.sides[0].player.as_ref().unwrap().bullets.len());}
+    assert!(fired>20,"Aunn's spiral volley");
+    // Nazrin: the skill circle kills a disabled spirit and spares an active one.
+    let Some(mut g)=setup() else{return};use_next_character(&mut g,0,Character::Nazrin);
+    let p=g.sides[0].player.as_mut().unwrap();
+    let mut enemies=[body(1,[p.pos[0]+60.0,p.pos[1]],true),body(2,[p.pos[0]-60.0,p.pos[1]],false)];
+    p.instant_charge(Level::Skill);
+    for _ in 0..40 {p.update(0,&mut enemies,&mut g.world,&g.lib,FIELDS[0]);g.world.tick(&g.lib);}
+    assert!(enemies[0].data.killed,"disabled spirit inside the circle is marked dead");
+    assert!(!enemies[1].data.killed,"active spirits are not");
+    // Seiran: slot 11 for 200 frames from the bottom of the field.
+    let Some(mut g)=setup() else{return};use_next_character(&mut g,0,Character::Seiran);
+    g.sides[0].player.as_mut().unwrap().instant_charge(Level::Skill);
+    let mut low=false;
+    for _ in 0..60 {g.tick([0;2]);low|=g.sides[0].player.as_ref().unwrap().bullets.iter().any(|b|b.pos[1]>400.0);}
+    assert!(low,"Seiran's skill shots rise from the bottom");
+    // Orin: the skill circle and an armed slot 11 volley of three columns.
+    let Some(mut g)=setup() else{return};use_next_character(&mut g,0,Character::Orin);
+    g.sides[0].player.as_mut().unwrap().instant_charge(Level::Skill);
+    g.tick([0;2]);
+    let p=g.sides[0].player.as_ref().unwrap();
+    assert!(p.scope.circle.is_some());
+    assert_eq!(p.bullets.len(),3,"slot 11 fires three columns at once");
+    let probe=p.scope.probe();
+    assert_eq!(probe.test([p.pos[0],p.pos[1]],4.0),-2);
+}
+
+#[test]
+fn later_character_bombs_have_native_durations_and_shapes() {
+    use th_game::character::Character;
+    for (character,duration) in [(Character::Aunn,300),(Character::Nazrin,370),(Character::Seiran,300),(Character::Orin,320)] {
+        let Some(mut g)=setup() else{return};use_next_character(&mut g,0,character);
+        g.tick([input::BOMB,0]);
+        let p=g.sides[0].player.as_ref().unwrap();
+        assert_eq!(p.bomb.as_ref().unwrap().progress().1,duration,"{}",character.name());
+        let start=p.pos;
+        for _ in 0..duration-2 {g.tick([0,0]);}
+        let p=g.sides[0].player.as_ref().unwrap();
+        let b=p.bomb.as_ref().unwrap();
+        match character {
+            Character::Aunn => {
+                // Mode 1 (quadratic in) one frame short of the end: 1 + (goal - 1) * (299/300)^2.
+                let k=(299.0f32/300.0).powi(2);
+                assert!((b.current_radius-(1.0+189.5*k)).abs()<0.01 && (b.current_radius2-(1.0+377.0*k)).abs()<0.01,"{} {}",b.current_radius,b.current_radius2);
+                assert_eq!(p.cancel_ellipses.len(),1);
+            }
+            Character::Nazrin => { assert!((b.current_radius-130.0).abs()<0.05); assert_eq!(p.cancel_circles[0].0,start); }
+            Character::Seiran => { assert!((b.current_radius-130.0).abs()<0.05); assert_eq!(p.cancel_circles[0].0,[start[0],start[1]-160.0]); }
+            _ => {
+                assert!((b.current_radius-128.0).abs()<0.01);
+                let (c,size,_)=p.cancel_orects[0];
+                assert_eq!(size,[256.0,128.0]);
+                assert!(c[1]<start[1]-100.0,"thrown upwards {:?}",c);
+            }
+        }
+    }
+}
+
+#[test]
+fn later_character_shot_callbacks() {
+    use th_game::character::Character;
+    // Seiran's shots start still and gain 0.3 a frame (0054c7a0); a hit leaves a rising
+    // explosion collider and slows the shot to 0.3 (0054c5f0).
+    let Some(mut g)=setup() else{return};use_next_character(&mut g,0,Character::Seiran);
+    let p=g.sides[0].player.as_mut().unwrap();
+    let mut enemies=[body(1,[p.pos[0],p.pos[1]-60.0],false)];
+    enemies[0].data.spirit_kind=0;
+    p.update(input::SHOT,&mut enemies,&mut g.world,&g.lib,FIELDS[0]);
+    let b=&p.bullets[0];
+    assert!((b.speed-0.3).abs()<1e-5,"first update accelerates from 0: {}",b.speed);
+    let hp=enemies[0].data.hp;
+    for _ in 0..30 {p.update(input::SHOT,&mut enemies,&mut g.world,&g.lib,FIELDS[0]);g.world.tick(&g.lib);}
+    assert!(enemies[0].data.hp<hp);
+    assert!(p.bullets.iter().any(|b|b.impacting && (b.speed-0.3).abs()<1e-5));
+    // Orin's shots pierce (0054b270 sets +0x114): they pass through and keep hitting.
+    let Some(mut g)=setup() else{return};use_next_character(&mut g,0,Character::Orin);
+    let p=g.sides[0].player.as_mut().unwrap();
+    let mut enemies=[body(1,[p.pos[0],p.pos[1]-40.0],false)];
+    enemies[0].data.spirit_kind=0;enemies[0].data.hurtbox=[200.0;2];enemies[0].data.hp=100000;
+    for _ in 0..40 {p.update(input::SHOT,&mut enemies,&mut g.world,&g.lib,FIELDS[0]);g.world.tick(&g.lib);}
+    // Slot 2's middle record has no callbacks; the two init-16 records pierce.
+    assert!(p.bullets.iter().any(|b|b.pierce));
+    assert!(p.bullets.iter().filter(|b|b.pierce).all(|b|!b.impacting),"piercing shots never impact");
+    assert!(enemies[0].data.hp<100000);
+}

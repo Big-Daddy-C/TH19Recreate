@@ -90,10 +90,17 @@ impl Pending {
     pub fn new(req: Request, source_field: [f32; 4], receiver: &mut SideState) -> Self {
         Self::new_character(req,source_field,receiver,crate::character::Character::Reimu)
     }
+    /// A character's special bullet flies like `FUN_0051c250` but with its EX class's init
+    /// (vtable [1]): Sanae 80-159 frames (`FUN_004186e0`), Ran 50-89, Orin 70-129
+    /// (`FUN_0041cbb0`, whose tangents are always (r100, 200), (r100, -300)); Aunn, Nazrin and
+    /// Seiran 60-159 (`FUN_0053f2c0`, `FUN_0041af40`, `FUN_0041bb20`) with the default tangents.
     pub fn new_character(req: Request, source_field: [f32;4], receiver: &mut SideState, character: crate::character::Character) -> Self {
+        use crate::character::Character::*;
+        let special = req.special_rank.is_some();
         let delay = match character {
-            crate::character::Character::Sanae if req.special_rank.is_some() => (receiver.rand()&0xffff) as i32%80+80,
-            crate::character::Character::Ran if req.special_rank.is_some() => (receiver.rand()&0xffff) as i32%40+50,
+            Sanae if special => (receiver.rand()&0xffff) as i32%80+80,
+            Ran if special => (receiver.rand()&0xffff) as i32%40+50,
+            Orin if special => (receiver.rand()&0xffff) as i32%60+70,
             _ => (receiver.rand()&0xffff) as i32%100+60,
         };
         let jitter = [receiver.randf2() * 16.0, receiver.randf() * 32.0];
@@ -101,7 +108,7 @@ impl Pending {
         let start = field_to_canvas(source_field, req.origin);
         let end = field_to_canvas(receiver.field, target);
         let mut curve = Interp::default();
-        let (t0, t1) = req.tangents.unwrap_or_else(|| if matches!(character,crate::character::Character::Sanae|crate::character::Character::Ran) && req.special_rank.is_some() {
+        let (t0, t1) = req.tangents.unwrap_or_else(|| if matches!(character,Sanae|Ran|Orin) && special {
             ([receiver.randf2()*100.0,200.0],[receiver.randf2()*100.0,-300.0])
         } else {([receiver.randf2() * 100.0, -400.0], [receiver.randf2() * 100.0, 100.0])});
         curve.start_bezier(start, t0, end, t1, delay);
@@ -113,14 +120,28 @@ impl Pending {
     /// within 30 degrees from the middle of the field and inward from the sides.
     pub fn tick(&mut self, anm: Option<usize>, types: &[BulletType], receiver: &mut SideState, world: &mut World, lib: &AnmLibrary) -> Option<Arrival> {
         if self.time == 0 && self.script.is_some() {
+            use crate::character::Character::*;
+            // Ran's and the later characters' specials use the sender's plNNb.anm
+            // (EnemyManager +0x4adc); Sanae's and Marisa's come from bullet.anm.
             let own_file=match self.character {
-                crate::character::Character::Ran => lib.file_id("pl03b.anm"),
+                Ran | Aunn | Nazrin | Seiran | Orin => lib.file_id(&format!("{}b.anm", self.character.prefix())),
                 _ => anm,
             };
             if let (Some(file), Some(script)) = (own_file, self.script) {
                 let id = world.spawn_clipped(lib, file, script as usize, self.start, [0.0, 0.0, 640.0, 480.0]);
                 world.set_draw_priority(id, crate::bullet::BULLET_DRAW_PRIORITY);
-                if let Some(vm) = world.get_mut(id) { vm.scale = [0.8, 0.8]; if self.special_rank.is_some() && matches!(self.character,crate::character::Character::Sanae|crate::character::Character::Ran) {vm.alpha=192.0;} }
+                let special = self.special_rank.is_some();
+                if let Some(vm) = world.get_mut(id) {
+                    // The flight updates (FUN_00418a80, FUN_0053f150) hold Sanae's and Aunn's
+                    // sprite at alpha 0xc0, scale 0.8; Nazrin's and Seiran's (FUN_0041b2e0) and
+                    // Orin's (FUN_0041cf10) keep their script's. Orin's VM gets resolution mode 6.
+                    match self.character {
+                        Nazrin | Seiran | Orin if special => {}
+                        _ => vm.scale = [0.8, 0.8],
+                    }
+                    if special && matches!(self.character, Sanae | Ran | Aunn) { vm.alpha = 192.0; }
+                    if special && self.character == Orin { vm.res_mode = Some(6); }
+                }
                 self.vm = Some(id);
             }
         } else if self.time == 0 {

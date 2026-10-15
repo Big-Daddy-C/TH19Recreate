@@ -88,6 +88,10 @@ struct PlayerOption {
     extra: Option<VmId>,
     /// Snap-to-target ticks left (option +0x100; Ran's callback sets 10).
     hold: i32,
+    /// Seiran's orbit angle (option +0xd4, index * pi at creation) and whether the last
+    /// target wrapped across the field (+0x104 bit 1).
+    orbit: f32,
+    wrapped: bool,
 }
 
 pub struct PlayerBullet {
@@ -111,9 +115,31 @@ pub struct PlayerBullet {
     snake_turn: Option<(i32, f32)>,
     snake: bool,
     explosion_growth: f32,
+    /// SHT update callback index (+0x4c of the record, table 0x5a0400).
+    update_callback: i32,
+    /// Shot +0x114: the default hit callback (`FUN_0054fba0`) leaves the shot alive.
+    pub pierce: bool,
+    /// SHT +0x34: at this age the VM gets interrupt 1 and the age jumps to -999
+    /// (`FUN_0054df10`); 999 for most records.
+    lifetime: i32,
+    /// Kinds 2 and 8 skip `FUN_0054df10`'s off-field check.
+    stays_off_field: bool,
+    /// Orin's wander (+0xb8 angle step, +0xbc speed step; `FUN_0054b0c0`).
+    drift: [f32; 2],
+    /// Orin's charge column: the collider trails the shot as a (length, 28) box
+    /// (`FUN_0054adc0`).
+    column: Option<f32>,
+    /// The motion's velocity from the last movement step (+0x8c), the record's at spawn.
+    velocity: [f32; 2],
 }
 
-struct SnakeExplosion {pos:[f32;2],angle:f32,radius:f32,growth:f32,damage:i32,time:i32}
+/// A shot's impact collider (`FUN_005200f0`): a circle that moves with the shot's motion,
+/// grows each frame and hits every `interval` frames until `life`.
+struct SnakeExplosion {pos:[f32;2],angle:f32,speed:f32,radius:f32,growth:f32,damage:i32,time:i32,interval:i32,life:i32}
+
+/// Nazrin's skill (`FUN_0041b420`): pl05.anm script 9 at the cast position; its X scale is the
+/// radius of a collider (flags 0x2c0) that kills disabled spirits until the VM ends.
+struct MarkCircle { pos: [f32; 2], vm: VmId }
 pub struct Player {
     pub character: crate::character::Character,
     /// Development toggle: the player can't be hit.
@@ -157,7 +183,19 @@ pub struct Player {
     charge_origin: [f32;2],
     skill_volley: bool,
     boost_frames: i32,
+    /// Orin's skill arms her next charge shot with SHT slot 11 (EX class +0xf0, `FUN_0041d020`).
+    orin_armed: bool,
+    nazrin_skill: Option<MarkCircle>,
+    /// Positions of the enemies a shot's init callback may aim at (refreshed every update;
+    /// `FUN_00508530` skips flags 0x21).
+    targets: Vec<[f32; 2]>,
     pub cancel_rects: Vec<([f32;2],[f32;2])>,
+    /// Aunn's bomb: ellipses (centre, axis along the angle, axis across, angle) that cancel
+    /// bullets (`FUN_004ee500`).
+    pub cancel_ellipses: Vec<([f32;2], f32, f32, f32)>,
+    /// Orin's bomb: oriented boxes (centre, size along / across, angle) that cancel bullets on
+    /// the field (`FUN_004ee0d0`) and lasers (`FUN_005303f0`).
+    pub cancel_orects: Vec<([f32;2], [f32;2], f32)>,
     pub aura_anm: Option<usize>,
     charge_vm: Option<VmId>,
     focus_vm: Option<VmId>,
@@ -238,6 +276,7 @@ impl Player {
             skills: Vec::new(), bomb: None, bomb_prev: false, cancel_circles: Vec::new(), cancel_columns: Vec::new(), damage_circles: Vec::new(), snake_explosions: Vec::new(), skill_rng: 0x1cafe777,
             charge_timer: None,
             wide_charge: false, charge_origin: [0.0;2], skill_volley: false, boost_frames: 0, cancel_rects: Vec::new(),
+            orin_armed: false, nazrin_skill: None, targets: Vec::new(), cancel_ellipses: Vec::new(), cancel_orects: Vec::new(),
             aura_anm: None,
             charge_vm: None,
             focus_vm: None,
@@ -349,6 +388,8 @@ impl Player {
 
     pub fn update(&mut self, keys: u32, enemies: &mut [Enemy], world: &mut World, lib: &AnmLibrary, field: [f32; 4]) {
         self.cancel_radius = None;
+        self.targets = enemies.iter().filter(|e| e.data.flags & (flag::NO_HURTBOX | flag::HIDDEN) == 0
+            && !e.data.delete && !e.data.killed).map(|e| e.data.pos).collect();
         if self.boost_frames > 0 {
             self.boost_frames -= 1;
             if self.boost_frames == 0 { self.power = 200; }
@@ -465,10 +506,13 @@ impl Player {
         self.update_charge(keys, world, lib, field);
         self.update_focus_marker(world, lib, field);
         self.scope.update_character(self.charge.value > 0 && keys & input::CHARGE != 0
-            && self.state == State::Normal, self.character, self.pos, self.anm_file, world, lib, field);
+            && self.state == State::Normal, self.character, self.pos, self.prev_vx as f32, &*enemies,
+            self.anm_file, world, lib, field);
         self.cancel_circles.clear();
         self.cancel_columns.clear();
         self.cancel_rects.clear();
+        self.cancel_ellipses.clear();
+        self.cancel_orects.clear();
         self.skills.retain_mut(|s| {
             let alive = s.tick(world, field, &mut self.cancel_circles, &mut self.damage_circles);
             if std::mem::take(&mut s.ended) {
@@ -495,8 +539,10 @@ impl Player {
             let meter = if self.free_charge { crate::bomb::MAX_METER } else { self.meter };
             self.bomb = Some(if self.character == Character::Marisa {
                 crate::bomb::Bomb::new_marisa(self.pos, meter, self.anm_file, world, lib, field)
-            } else if matches!(self.character, Character::Sanae | Character::Ran) {
+            } else if matches!(self.character, Character::Sanae | Character::Ran | Character::Seiran) {
                 crate::bomb::Bomb::new_character(self.character,self.pos,meter,self.anm_file,world,lib,field)
+            } else if matches!(self.character, Character::Aunn | Character::Nazrin | Character::Orin) {
+                crate::bomb::Bomb::new_moving(self.character,self.pos,self.prev_vx as f32,meter,self.anm_file,world,lib,field)
             } else {
                 crate::bomb::Bomb::new(self.pos, meter, self.anm_file, world, lib, field)
             });
@@ -505,7 +551,9 @@ impl Player {
         }
         if let Some(b) = &mut self.bomb {
             let protecting = b.protecting();
-            let alive = b.tick_character(self.pos, world, field, &mut self.cancel_circles, &mut self.cancel_columns, &mut self.cancel_rects, &mut self.damage_circles);
+            let alive = b.tick_character(self.pos, &*enemies, world, field, &mut crate::bomb::Areas {
+                circles: &mut self.cancel_circles, columns: &mut self.cancel_columns, rects: &mut self.cancel_rects,
+                ellipses: &mut self.cancel_ellipses, orects: &mut self.cancel_orects }, &mut self.damage_circles);
             // Every bomb update writes its draining meter (FUN_00403250 at bomb +0x88: the meter
             // at the start -> 0, linear, over the duration) and, 10 frames after the end, resets
             // the meter to the attack threshold (status +0x28).
@@ -522,18 +570,42 @@ impl Player {
             }
         }
         let mut damage = vec![(0i32, self.pos); enemies.len()];
-        // 0054c2f0 copies shot motion with speed2; collider hit interval +a4 is4.
+        // 0054c2f0 copies shot motion with speed 2, hit interval +a4 4, life 20; 0054c5f0
+        // (Seiran's) moves up at 0.3, hit interval 2, life 16.
         for x in &mut self.snake_explosions {
-            x.time+=1;x.pos[0]+=x.angle.cos()*2.0;x.pos[1]+=x.angle.sin()*2.0;x.radius+=x.growth;
-            if x.time%4==0 {self.damage_circles.push(crate::skill::DamageCircle {pos:x.pos,radius:x.radius,
-                damage:x.damage,remaining:1,growth:0.0,rect:None});}
+            x.time+=1;x.pos[0]+=x.angle.cos()*x.speed;x.pos[1]+=x.angle.sin()*x.speed;x.radius+=x.growth;
+            if x.time%x.interval==0 {self.damage_circles.push(crate::skill::DamageCircle {pos:x.pos,radius:x.radius,
+                damage:x.damage,remaining:1,growth:0.0,rect:None,ellipse:None,orect:None});}
         }
-        self.snake_explosions.retain(|x|x.time<20);
+        self.snake_explosions.retain(|x|x.time<x.life);
+        // Nazrin's skill collider (FUN_005402e0 keeps its radius at the VM's X scale; flags
+        // 0x2c0 in FUN_00520450: only spirits that are disabled, marked +0x6250 |= 2 instead of
+        // damaged, which FUN_00509980 turns into the death routine).
+        if let Some(sk) = &self.nazrin_skill {
+            match world.get(sk.vm) {
+                None => self.nazrin_skill = None,
+                Some(vm) => {
+                    let r = vm.scale[0];
+                    for e in enemies.iter_mut() {
+                        let d = &mut e.data;
+                        if d.delete || d.killed || d.spirit_kind == 0 || !d.spirit_disabled
+                            || d.flags & flag::NO_HURTBOX != 0 { continue; }
+                        if dist2(sk.pos, d.pos) <= (r + d.hurtbox[0] / 2.0).powi(2) { d.killed = true; }
+                    }
+                }
+            }
+        }
         for circle in &mut self.damage_circles {
             for (index, enemy) in enemies.iter_mut().enumerate() {
                 let d = &mut enemy.data;
                 if d.delete || d.flags & flag::NO_HURTBOX != 0 || d.hurtbox[0] <= 0.0 { continue; }
-                let hit = if let Some(size) = circle.rect {
+                let hit = if let Some((size, angle)) = circle.orect {
+                    // FUN_0051f320's oriented box, tested like a shot's collider.
+                    shot_hits(circle.pos, size, angle, d)
+                } else if let Some((a, b, theta)) = circle.ellipse {
+                    // Collider type 5 (FUN_0051e670 -> FUN_004d4020): the body as a circle.
+                    crate::scope::ellipse_circle(d.pos, d.hurtbox[0] / 2.0, circle.pos, a, b, theta)
+                } else if let Some(size) = circle.rect {
                     (circle.pos[0] - d.pos[0]).abs() <= size[0] / 2.0 + d.hurtbox[0] / 2.0
                         && (circle.pos[1] - d.pos[1]).abs() <= size[1] / 2.0 + d.hurtbox[1] / 2.0
                 } else {
@@ -635,8 +707,6 @@ impl Player {
             use crate::charge::Level;
             self.last_charge = Some(level);
             self.charge_event = Some(level);
-            // The basic local shot accompanies every higher-tier release.
-            if !self.skill_volley { self.charge_timer = Some(0); }
             if !self.skill_volley || level==Level::Skill {self.charge_origin = self.pos;}
             let threshold = match level {
                 Level::Attack => self.charge_settings.attack,
@@ -645,6 +715,9 @@ impl Player {
                 Level::Boss => self.charge_settings.boss,
             };
             if !self.free_charge { self.meter = (self.meter-threshold+self.charge_settings.attack).clamp(0,2500); }
+            // FUN_004e79e0 calls the EX class's skill ([4]) before the charge shot ([3]), so a
+            // skill that sets the class's busy flag (Sanae, Aunn and Seiran: their volley;
+            // Nazrin: her skill collider) keeps the basic shot from restarting.
             if level == Level::Skill && self.character == Character::Marisa {
                 // FUN_00417b90: sound 0x33, panned to the player's side.
                 if crate::sfx::on(crate::sfx::Cat::Skill) { self.sounds.push((0x33, None)); }
@@ -669,18 +742,57 @@ impl Player {
                 self.power = 400; self.boost_frames = 600;
                 self.update_options(world,lib,field);
             }
+            if level == Level::Skill && self.character == Character::Aunn {
+                // FUN_0041a9b0: SHT slot 11 volley and 90 frames of invulnerability (+0x2078).
+                self.skill_volley = true; self.charge_timer = Some(0);
+                self.invuln = 90;
+            }
+            if level == Level::Skill && self.character == Character::Nazrin {
+                // FUN_0041b420: sound 0x1d panned by her x, pl05.anm script 9 where she is,
+                // 40 frames of invulnerability, and the marking collider.
+                if crate::sfx::on(crate::sfx::Cat::Skill) { self.sounds.push((0x1d, Some((self.pos[0] * 1000.0 / 192.0) as i32))); }
+                if let Some(old) = self.nazrin_skill.take() { world.delete(old.vm); }
+                let vm = world.spawn_clipped(lib, self.anm_file, 9, field_to_canvas(field, self.pos), field);
+                self.nazrin_skill = Some(MarkCircle { pos: self.pos, vm });
+                self.invuln = 40;
+            }
+            if level == Level::Skill && self.character == Character::Seiran {
+                // FUN_0041bec0: SHT slot 11 volley, sound 0x31 panned to her side.
+                self.skill_volley = true; self.charge_timer = Some(0);
+                if crate::sfx::on(crate::sfx::Cat::Skill) { self.sounds.push((0x31, None)); }
+            }
+            if level == Level::Skill && self.character == Character::Orin {
+                // FUN_0041d020: sound 0x1e panned to her side, the aura's skill circle at her
+                // position, and the next charge shot uses slot 11 (it starts right below).
+                if crate::sfx::on(crate::sfx::Cat::Skill) { self.sounds.push((0x1e, None)); }
+                self.scope.start_circle(self.pos, self.anm_file, world, lib, field);
+                self.orin_armed = true;
+            }
+            // The basic local shot accompanies every release ([3] after the switch).
+            if !self.skill_volley && self.nazrin_skill.is_none() { self.charge_timer = Some(0); }
             if matches!(level, Level::Extra | Level::Boss) { self.barrier = Barrier::Up; }
         }
         if let Some(t) = self.charge_timer {
+            // (slot, fires while t < n, stops once the advanced timer passes `end`, i.e. at
+            // end + 1): FUN_0053df80 Sanae 30/40 and 60/70 for the volley; FUN_0053eb60 Aunn
+            // 30/40 and 90/100; FUN_005402e0 Nazrin 120/120; FUN_00541330 Seiran 30/40 and
+            // 200/210; FUN_0041d1b0 Orin 10/10, slot 11 while armed.
             let (slot, fire_frames, stop) = match self.character {
-                Character::Sanae => (if self.skill_volley {11} else {10}, if self.skill_volley {60} else {30}, if self.skill_volley {70} else {40}),
+                Character::Sanae => if self.skill_volley {(11,60,71)} else {(10,30,41)},
                 Character::Ran => (if self.boost_frames>0 {11} else {10},50,61),
+                Character::Aunn => if self.skill_volley {(11,90,101)} else {(10,30,41)},
+                Character::Nazrin => (10,120,121),
+                Character::Seiran => if self.skill_volley {(11,200,211)} else {(10,30,41)},
+                Character::Orin => (if self.orin_armed {11} else {10},10,11),
                 _ => (10,21,21),
             };
             if t < fire_frames { self.fire_slot(slot, t, 0, world, lib, field); }
             if t == 0 && std::mem::take(&mut self.wide_charge) { self.fire_slot(11,t,0,world,lib,field); }
             self.charge_timer = (t+1 < stop).then_some(t+1);
-            if self.charge_timer.is_none() { self.skill_volley=false; }
+            if self.charge_timer.is_none() {
+                self.skill_volley=false;
+                if slot == 11 && self.character == Character::Orin { self.orin_armed = false; }
+            }
         }
     }
 
@@ -703,12 +815,14 @@ impl Player {
                     world.delete(id);
                 }
             }
-            for off in &offsets {
+            for (i, off) in offsets.iter().enumerate() {
                 let at = [self.fixed[0] + (off[0] * 128.0) as i32, self.fixed[1] + (off[1] * 128.0) as i32];
                 let script = self.sht.option_script;
                 let canvas = field_to_canvas(field, [at[0] as f32 / 128.0, at[1] as f32 / 128.0]);
                 let vm = (script >= 0).then(|| world.spawn_clipped(lib, self.anm_file, script as usize, canvas, field));
-                self.options.push(PlayerOption { pos: at, vm, extra: None, hold: if latching { 10 } else { 0 } });
+                // Seiran's orbit starts at index * pi (FUN_005483d0, option +0xd4).
+                let orbit = crate::motion::wrap_angle(i as f32 * std::f32::consts::PI);
+                self.options.push(PlayerOption { pos: at, vm, extra: None, hold: if latching { 10 } else { 0 }, orbit, wrapped: false });
             }
         }
         // FUN_005483d0: at full power (400) every option carries the SHT +0x40 script; below it
@@ -723,8 +837,27 @@ impl Player {
             }
         }
         let anchor = if latching { self.option_anchor } else { self.fixed };
+        let orbiting = self.character == Character::Seiran;
+        let (fixed, focused) = (self.fixed, self.focused);
         for (o, off) in self.options.iter_mut().zip(&offsets) {
-            let target = [anchor[0] + (off[0] * 128.0) as i32, anchor[1] + (off[1] * 128.0) as i32];
+            let mut target = [anchor[0] + (off[0] * 128.0) as i32, anchor[1] + (off[1] * 128.0) as i32];
+            if orbiting {
+                // Seiran's callback FUN_00545b70: the option circles her at radius 40 (24
+                // focused), a sixtieth of a half turn a frame, wrapping across the field's
+                // sides (+-160) with a one-frame snap.
+                let r = if focused { 24.0 } else { 40.0 };
+                let (s, c) = o.orbit.sin_cos();
+                target = [fixed[0] - (c * r * -128.0) as i32, fixed[1] - (s * r * -128.0) as i32];
+                o.orbit = crate::motion::wrap_angle(o.orbit + std::f32::consts::PI / 60.0);
+                if target[0] < -0x5000 {
+                    o.hold = 1; o.wrapped = true; target[0] += 0xa000;
+                } else if target[0] <= 0x5000 {
+                    if o.wrapped { o.hold = 1; }
+                    o.wrapped = false;
+                } else {
+                    o.hold = 1; o.wrapped = true; target[0] -= 0xa000;
+                }
+            }
             if o.hold == 0 {
                 // Options close 30% of the distance to their slot every frame.
                 let d = [(target[0] - o.pos[0]) * 30 / 100, (target[1] - o.pos[1]) * 30 / 100];
@@ -824,11 +957,11 @@ impl Player {
         if matches!(r.funcs[0], 2 | 12 | 18) && crate::sfx::on(crate::sfx::Cat::BeamStart) {
             self.sounds.push((0x14, Some((self.pos[0] * 1000.0 / 192.0) as i32)));
         }
-        if r.sound >= 0 && crate::sfx::on(crate::sfx::Cat::PlayerShot) {
-            let back = if matches!(r.kind, 4..=6) { 0.0 } else { r.angle.cos() * r.speed };
-            self.sounds.push((r.sound as u32, Some(((origin[0] + r.offset[0] - back) * 1000.0 / 192.0) as i32)));
-        }
+        let sound = |pos_x: f32| (r.sound >= 0 && crate::sfx::on(crate::sfx::Cat::PlayerShot))
+            .then(|| (r.sound as u32, Some((pos_x * 1000.0 / 192.0) as i32)));
         if r.kind == 2 || r.funcs[0] == 12 {
+            let back = if matches!(r.kind, 4..=6) { 0.0 } else { r.angle.cos() * r.speed };
+            self.sounds.extend(sound(origin[0] + r.offset[0] - back));
             let pos = [origin[0] + r.offset[0], origin[1] + r.offset[1]];
             self.beams.push(crate::beam::Beam::new(r, self.anm_file, world, lib, field, pos));
             if r.kind == 2 {
@@ -840,19 +973,52 @@ impl Player {
         let vel = [c * r.speed, s * r.speed];
         // The game places the bullet one step back, so its first update lands on the offset.
         let back = if matches!(r.kind, 4..=6) { [0.0; 2] } else { vel };
-        let pos = [origin[0] + r.offset[0] - back[0], origin[1] + r.offset[1] - back[1]];
+        let mut pos = [origin[0] + r.offset[0] - back[0], origin[1] + r.offset[1] - back[1]];
+        let mut angle = r.angle;
+        let mut pierce = false;
+        let mut scale = None;
+        // Init callbacks (table 0x5a0440) that change the shot.
+        match r.funcs[0] {
+            // FUN_0054b5c0 / FUN_0054b3f0 (Nazrin): aim at the nearest enemy within 640 of the
+            // shot (FUN_00508530); 13 adds up to 10 degrees either way.
+            10 | 13 => {
+                let mut best = 640.0f32 * 640.0;
+                let mut target = None;
+                for t in &self.targets {
+                    let d = dist2(*t, pos);
+                    if d < best { best = d; target = Some(*t); }
+                }
+                if let Some(t) = target {
+                    angle = (t[1] - pos[1]).atan2(t[0] - pos[0]);
+                    if r.funcs[0] == 13 { angle += self.rand_signed() * std::f32::consts::PI * 5.0 / 90.0; }
+                    angle = crate::motion::wrap_angle(angle);
+                }
+            }
+            // FUN_0054ba40 (Seiran's options): within 36 degrees of straight up.
+            14 => angle = crate::motion::wrap_angle(self.rand_signed() * std::f32::consts::PI * 0.2 - std::f32::consts::FRAC_PI_2),
+            // FUN_0054b9a0 (Seiran's skill): x moved by up to 32, the sprite at scale 2.
+            15 => { pos[0] += self.rand_signed() * 32.0; scale = Some([2.0, 2.0]); }
+            // FUN_0054b270 (Orin): piercing, within 10 degrees of straight up.
+            16 => { pierce = true; angle = crate::motion::wrap_angle(self.rand_signed() * 0.17453294 - std::f32::consts::FRAC_PI_2); }
+            // FUN_0054afc0 (Orin's charge): piercing, up or 6 degrees towards her movement.
+            17 => { pierce = true; angle = crate::scope::orin_angle(self.prev_vx as f32); }
+            _ => {}
+        }
+        // The record's sound plays after the init callback, panned by the shot's x.
+        self.sounds.extend(sound(pos[0]));
         let vm = (r.anm_script >= 0).then(|| {
             let id = world.spawn_clipped(lib, self.anm_file, r.anm_script as usize, field_to_canvas(field, pos), field);
             if let Some(v) = world.get_mut(id) {
                 // Charge orbs rotate through script 10's angular velocity. Their ANM
                 // does not request direction-following rotation (0054df10, +0x4cc).
-                if v.auto_rotate { v.rot[2] = r.angle; }
+                if v.auto_rotate { v.rot[2] = angle; }
+                if let Some(sc) = scale { v.scale = sc; }
             }
             id
         });
         self.bullets.push(PlayerBullet {
             pos,
-            angle: r.angle,
+            angle,
             speed: r.speed,
             hitbox: r.hitbox,
             damage: r.damage as i32,
@@ -866,7 +1032,22 @@ impl Player {
             impacting: false,
             hit_callback: r.funcs[3], snake_turn: None, snake: r.funcs[1]==4,
             explosion_growth: f32::from_le_bytes(r.raw[0x68..0x6c].try_into().unwrap()),
+            update_callback: r.funcs[1],
+            pierce,
+            lifetime: i32::from_le_bytes(r.raw[0x34..0x38].try_into().unwrap()),
+            stays_off_field: matches!(r.kind, 2 | 8),
+            drift: [0.0; 2],
+            column: None,
+            velocity: vel,
         });
+    }
+
+    /// `FUN_00404b70` on the replay RNG: uniform in [-1, 1].
+    /// APPROX: a local xorshift stands in for the game's replay RNG.
+    fn rand_signed(&mut self) -> f32 {
+        let x = &mut self.skill_rng;
+        *x ^= *x << 13; *x ^= *x >> 17; *x ^= *x << 5;
+        (*x as f64 / u32::MAX as f64 * 2.0 - 1.0) as f32
     }
 
     /// Marisa's beams (`FUN_0054d370` / `FUN_0054cd70`): grow, hit, and end with the shot button.
@@ -905,7 +1086,46 @@ impl Player {
     fn update_bullets(&mut self, enemies: &mut [Enemy], world: &mut World, lib: &AnmLibrary, field: [f32; 4], damage: &mut [(i32, [f32; 2])]) {
         let mut i = 0;
         while i < self.bullets.len() {
+            let wander = (self.bullets[i].update_callback == 10 && self.bullets[i].time % 30 == 0)
+                .then(|| [self.rand_signed() * 0.017453292, self.rand_signed() * 0.2]);
             let b = &mut self.bullets[i];
+            // FUN_0054df10 first: a shot at its SHT +0x34 age gets interrupt 1 and restarts its
+            // age at -999.
+            if b.lifetime > 0 && b.lifetime <= b.time {
+                if let Some(id) = b.vm { world.interrupt(id, 1); }
+                b.time = -999;
+            }
+            let mut expired = false;
+            match b.update_callback {
+                // 0054c7a0 (Seiran): +0.3 speed a frame while flying.
+                3 if !b.impacting => b.speed += 0.3,
+                // 0054b0c0 (Orin): every 30 frames a new turn (up to 1 degree a frame) and speed
+                // step (up to 0.2, not below speed 2 when negative).
+                10 => {
+                    if let Some(w) = wander { b.drift = w; }
+                    b.angle = crate::motion::wrap_angle(b.angle + b.drift[0]);
+                    if b.speed >= 2.0 || b.drift[1] >= 0.0 { b.speed += b.drift[1]; }
+                }
+                // 0054adc0 (Orin's charge): +0.1 speed; the script-9 child's X scale grows by the
+                // speed and is the length of a (length, 28) box trailing the shot along its last
+                // velocity; gone after 129 frames.
+                11 => {
+                    b.speed += 0.1;
+                    let child = b.vm.and_then(|id| world.find_descendant(id, 9));
+                    let length = match child.and_then(|id| world.get_mut(id)) {
+                        Some(v) => { v.scale[0] += b.speed; v.scale[0] }
+                        None => 16.0,
+                    };
+                    b.column = Some(length);
+                    expired = b.time > 0x81;
+                }
+                _ => {}
+            }
+            if expired {
+                if let Some(id) = b.vm { world.delete(id); }
+                self.bullets.swap_remove(i);
+                continue;
+            }
             // Callback 8 at 0054b380, read from the original executable's table
             // 005a0400 (not present as a function in the Ghidra export).
             if !b.impacting && b.charge_shot {
@@ -921,10 +1141,19 @@ impl Player {
                 b.speed += b.acceleration;
             }
             b.time += 1;
+            // Orin's column box is placed from the position and velocity before this move.
+            let column = b.column.map(|length| {
+                let v = b.velocity;
+                let len = (v[0]*v[0] + v[1]*v[1]).sqrt();
+                let dir = if len.abs() >= 0.01 { [v[0]/len, v[1]/len] } else { v };
+                ([b.pos[0] - dir[0]*length/2.0, b.pos[1] - dir[1]*length/2.0], [length, 28.0])
+            });
             let (s, c) = b.angle.sin_cos();
-            b.pos = [b.pos[0] + c * b.speed, b.pos[1] + s * b.speed];
+            b.velocity = [c * b.speed, s * b.speed];
+            b.pos = [b.pos[0] + b.velocity[0], b.pos[1] + b.velocity[1]];
 
-            let mut dead = b.pos[0].abs() > 148.0 + 32.0 || b.pos[1] < -32.0 || b.pos[1] > 448.0 + 32.0;
+            // Kinds 2 and 8 skip the off-field check.
+            let mut dead = !b.stays_off_field && (b.pos[0].abs() > 148.0 + 32.0 || b.pos[1] < -32.0 || b.pos[1] > 448.0 + 32.0);
             dead |= b.vm.is_some_and(|id| world.get(id).is_none());
             if !dead && !b.impacting {
                 for (index, e) in enemies.iter_mut().enumerate() {
@@ -932,7 +1161,10 @@ impl Player {
                     if d.flags & flag::NO_HURTBOX != 0 || d.hurtbox[0] <= 0.0 || d.delete {
                         continue;
                     }
-                    let overlap = shot_hits(b.pos, b.hitbox, b.angle, d);
+                    let overlap = match column {
+                        Some((centre, size)) => shot_hits(centre, size, b.angle, d),
+                        None => shot_hits(b.pos, b.hitbox, b.angle, d),
+                    };
                     if overlap {
                         // A collider remembers the last enemy it hit (+0xa8) only to avoid a
                         // second hit within one frame: the per-frame collider tick (0051fa30)
@@ -941,7 +1173,7 @@ impl Player {
                         // overlapping enemy on every frame.
                         damage[index].0 += b.damage;
                         damage[index].1 = b.pos;
-                        if !b.charge_shot {
+                        if !b.charge_shot && !b.pierce {
                             // Hit callbacks 3, 4 and 9 (0054c5f0, 0054c2f0, 0054a7b0) end with sound 0x41,
                             // panned by the shot's x.
                             if matches!(b.hit_callback, 3 | 4 | 9) {
@@ -967,11 +1199,17 @@ impl Player {
                             }
                             if b.hit_callback == 4 {
                                 //0054c2f0: replace the shot collider with radius24,+SHT68/frame,life20.
-                                self.snake_explosions.push(SnakeExplosion {pos:b.pos,angle:b.angle,radius:24.0,
-                                    damage:b.damage,time:0,growth:b.explosion_growth});
+                                self.snake_explosions.push(SnakeExplosion {pos:b.pos,angle:b.angle,speed:2.0,radius:24.0,
+                                    damage:b.damage,time:0,growth:b.explosion_growth,interval:4,life:20});
+                            }
+                            if b.hit_callback == 3 {
+                                // 0054c5f0 (Seiran): a radius 24 collider growing 1 a frame, life 16,
+                                // hit interval 2, drifting up at 0.3; the shot slows to 0.3.
+                                self.snake_explosions.push(SnakeExplosion {pos:b.pos,angle:-std::f32::consts::FRAC_PI_2,speed:0.3,
+                                    radius:24.0,damage:b.damage,time:0,growth:1.0,interval:2,life:16});
                             }
                             b.impacting = true;
-                            b.speed = if b.hit_callback==4 {2.0} else {b.speed/8.0};
+                            b.speed = match b.hit_callback { 4 => 2.0, 3 => 0.3, _ => b.speed/8.0 };
                             if let Some(id) = b.vm { world.interrupt(id, 1); }
                             else { dead = true; }
                             break;
@@ -1178,7 +1416,8 @@ use super::*;
     fn amulet(angle: f32, speed: f32, time: i32) -> PlayerBullet {
         PlayerBullet { pos: [0.0, 300.0], angle, speed, hitbox: [4.0; 2], damage: 1,
             homing: true, homing_target: None, angular_velocity: 0.0, acceleration: 0.0,
-            vm: None, time, charge_shot: false, impacting: false, hit_callback: 0, snake_turn: None, snake: false, explosion_growth: 0.0 }
+            vm: None, time, charge_shot: false, impacting: false, hit_callback: 0, snake_turn: None, snake: false, explosion_growth: 0.0,
+            update_callback: 0, pierce: false, lifetime: 999, stays_off_field: false, drift: [0.0; 2], column: None, velocity: [0.0; 2] }
     }
 
     fn homing_enemy(id: i32, pos: [f32; 2]) -> Enemy {
@@ -1291,7 +1530,7 @@ fn combined_player_colliders_obey_original_damage_cap() {
     assert_eq!(i32::from_le_bytes(p.sht.params_raw[8..12].try_into().unwrap()),90);
     // Three skill colliders total 120 this frame; the original caps their sum at 90.
     p.damage_circles=(0..3).map(|_|crate::skill::DamageCircle {
-        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1,rect:None
+        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1,rect: None, ellipse: None, orect: None
     }).collect();
     let mut enemies=[crate::Enemy {
         threads:th_ecl::Threads::new(th_ecl::Context::new(th_ecl::SubRef{file:0,sub:0})),
@@ -1301,7 +1540,7 @@ fn combined_player_colliders_obey_original_damage_cap() {
     assert_eq!(enemies[0].data.hp,4910);
     enemies[0].data.hp=1500; enemies[0].data.spell_hp7=Some(10500);
     p.damage_circles=(0..3).map(|_|crate::skill::DamageCircle {
-        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1,rect:None
+        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1,rect: None, ellipse: None, orect: None
     }).collect();
     p.update(0,&mut enemies,&mut world,&lib,crate::FIELDS[0]);
     assert_eq!(enemies[0].data.spell_hp7,Some(10410));
@@ -1309,7 +1548,7 @@ fn combined_player_colliders_obey_original_damage_cap() {
     p.state=State::Entering;
     enemies[0].data.hp=5000;enemies[0].data.spell_hp7=None;
     p.damage_circles=(0..3).map(|_|crate::skill::DamageCircle {
-        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1,rect:None
+        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1,rect: None, ellipse: None, orect: None
     }).collect();
     p.update(0,&mut enemies,&mut world,&lib,crate::FIELDS[0]);
     assert_eq!(enemies[0].data.hp,4982,"Entering divides the capped 90 damage by five");
