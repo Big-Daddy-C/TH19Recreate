@@ -61,6 +61,9 @@ struct Game {
     sides: Vec<th_game::Side>,
     round: th_game::round::Round,
     hud: Option<th_game::hud::Hud>,
+    /// Running screen shakes and this frame's offsets (`th_game::shake`).
+    shakes: th_game::shake::Shakes,
+    shake: th_game::shake::Offsets,
 }
 
 /// Draw priority of the pause menu's text; the dimming layer sits just below it.
@@ -373,7 +376,7 @@ impl Viewer {
                 self.world.interrupt_now(&self.lib, id, n);
             }
         }
-        Some(Game { progs, sides, round, hud })
+        Some(Game { progs, sides, round, hud, shakes: Default::default(), shake: Default::default() })
     }
 
     /// Load an `.anm` from the archive once and return its library id.
@@ -464,6 +467,10 @@ impl Viewer {
                     if let Some(a) = &mut self.audio { a.play_all(&s.st.sounds); }
                     s.st.sounds.clear();
                 }
+                // Shakes started this frame run from the next one (the effect task runs early in
+                // the frame, before the managers that start them).
+                g.shake = g.shakes.tick();
+                for side in &mut g.sides { for sh in side.st.shakes.drain(..) { g.shakes.add(sh); } }
                 th_game::side::dispatch_charges(&mut g.sides);
                 // FUN_00546320: a player out of hearts ends the round when its death finishes
                 // (state 2 at 30 frames); in 2 vs 2 a team is out when both teammates are.
@@ -554,7 +561,16 @@ impl Viewer {
                 let mut list = vec![th_anm::DrawBatch::solid_rect(rect, [sky[0], sky[1], sky[2], 1.0])];
                 // The stage, layer by layer as the game draws it (sprite slots interleaved).
                 let cam = st.camera(rect);
-                list.extend(self.world.draw_stage(&self.lib, &cam));
+                let mut stage = self.world.draw_stage(&self.lib, &cam);
+                // The stage camera takes the shake's unscaled value: screen pixels (R = 2).
+                if let Some(g) = &self.game {
+                    let [dx, dy] = g.shake.stage_pixels;
+                    if dx != 0.0 || dy != 0.0 {
+                        let d = [dx / th_anm::RESOLUTION_SCALE, dy / th_anm::RESOLUTION_SCALE];
+                        for b in &mut stage { for v in &mut b.vertices { v.pos[0] += d[0]; v.pos[1] += d[1]; } }
+                    }
+                }
+                list.extend(stage);
                 if self.show_fields {
                     // Stand-in for the real frame from front.anm: darken the strip between fields.
                     let gap_x = FIELDS[0][0] + FIELDS[0][2];
@@ -582,6 +598,7 @@ impl Viewer {
                 }
             }
         }
+        let field_start = list.len();
         if let Some(g)=&self.game {
             let priority=th_game::laser::DRAW_PRIORITY;
             list.extend(self.world.draw_priority_range(&self.lib,th_anm::Pass::Ui,i32::MIN,priority+1));
@@ -598,6 +615,16 @@ impl Viewer {
             for side in &g.sides { for spark in &side.st.sparks {
                 if let Some(batch)=spark.batch(side.st.field) {list.push(batch);}
             }}
+            // Field shake: the cameras' offsets reach sprite quads only (FUN_004c9380 adds
+            // manager +0xc4 / +0xc8); untextured primitives keep their place.
+            for (field, d) in FIELDS.iter().zip(g.shake.field) {
+                if d == [0.0, 0.0] { continue; }
+                for b in &mut list[field_start..] {
+                    if b.texture.is_some() && b.clip == Some(*field) {
+                        for v in &mut b.vertices { v.pos[0] += d[0]; v.pos[1] += d[1]; }
+                    }
+                }
+            }
         } else {list.extend(self.world.draw_list(&self.lib,th_anm::Pass::Ui));}
         if let Some(g) = &self.game {
             for (side, field) in g.sides.iter().zip(FIELDS) {

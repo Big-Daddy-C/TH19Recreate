@@ -1425,6 +1425,138 @@
     "ecl_dispatch": {
       "address": "004fecc0",
       "decompile_sha256": "145bb78a3907254fc4f19360d88f5865d82d3514bf44c3babe91d4219841972a"
+    },
+    "anm_dispatch": {
+      "address": "004bd660",
+      "decompile_sha256": "80121d52f4f4ed3e09e227cf3e52e24cdc914c5828c2ac45e427569b4c412b0b"
+    },
+    "draw_round_rect": {
+      "address": "004c2cc0",
+      "decompile_sha256": "d1347556f6d9a96204d7fb7077293fe1eb8016ba44bf2a1ef98715fbe620e1b7"
+    },
+    "draw_round_rect_band": {
+      "address": "004c2460",
+      "decompile_sha256": "9be0847567e272a3312bd485d1cd1d4e9c3feb7971c1cc9e9366e696f060d62b"
+    },
+    "screen_effect_create": {
+      "address": "004b9f00",
+      "decompile_sha256": "f1ae2afae878caa4aef6ac6a70da60cac2a117c5debeb1f34d1f1f707bf78192"
+    },
+    "camera_select": {
+      "address": "00405690",
+      "decompile_sha256": "3b4a5201614478df185fd10298f668da7f55b91187df25d75055ae0869ef1959"
+    },
+    "layer_camera": {
+      "address": "004cc030",
+      "decompile_sha256": "138cbaf185e7929cebd8d3598a1b5b0899ec87bee90d69b9d36535973f6ee9a2"
+    },
+    "anm_draw_layer": {
+      "address": "004cc5a0",
+      "decompile_sha256": "f2616283f00e2c65b7865b2ebe54abf6837c1fa28c9d7ca042df42950d077139"
+    },
+    "sprite_vertices": {
+      "address": "004c9380",
+      "decompile_sha256": "d0258a3ce844dfd6c0a27fe91c84ab39940e414967615cfb539d9278a85a11a7"
+    },
+    "stage_camera_copy": {
+      "address": "004ec1e0",
+      "decompile_sha256": "ecc54d861e40c017c44ceba39d30627733b309bf064c8538b6199c51b5112d18"
+    },
+    "rng_next": {
+      "address": "00402540",
+      "decompile_sha256": "e69ab405b681ca0de5ea82cd9c349ee73c2312f966d4edf5385531f50ffcd76e"
+    },
+    "rng_next16": {
+      "address": "00401960",
+      "decompile_sha256": "61c4c072cec0347c53463edae05fc8b6a18d85e8705f6638dd94a1aac43a334f"
+    },
+    "rng_signed": {
+      "address": "00404b70",
+      "decompile_sha256": "83c56091047e7365107caa02e267ed58cabd2ed7b86d42d23928d4d0083b3ebf"
+    },
+    "rng_signed_scaled": {
+      "address": "00404bd0",
+      "decompile_sha256": "faabca086e11b38ec80b25be560221f0a2c99f70ec7176526d8ae8f883686770"
+    },
+    "rng_unit_scaled": {
+      "address": "00404c90",
+      "decompile_sha256": "7b5efd9c0cb02f54c157ac12507316d853223946e0dda5ad15c750f0a34129ad"
+    },
+    "rng_signed_pi": {
+      "address": "004042b0",
+      "decompile_sha256": "1611a95e9cf63ea28cda28613478addb1e51d8b2b0e80b226d3acf82c1234cd5"
+    },
+    "et_place": {
+      "address": "004f3910",
+      "decompile_sha256": "55fb6979f1b6a40cdfdd0823b2a6f774e94aeaf27b2220b31ae84a2add4e021f"
+    },
+    "reflect_arrive": {
+      "address": "0051bd50",
+      "decompile_sha256": "4dfe0fb269b6e14d7d53aa0df0fcc3f10323fc3da849aabe6b070ffb3d2bdc89"
+    },
+    "ellipse_rect": {
+      "address": "004d3c50",
+      "decompile_sha256": "fcad156b8496e33cea7a23bd529adee93de11f9dbbe4f5f7afb12dac52dbdfdc"
+    },
+    "laser_line_ellipse": {
+      "address": "00529820",
+      "decompile_sha256": "2fea9b26e427e8684eaa937a0abc17a720a413a42dafa8752ee1a7a95a0d6b2f"
+    },
+    "laser_inf_ellipse": {
+      "address": "0052c2c0",
+      "decompile_sha256": "9e07271aede89802350019fc92bb09f6236dd7ce98d1ad5683b47e89e3c738ff"
+    },
+    "laser_curve_ellipse": {
+      "address": "00524160",
+      "decompile_sha256": "0e9d811a832c847cbc3e65c2d3f5404df57ca211b6b01683606e3f09a8bc4c4b"
+    },
+    "point_in_ellipse": {
+      "address": "004d4420",
+      "decompile_sha256": "ead27e69e771824c3fa9debb3feb45be00d1788781240621623db9c6ade7119d"
+    },
+    "cancel_drop": {
+      "address": "004ee9b0",
+      "decompile_sha256": "6742dbe278239f01b9e9b21bb683e3ac376f4c19ca0d5311343daa17eb050a63"
+    },
+    "orb_rate_set": {
+      "address": "0040f1e0",
+      "decompile_sha256": "491b953c65dbde04afcb1a1ca73f720107d5072730a988357da5c7301fddcdcf"
+    },
+    "card_charge_speed": {
+      "address": "004085a0",
+      "decompile_sha256": "704269b859317f47da1e2fe8f1fd3129bb9d39c8de7242a28bceb865ecf57ae8"
+    },
+    "card_scope_size": {
+      "address": "004085c0",
+      "decompile_sha256": "a82236d35836f57a3189d3a54f6b0ad4eb829d0a511f20ca8cbf60a32769ebf9"
+    },
+    "card_bomb_time": {
+      "address": "00408600",
+      "decompile_sha256": "8f75062a52ff0a4af7d20a01484f863ccb358b737b5e786defe996c0589ff9bb"
+    },
+    "spell_number": {
+      "address": "0040f4d0",
+      "decompile_sha256": "467254381e945e6fe1074c7f555cda2922f108b6aa14741cc61f56325cacd716"
+    },
+    "spell_marker": {
+      "address": "0040fb30",
+      "decompile_sha256": "40916f1394974ce3b2a12abaa75bca389ad61130b5d66de66cef454ebbff0ddd"
+    },
+    "gamestate_2e8": {
+      "address": "0040f4b0",
+      "decompile_sha256": "abd08b8abf08f3e3bd1b3dbad2ad6d8a14539a81c1fc58530cf0de5416dd51f2"
+    },
+    "boss_slot": {
+      "address": "0040f810",
+      "decompile_sha256": "03a27e41688598cafa3b5f52f49e4bbf9fe7c1d69d89723b99e71f3477f04487"
+    },
+    "shot_hit_callback1": {
+      "address": "0054da60",
+      "decompile_sha256": "7a75cd64aa6e80dc977408721db0b67ff949d48ca9bda7fe0c9edfefbd8e6e95"
+    },
+    "spirit_flight": {
+      "address": "0051b6c0",
+      "decompile_sha256": "4946f8f3ba11854024a73ab8f2ccc3c465b32fc03ae35241aa297ccf363f0a2a"
     }
   },
   "features": {
@@ -2569,7 +2701,7 @@
           "evidence": "code_checked"
         },
         {
-          "text": "Not found / not ported: orbs dropped by focusing spirits (no focus-dependent drop was found; the player's focus flag only scales the hit circle in FUN_00549e00), ECL-controlled orb rate ops (FUN_0040f1e0 callers), cancel-to-orb conversion (ECL op 1000 passes mode 1 to FUN_004ee0d0; all other cancels pass 0), item types other than 9..14, and the status meter's starting value (the code keeps the earlier starting meter = attack threshold).",
+          "text": "Not found / not ported: orbs dropped by focusing spirits (no focus-dependent drop was found; the player's focus flag only scales the hit circle in FUN_00549e00), ECL-controlled orb rate ops (FUN_0040f1e0 callers), cancel-to-orb conversion (ECL op 712 - not 1000 - passes mode 1 to FUN_004ee0d0, unused in VS scripts; all other cancels pass 0), item types other than 9..14, and the status meter's starting value (the code keeps the earlier starting meter = attack threshold).",
           "sources": [],
           "evidence": "assumption"
         },
@@ -3514,10 +3646,185 @@
         "visual": "Not inspected yet."
       },
       "next": [
-        "Aunn bomb laser cancel uses an approximation of FUN_004d3c50 sampling.",
         "Flags 0xc00 of enemies (FUN_00508530/00508420 filters) are not modelled.",
         "Bodies with flag 0x1000 (rect) against the new ellipse/box colliders fall back to the circle test (no VS script sets 0x1000).",
         "Visual comparison of the four characters against original footage."
+      ]
+    },
+    "presentation_rng_meter": {
+      "implementation": "partial",
+      "summary": "Bug fixes (Orin scope primitives, Nazrin pyramid hit sound), screen shake, presentation ECL ops, the game RNG and helpers, boss random movement, laser ellipse cancels, meter-economy defaults and orb-rate ops.",
+      "symbols": [
+        "anm_dispatch",
+        "anm_draw_primitive",
+        "draw_round_rect",
+        "draw_round_rect_band",
+        "screen_effect_create",
+        "screen_effect",
+        "screen_shake",
+        "camera_select",
+        "layer_camera",
+        "anm_draw_layer",
+        "sprite_vertices",
+        "stage_camera_copy",
+        "ecl_dispatch",
+        "rng_next",
+        "rng_next16",
+        "rng_signed",
+        "rng_signed_scaled",
+        "rng_unit_scaled",
+        "rng_signed_pi",
+        "et_place",
+        "reflect_arrive",
+        "ellipse_rect",
+        "laser_line_ellipse",
+        "laser_inf_ellipse",
+        "laser_curve_ellipse",
+        "point_in_ellipse",
+        "enemy_damage",
+        "enemy_death",
+        "cancel_drop",
+        "orb_rate_set",
+        "card_charge_speed",
+        "card_scope_size",
+        "card_bomb_time",
+        "spell_number",
+        "spell_marker",
+        "gamestate_2e8",
+        "boss_slot",
+        "shot_hit_callback1",
+        "spirit_flight"
+      ],
+      "code": [
+        "crates/th-anm/src/vm.rs",
+        "crates/th-anm/src/lib.rs",
+        "crates/th-game/src/shake.rs",
+        "crates/th-game/src/rng.rs",
+        "crates/th-game/src/enemy.rs",
+        "crates/th-game/src/side.rs",
+        "crates/th-game/src/player.rs",
+        "crates/th-game/src/bomb.rs",
+        "crates/th-game/src/bullet.rs",
+        "crates/th-game/src/reflect.rs",
+        "crates/th-game/src/spirit.rs",
+        "crates/th-game/src/laser.rs",
+        "crates/th-game/src/scope.rs",
+        "crates/th-game/src/item.rs",
+        "crates/th19/src/main.rs"
+      ],
+      "tests": [
+        "crates/th-game/src/shake.rs",
+        "crates/th-game/src/rng.rs",
+        "crates/th-game/tests/higher_charge.rs"
+      ],
+      "findings": [
+        {
+          "text": "Orin's focus scope and bomb box were invisible: pl07.anm scripts 13/14 use ANM623 and 15/16 ANM626/627, which the VM ignored. ANM dispatch (FUN_004bd660, ops 301..: byte table 0x4c1268[op-0x12d] -> 0x4c10c4): 623 sets draw type 0x25 (+0x74 f0, +0x78 f1, +0x470 f2 corner radius, +0x460 segments); 624 0x26; 625/626/627 0x27/0x28/0x29 with +0x474 thickness. FUN_004c50f0 computes A = scale.x chain * +0x74 and B = scale.y chain * +0x78 (x R for res modes 1/5, R/2 for 2/6): type 0x25 draws FUN_004c2cc0, a fan from colour 1 at the centre to colour 2 at n+1 points on a corner circle of radius c (unscaled), offset by +-(A-2c)/2, +-(B-2c)/2 by quarter (index < n/4 or == n top-left, then top-right, bottom-right, bottom-left), angles from -pi; 0x27/0x28/0x29 draw FUN_004c2460, a band of thickness t centred on c, c + t/2 or c - t/2 (colour 1 inner, 2 outer).",
+          "sources": [
+            "anm_dispatch",
+            "anm_draw_primitive",
+            "draw_round_rect",
+            "draw_round_rect_band"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Nazrin's pyramids (ExAttack, flag 0x10 invincible, ECL 547 hurt sound 36) were silent because the port skipped the damaged flag for invincible enemies. FUN_00509980 adds every hit to +0x501c and sets +0x5170 |= 0x20 (flash and damage sound) whether or not flag 0x10 / +0x512c apply; only HP is skipped.",
+          "sources": [
+            "enemy_damage"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Screen shake = ScreenInf type 1 (FUN_004b9f00(type=ECX, duration=EDX, start, end, .., 0x67, index) -> FUN_004b9d40 -> FUN_004ba250): per frame timer+1, stop at duration; s = start + (end-start) * t / duration; each axis rand%3 -> 0, +s, -s, except the x case 2 writes +s to the field cameras (DAT_0062c414 gets -s). It writes slot `index` (+0x14c + 8i) of the three field cameras (0x62be14 + k*0x18c, scaled by R) and always DAT_0062c414/418; the task 0x532090 (draw priority 0x68) zeroes them each frame. Field layers pick slot = side (FUN_004cc030 / FUN_00405690), so slot 2 is never read by a field; the stage camera copies DAT_0062c414 (FUN_004ec1e0, FUN_0040cdf0 reads +0x15c). Sprite quads add manager +0xc4/+0xc8 in pixels (FUN_004c9380), primitives do not. ECL 517 (case 0x3e): FUN_004b9f00(1, arg0, arg1, arg2, .., 2) shakes the stage only (BossDead: 30 frames 12 -> 0); every bomb update's end (time == duration) calls FUN_004b9f00(1, 15, 6, 6, .., side): its field shakes 6 px. The bomb end sounds (stop 0x31, 0x2c) also happen at time == duration, not 10 frames later.",
+          "sources": [
+            "screen_effect_create",
+            "screen_effect",
+            "screen_shake",
+            "camera_select",
+            "layer_camera",
+            "anm_draw_layer",
+            "sprite_vertices",
+            "stage_camera_copy"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Presentation ECL ops without VS display: 524 (case 0x45) sets the spell number (DAT_0062ba8c via FUN_0040f4d0, enemy +0x5630) used for the capture bonus; 527 (0x48) writes (threshold / max HP, value) to GameState +0x32c per spell slot (FUN_0040fb30); 534 (0x4b) writes GameState +0x2e8 (FUN_0040f4b0). No reader of +0x32c or GameState +0x2e8 was found. ECL 512 with a negative slot only unregisters the boss (FUN_0040f810) and clears internal 0x80; it does not clear enemies (the port's clone clearing there stays an observation).",
+          "sources": [
+            "ecl_dispatch",
+            "spell_number",
+            "spell_marker",
+            "gamestate_2e8",
+            "boss_slot"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "RNG: FUN_00402540 is Park-Miller minimal standard (state = state * 48271 mod 2^31-1, returning state % RNG+0x10). The replay RNG DAT_005c6620 and the ANM RNG DAT_005c6638 both use divisor 0xffff00, seeded seed mod (2^31-1) (0 -> 1). FUN_00401960 returns the state's low 16 bits. Helpers: r/(d-1); FUN_00404b70 r/(d/2-1)-1; FUN_00404bd0 x*that; FUN_00404c90 x*r/(d-1); FUN_004042b0 pi*(r/(d/2-1)-1). ET aim modes 6/7/8 (FUN_004f3910) use FUN_00404bd0(a2) and FUN_00404c90(s2), mode 8 angle first. Spirit and special flights use FUN_00401960 % n. The port uses the exact generator and helpers; the game shares one replay RNG between both sides, so sequences still differ (APPROX sequencing).",
+          "sources": [
+            "rng_next",
+            "rng_next16",
+            "rng_signed",
+            "rng_signed_scaled",
+            "rng_unit_scaled",
+            "rng_signed_pi",
+            "et_place",
+            "spirit_flight",
+            "shot_hit_callback1"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Converted bullets arriving (FUN_0051bd50): at |x| >= 64 the angle is pi/2 - unit*pi/6 (left) or pi/2 + unit*pi/6 (right), otherwise pi/2 + signed*pi/6; the port had a quarter turn.",
+          "sources": [
+            "reflect_arrive",
+            "rng_unit_scaled"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "ECL 412/413 (case 0x1c, 00501013; 412 absolute motion, 413 relative): with the 504 box (+0x4ff4 x, +0x4ff8 y, +0x4ffc w, +0x5000 h; zero at creation, kept after 505 clears flag 2): left of x - w/4 angle = FUN_004042b0()/3, right of x + w/4 that + pi (wrapped), else FUN_004042b0()/4 flipped by pi unless it points at the player (kept when FUN_00401960() % 3 != 0 for a player on the right, == 0 on the left); above y - h/4 |a|, below y + h/4 -|a|; within 0.05 of -pi/2 or pi/2 pushed 0.05 away; then the position interpolates by (cos a, sin a) * arg2 over arg0 frames, mode arg1, unclamped.",
+          "sources": [
+            "ecl_dispatch",
+            "rng_signed_pi",
+            "rng_next16"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Laser ellipse cancels: line/infinite lasers (vtable +0x3c FUN_00529820 / FUN_0052c2c0) test each 16-pixel step box with FUN_004d3c50 (box extents cos(b)w - sin(b)h by sin(b)w + cos(b)h in the ellipse frame, b = box angle - ellipse angle; box larger than both axes: max(8,(a+b)/4) ellipse points from the box angle strictly inside the box; else a max(3, max(w,h)/8)^2 grid against the ellipse); curved lasers (FUN_00524160) test each node with FUN_004d4420 (point in ellipse).",
+          "sources": [
+            "ellipse_rect",
+            "laser_line_ellipse",
+            "laser_inf_ellipse",
+            "laser_curve_ellipse",
+            "point_in_ellipse"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Meter economy: game init (FUN_005177a0) sets status +0x84, +0x88 (charge speed), +0x8c (scope size), +0x90 (bomb time) and +0x98 (orb meter rate) to 100 for both sides; only ability cards change them (FUN_004085a0 charge 125, FUN_004085c0 scope 125, FUN_00408600 bomb 150), so VS runs at 100. Cancel drops (FUN_004ee9b0): mode 0 nothing, 1 an orb, 4 orbs with item 2 on counts 0/2/4 mod 5; every player, bomb and VS script cancel passes mode 0 - the only mode 1 caller is ECL 712, unused by default.ecl and pl00-07.ecl. ECL 1023 (case 0xb2) sets the orb rate (+0xff8e8): 0 for a negative value else min(arg, 500); 1024 (0xb3) averages with it (arg when 0). The port had read 1023 as an unused wave parameter.",
+          "sources": [
+            "card_charge_speed",
+            "card_scope_size",
+            "card_bomb_time",
+            "cancel_drop",
+            "orb_rate_set",
+            "ecl_dispatch"
+          ],
+          "evidence": "code_checked"
+        }
+      ],
+      "checks": {
+        "date": "2026-10-15",
+        "automated": "cargo test --workspace PASS with the restored th19.exe; new: orin_scope_draws_its_rounded_box, shake and rng unit tests; EX/boss/special runs of six characters now require zero unknown ECL ops.",
+        "visual": "Not inspected after these changes."
+      },
+      "next": [
+        "Boss life ring: no spawner or HP reader found (enemy +0x6238/+0x6240/+0x6248 are only read by the damage sound); 527 markers have no reader.",
+        "Shake on lasers and spark batches: whether their draw code adds +0xc4 was not checked.",
+        "The 512 clone-clearing observation is still untraced."
       ]
     }
   }

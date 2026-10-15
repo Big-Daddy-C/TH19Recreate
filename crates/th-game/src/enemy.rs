@@ -85,6 +85,8 @@ pub struct EnemyData {
     /// that / 7 (FUN_004fecc0 case 0x43, FUN_00509980 +0x5014/+0x5020): cards take 1/7.
     pub spell_hp7: Option<i32>,
     pub movement_limits: Option<[f32;4]>,
+    /// The ECL 504 box (+0x4ff4..+0x5000, zero at creation), kept after 505 turns the clamp off.
+    pub movement_box: [f32; 4],
     pub boss_mesh: Option<crate::boss_mesh::BossMesh>,
     pub score: i32,
     pub item: i32,
@@ -316,8 +318,11 @@ impl Enemy {
 impl EnemyData {
     /// Apply shot damage (the hit handling in th19.exe `FUN_00509980`).
     pub fn damage(&mut self, amount: i32, from: [f32; 2]) {
-        // FUN_00509980 adds every hit to +0x501c, invincible or not.
+        // FUN_00509980 adds every hit to +0x501c and sets the damaged flag (+0x5170 0x20: the
+        // flash and damage sound) whether or not the enemy is invincible (flag 0x10) or
+        // invulnerable (+0x512c); only the HP loss is skipped.
         self.damage_taken += amount;
+        if amount > 0 { self.damaged = true; self.last_hit = Some(from); }
         if self.flags & flag::INVINCIBLE != 0 || self.invuln_time>0 {
             return;
         }
@@ -328,8 +333,6 @@ impl EnemyData {
             }
             None => self.hp -= amount,
         }
-        self.damaged = amount > 0;
-        self.last_hit = Some(from);
         if self.hp < 1 && self.flags & flag::NO_DEATH == 0 {
             self.killed = true;
         }
@@ -945,17 +948,43 @@ impl EnemyHost<'_> {
                 let (t, mode, speed) = (i!(0), i!(1), f!(2));
                 start_speed(self.motion(matches!(op, 444 | 445)), t, mode, speed);
             }
-            // Random movement within the boss region. APPROX: choose a bounded target;
-            // original 412 uses position-biased random direction before interpolation.
-            412 => {
-                let (time,mode,speed)=(i!(0),i!(1),f!(2));
-                let [x,y,w,h]=self.e.movement_limits.unwrap_or([0.0,128.0,280.0,96.0]);
-                let angle=self.st.randf()*std::f32::consts::TAU;
-                let goal=[(self.e.pos[0]+angle.cos()*speed*time as f32).clamp(x-w/2.0,x+w/2.0),
-                    (self.e.pos[1]+angle.sin()*speed*time as f32).clamp(y-h/2.0,y+h/2.0)];
-                self.e.abs.i_pos.start(self.e.abs.pv.pos,goal,time,mode);
+            // Random move (FUN_004fecc0 case 0x1c, 00501013): 412 on the absolute motion, 413 on
+            // the relative one. The direction comes from the ECL 504 box (centre x, y, size w,
+            // h): left of x - w/4 a random angle / 3 (rightwards), right of x + w/4 that plus pi;
+            // in between a random angle / 4, flipped by pi unless it points at the player (kept
+            // 2 times in 3, by FUN_00401960 % 3). Above y - h/4 it is turned downwards (|a|),
+            // below y + h/4 upwards (-|a|); within 0.05 of straight up or down it is pushed
+            // 0.05 away. The enemy then moves `distance` along it over `time` frames.
+            412 | 413 => {
+                use std::f32::consts::{FRAC_PI_2, PI};
+                let (time,mode,distance)=(i!(0),i!(1),f!(2));
+                let [x,y,w,h]=self.e.movement_box;
+                let pos=self.e.pos;
+                let mut angle = if x - w / 4.0 > pos[0] {
+                    self.st.rand_signed_pi() / 3.0
+                } else if pos[0] > w / 4.0 + x {
+                    crate::motion::wrap_angle(self.st.rand_signed_pi() / 3.0 + PI)
+                } else {
+                    let a = self.st.rand_signed_pi() / 4.0;
+                    let keep = self.st.rand16() % 3 != 0;
+                    let towards = self.st.player_pos[0] > pos[0];
+                    if keep == towards { a } else { a + PI }
+                };
+                if y - h / 4.0 > pos[1] {
+                    angle = angle.abs();
+                } else if pos[1] > h / 4.0 + y {
+                    angle = -angle.abs();
+                }
+                if (angle + FRAC_PI_2).abs() < 0.05 {
+                    angle = if -FRAC_PI_2 > angle { -FRAC_PI_2 - 0.05 } else { 0.05 - FRAC_PI_2 };
+                } else if (((angle - FRAC_PI_2).abs()) as f64) < 0.05 {
+                    angle = if FRAC_PI_2 > angle { FRAC_PI_2 - 0.05 } else { FRAC_PI_2 + 0.05 };
+                }
+                let m=self.motion(op==412);
+                let goal=[m.pv.pos[0]+angle.cos()*distance, m.pv.pos[1]+angle.sin()*distance];
+                m.i_pos.start(m.pv.pos,goal,time,mode);
             }
-            504 => self.e.movement_limits=Some([f!(0),f!(1),f!(2),f!(3)]),
+            504 => { let b=[f!(0),f!(1),f!(2),f!(3)]; self.e.movement_box=b; self.e.movement_limits=Some(b); }
             505 => self.e.movement_limits=None,
             // setLife: HP, max HP and the x7 spell counter (FUN_0040f870/0040f860/0040f840).
             511 => {
@@ -1127,7 +1156,17 @@ impl EnemyHost<'_> {
             }
             // ECL 516 (case 0x3d, 00502df4): sound arg0 panned by the enemy's x (FUN_004bb8a0).
             516 => if crate::sfx::on(crate::sfx::Cat::Script) { let id=i!(0); if id>=0 { self.st.play_sound(id as u32, self.e.pos[0]); } },
-            1023 => self.st.wave_param = i!(0),
+            1023 => { let r = i!(0); self.st.items.set_rate(r); }
+            1024 => { let r = i!(0); self.st.items.blend_rate(r); }
+            // Score bookkeeping with no VS display (FUN_004fecc0): 524 (case 0x45) sets the
+            // current spell number (DAT_0062ba8c via FUN_0040f4d0, enemy +0x5630), compared with
+            // enemy +0x6860 when a phase ends to add the capture bonus to the score; 527 (0x48)
+            // writes (threshold / max HP, value) into GameState +0x32c per spell; 534 (0x4b)
+            // writes GameState +0x2e8. No reader of the last two was found.
+            524 | 527 | 534 => {}
+            // FUN_004fecc0 case 0x3e: screen effect 1 for (duration, start, end) on camera slot 2,
+            // which only the stage reads (see shake.rs).
+            517 => { let (d, a, b) = (i!(0), i!(1), i!(2)); self.st.shakes.push(crate::shake::Shake::new(d, a, b, 2)); }
             // FUN_004fecc0 case b4: set internal type, clear disabled bit 0x80000.
             1027 => { self.e.spirit_kind = (i!(0) & 7) as u8; self.e.spirit_disabled = false; },
             1028 => self.e.rewards.a = f!(0),

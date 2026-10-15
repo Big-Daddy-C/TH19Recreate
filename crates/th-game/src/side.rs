@@ -74,7 +74,6 @@ pub struct SideState {
     pub wave_pool: Vec<i32>,
     pub wave_sequence: [u8; 256],
     pub wave_counter: usize,
-    pub wave_param: i32,
     /// ECL anm slot -> loaded file.
     pub anm_files: [Option<usize>; 8],
     /// The sprite slots of each side's character program (slot 3 is its `plXXb.anm`); enemies
@@ -87,7 +86,7 @@ pub struct SideState {
     pub alive: Vec<(i32, bool)>,
     pub next_enemy_id: i32,
     pub last_enemy_id: i32,
-    rng: u32,
+    rng: crate::rng::Rng,
     pub unknown_ops: HashMap<u16, u32>,
     pub unknown_vars: HashMap<i32, u32>,
     /// Kill chain (`FUN_00549780`): a timer topped up by each kill (capped at 60 frames),
@@ -145,6 +144,8 @@ pub struct SideState {
     /// The aura's [7] state for Aunn, Nazrin, Seiran and Orin (whose shapes the fields above
     /// do not describe); `None` while it is not running.
     pub scope_probe: Option<crate::scope::Probe>,
+    /// Screen shakes started this frame (ECL 517, bombs ending); the game runs them.
+    pub shakes: Vec<crate::shake::Shake>,
     pub spirit_credit: i32,
     pub spirit_origin: [f32;2],
     pub spirit_pressure: i32,
@@ -317,14 +318,9 @@ impl SideState {
         crate::laser::cancel_lasers(&mut self.lasers, area, respect_invuln, &mut ctx);
     }
 
+    /// `FUN_00402540` on the replay RNG (see `rng.rs` for what remains approximate).
     pub fn rand(&mut self) -> u32 {
-        // APPROX: the game uses its own replay RNG; any uniform generator plays the same.
-        let mut x = self.rng;
-        x ^= x << 13;
-        x ^= x >> 17;
-        x ^= x << 5;
-        self.rng = x;
-        x
+        self.rng.next()
     }
     /// `FUN_004bb8d0(id, x * 1000 / 192)`: queue a sound effect panned by the field x of its
     /// source (`id` indexes the exe's sound table).
@@ -332,12 +328,25 @@ impl SideState {
         self.sounds.push((id, (x * 1000.0 / 192.0) as i32));
     }
 
-    pub fn randf(&mut self) -> f32 {
-        (self.rand() >> 8) as f32 / (1u32 << 24) as f32
+    /// `FUN_00401960`: the low 16 bits of the next state.
+    pub fn rand16(&mut self) -> u16 {
+        self.rng.next_u16()
     }
-    /// Uniform in [-1, 1).
+    /// `FUN_004042b0`: [-pi, pi] as `signed * pi`.
+    pub fn rand_signed_pi(&mut self) -> f32 {
+        self.rng.signed_pi()
+    }
+    /// `r / (d - 1)`: [0, 1].
+    pub fn randf(&mut self) -> f32 {
+        self.rng.unit()
+    }
+    /// `FUN_00404b70`: [-1, 1].
     pub fn randf2(&mut self) -> f32 {
-        self.randf() * 2.0 - 1.0
+        self.rng.signed()
+    }
+    /// The angle helper: [-pi, pi].
+    pub fn rand_angle(&mut self) -> f32 {
+        self.rng.angle()
     }
 
     /// Queue an enemy for creation. Its id is allocated now, as the game creates enemies
@@ -364,13 +373,6 @@ impl SideState {
         let Some(anm) = self.anm_files[0] else { return };
         let types = self.bullet_types.clone();
         let mut out = Vec::new();
-        let mut rng = self.rng;
-        let mut rand = move || {
-            rng ^= rng << 13;
-            rng ^= rng >> 17;
-            rng ^= rng << 5;
-            (rng >> 8) as f32 / (1u32 << 24) as f32
-        };
         let mut ctx = bullet::Ctx {
             world,
             lib,
@@ -378,10 +380,9 @@ impl SideState {
             anm,
             field: self.field,
             player: self.player_pos,
-            rand: &mut rand,
+            rng: &mut self.rng,
         };
         bullet::fire(et, origin, &mut ctx, &mut out);
-        self.rand();
         self.bullets.extend(out);
         // FUN_004f1340 ends by queueing the ET's bullet sound (flag +0x474 & 0x20, set by ins_600),
         // panned by the origin x.
@@ -522,7 +523,6 @@ impl Side {
                 wave_pool: Vec::new(),
                 wave_sequence,
                 wave_counter: 0,
-                wave_param: 0,
                 anm_files,
                 anm_sets: [anm_files; 4],
                 index: 0,
@@ -530,7 +530,7 @@ impl Side {
                 alive: Vec::new(),
                 next_enemy_id: 1,
                 last_enemy_id: 0,
-                rng: seed | 1,
+                rng: crate::rng::Rng::new(seed),
                 unknown_ops: HashMap::new(),
                 unknown_vars: HashMap::new(),
                 chain_timer: 0,
@@ -556,7 +556,7 @@ impl Side {
                 sounds: Vec::new(),
                 explosions: Vec::new(),
                 scope_circle: None,
-                scope_column: false, scope_character: Default::default(), scope_probe: None,
+                scope_column: false, scope_character: Default::default(), scope_probe: None, shakes: Vec::new(),
                 spirit_credit: 0, spirit_origin: [0.0;2], spirit_pressure: 0, spirit_frames: 0,
                 outgoing_spirits: Vec::new(), pending_spirits: Vec::new(), outgoing_reflects: Vec::new(), pending_reflects: Vec::new(), arrived_reflects: Vec::new(), rain: 0, dot_counter: 0, special_counter: 0, special_sequence: 0, last_credit_pos: [0.0; 2], last_special_pos: [0.0; 2],
                 sent_spirits_pending: 0,
@@ -640,15 +640,10 @@ impl Side {
         }
         let Some(anm) = st.anm_files[0] else { return };
         let types = st.bullet_types.clone();
-        let mut rng = st.rand();
-        let mut rand = move || {
-            rng ^= rng << 13;
-            rng ^= rng >> 17;
-            rng ^= rng << 5;
-            (rng >> 8) as f32 / (1u32 << 24) as f32
-        };
+        // The bullet pass draws from the side's RNG through `ctx`; it is written back at the end.
+        let mut rng = st.rng;
         let mut ctx =
-            bullet::Ctx { world, lib, types: &types, anm, field: st.field, player: st.player_pos, rand: &mut rand };
+            bullet::Ctx { world, lib, types: &types, anm, field: st.field, player: st.player_pos, rng: &mut rng };
         let mut hit: Option<(usize, [f32; 2])> = None;
         let mut grazes: Vec<([f32; 2], u32)> = Vec::new();
         let ps: Vec<&Player> = self.player.iter().chain(self.partner.iter()).collect();
@@ -668,7 +663,7 @@ impl Side {
                     let d2 = d2_of(b, p);
                     !(r > 0.0 && d2 < r * r + b.hitbox * b.hitbox) && d2 < reach2(b)
                 });
-            b.scope_contact(slowed, slowed || ring, ctx.world, &mut *ctx.rand);
+            b.scope_contact(slowed, slowed || ring, ctx.world, ctx.rng);
             for p in &ps {
                 if let Some(r) = p.cancel_radius {
                     if d2_of(b, p) <= r * r && b.invuln == 0 {
@@ -709,19 +704,13 @@ impl Side {
         }
         for (at, rgb) in grazes {
             st.graze += 1;
-            let delay = (st.rand() & 7) as i32;
+            let delay = (ctx.rng.next() & 7) as i32;
             if crate::sfx::on(crate::sfx::Cat::Graze) { st.play_sound(0x2a, at[0]); }
             st.sparks.push(crate::graze::Spark::new(at, rgb, delay));
-            let mut seed = st.rand() | 1;
-            st.items.drop_orbs(at, || {
-                seed ^= seed << 13;
-                seed ^= seed >> 17;
-                seed ^= seed << 5;
-                (seed >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0
-            });
+            st.items.drop_orbs(at, || ctx.rng.signed());
         }
         let mut sparks = std::mem::take(&mut st.sparks);
-        sparks.retain_mut(|sp| sp.tick(&mut || st.randf()));
+        sparks.retain_mut(|sp| sp.tick(&mut || ctx.rng.unit()));
         st.sparks = sparks;
         let field = st.field;
         st.bullets.retain(|b| {
@@ -767,6 +756,7 @@ impl Side {
                 p.hit(from, ctx.world, lib, st.field);
             }
         }
+        st.rng = rng;
     }
 
     /// The enemy death routine (`FUN_0050c1f0`): death effect, chain, removal.
@@ -850,13 +840,7 @@ impl Side {
         if st.chain > 5 {
             let orbs = if e.survives_death { 1 } else { (st.chain / 12 + 1).min(3) };
             for _ in 0..orbs {
-                let mut seed = st.rand() | 1;
-                st.items.drop_orbs(e.pos, || {
-                    seed ^= seed << 13;
-                    seed ^= seed >> 17;
-                    seed ^= seed << 5;
-                    (seed >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0
-                });
+                st.items.drop_orbs(e.pos, || st.rng.signed());
             }
         }
         e.delete = true;
@@ -958,6 +942,9 @@ impl Side {
                 let id = if id & crate::sfx::PER_SIDE != 0 { (id & !crate::sfx::PER_SIDE) + side } else { id };
                 self.st.sounds.push((id, pan.unwrap_or(side_pan)));
             }
+            if std::mem::take(&mut p.bomb_shake) {
+                self.st.shakes.push(crate::shake::Shake::bomb(side as usize));
+            }
             // Losing a heart raises this player's EX and boss levels by one while below 3
             // (FUN_00549830, status +0x38/+0x3c).
             if std::mem::take(&mut p.just_died) {
@@ -1027,13 +1014,7 @@ impl Side {
                 let delay = (self.st.rand() & 7) as i32;
                 if crate::sfx::on(crate::sfx::Cat::Graze) { self.st.play_sound(0x2a, at[0]); }
                 self.st.sparks.push(crate::graze::Spark::new(at, 0, delay));
-                let mut seed = self.st.rand() | 1;
-                self.st.items.drop_orbs(at, || {
-                    seed ^= seed << 13;
-                    seed ^= seed >> 17;
-                    seed ^= seed << 5;
-                    (seed >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0
-                });
+                self.st.items.drop_orbs(at, || self.st.rng.signed());
             }
         }
         let mut items = std::mem::take(&mut self.st.items);
@@ -1113,13 +1094,7 @@ impl Side {
             let spark = spark_at.unwrap_or(at);
             if crate::sfx::on(crate::sfx::Cat::Graze) { self.st.play_sound(0x2a, spark[0]); }
             self.st.sparks.push(crate::graze::Spark::new(spark, crate::graze::DEFAULT_RGB, delay));
-            let mut seed = self.st.rand() | 1;
-            self.st.items.drop_orbs(at, || {
-                seed ^= seed << 13;
-                seed ^= seed >> 17;
-                seed ^= seed << 5;
-                (seed >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0
-            });
+            self.st.items.drop_orbs(at, || self.st.rng.signed());
         }
         if let Some(slot) = hit {
             if let Some(p) = if slot == 0 { self.player.as_mut() } else { self.partner.as_mut() } {

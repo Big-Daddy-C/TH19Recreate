@@ -291,10 +291,9 @@ impl Laser {
                     let (dx, dy) = (at[0]-pos[0], at[1]-pos[1]);
                     rect_rect([dx*ca+dy*sa, -dx*sa+dy*ca], [16.0*c, 16.0*s], self.angle-angle, [0.0, 0.0], size)
                 }
-                // APPROX: the laser's ellipse callback (vtable +0x3c, FUN_00529820) samples the
-                // 16-pixel step box against the ellipse (FUN_004d3c50); this tests the step as
-                // a circle of radius 8 (FUN_004d4020).
-                CancelArea::Ellipse { pos, a, b, angle } => crate::scope::ellipse_circle(at, 8.0, pos, a, b, angle),
+                // The ellipse callback (vtable +0x3c, FUN_00529820 / FUN_0052c2c0) tests the
+                // 16-pixel step box against the ellipse (FUN_004d3c50).
+                CancelArea::Ellipse { pos, a, b, angle } => crate::scope::ellipse_rect(at, [16.0*c, 16.0*s], self.angle, pos, a, b, angle),
             };
             mask.push(hit);
             if hit {
@@ -717,6 +716,7 @@ impl Laser {
             CancelArea::Rect {pos,size}=>crate::scope::rect_circle(pos,size,n.pos,0.0),
             CancelArea::Column {x,half_width}=>(n.pos[0]-x).abs()<=half_width,
             CancelArea::ORect {pos,size,angle}=>crate::scope::rect_circle_exact(pos,size,angle,n.pos,0.0),
+            // FUN_00524160 -> FUN_004d4420: each node as a point in the ellipse.
             CancelArea::Ellipse {pos,a,b,angle}=>crate::scope::ellipse_circle(n.pos,0.0,pos,a,b,angle),
         }).collect();
         if !mask.iter().any(|&x|x) {return (true,Vec::new());}

@@ -98,10 +98,10 @@ impl Pending {
         use crate::character::Character::*;
         let special = req.special_rank.is_some();
         let delay = match character {
-            Sanae if special => (receiver.rand()&0xffff) as i32%80+80,
-            Ran if special => (receiver.rand()&0xffff) as i32%40+50,
-            Orin if special => (receiver.rand()&0xffff) as i32%60+70,
-            _ => (receiver.rand()&0xffff) as i32%100+60,
+            Sanae if special => receiver.rand16() as i32%80+80,
+            Ran if special => receiver.rand16() as i32%40+50,
+            Orin if special => receiver.rand16() as i32%60+70,
+            _ => receiver.rand16() as i32%100+60,
         };
         let jitter = [receiver.randf2() * 16.0, receiver.randf() * 32.0];
         let target = req.target.unwrap_or([req.origin[0] + jitter[0], jitter[1]]);
@@ -164,13 +164,13 @@ impl Pending {
         if self.special_rank.is_some() {
             return Some(Arrival { kind: self.kind, color: self.color, speed: 0.0, angle: 0.0, pos: self.target, special: self.special_rank, owner: self.owner, character:self.character });
         }
-        // APPROX: FUN_00404c90's result is hidden in the decompile; the side fans are read as
-        // a random angle in the quarter turn that points inward.
+        // FUN_0051bd50: at |x| >= 64 the bullet aims down and up to 30 degrees inward
+        // (pi/2 -/+ FUN_00404c90(pi/6), i.e. unit * pi/6); nearer the middle down +- 30 degrees.
         let angle = if self.target[0].abs() >= 64.0 {
-            let r = receiver.randf() * FRAC_PI_2;
-            if self.target[0] < 0.0 { r } else { FRAC_PI_2 + r }
+            let r = receiver.randf() * FRAC_PI_6;
+            if self.target[0] < 0.0 { FRAC_PI_2 - r } else { FRAC_PI_2 + r }
         } else {
-            FRAC_PI_2 + (receiver.randf() * 2.0 - 1.0) * FRAC_PI_6
+            FRAC_PI_2 + receiver.randf2() * FRAC_PI_6
         };
         let speed = receiver.randf() * 0.2 + self.speed + receiver.spirit_pressure as f32 / 200.0 * 2.0;
         Some(Arrival { kind: self.kind, color: self.color, speed, angle, pos: self.target, special: None, owner: self.owner, character:self.character })

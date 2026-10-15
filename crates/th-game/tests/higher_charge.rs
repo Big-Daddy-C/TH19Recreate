@@ -815,8 +815,8 @@ fn put_bullet(g: &mut Game, side: usize, kind: i32, color: i32, pos: [f32; 2], i
     let types = s.st.bullet_types.clone();
     let anm = s.st.anm_files[0].expect("bullet.anm");
     let field = s.st.field;
-    let mut rand = || 0.5;
-    let mut ctx = Ctx { world: &mut g.world, lib: &g.lib, types: &types, anm, field, player: [0.0, 400.0], rand: &mut rand };
+    let mut rng = th_game::rng::Rng::new(1);
+    let mut ctx = Ctx { world: &mut g.world, lib: &g.lib, types: &types, anm, field, player: [0.0, 400.0], rng: &mut rng };
     let et = Et { sprite: kind, color, absolute: true, angle: [std::f32::consts::FRAC_PI_2, 0.0], speed: [0.0, 0.0],
         count: [1, 1], aim: 1, ..Et::default() };
     let mut out = Vec::new();
@@ -1625,7 +1625,7 @@ fn sanae_and_ran_send_original_special_extra_and_boss_programs() {
                     if let Some(e)=g.sides[1].enemies.iter().find(|e|e.data.sub=="Boss00Boss") {hp=hp.max(e.data.hp);}
                 }
                 assert!(maximum>0,"{} {:?} rank{} produces its attack",character.name(),level,rank);
-                assert!(g.sides[1].st.unknown_ops.keys().all(|op|matches!(*op,516|524|527|534)),
+                assert!(g.sides[1].st.unknown_ops.is_empty(),
                     "{} {:?} unknown gameplay opcodes {:?}",character.name(),level,g.sides[1].st.unknown_ops);
                 if level==Level::Boss {assert_eq!(hp,match rank {0|1=>5000,2|3=>1500,_=>6500});}
             }
@@ -1734,7 +1734,7 @@ fn later_characters_send_original_special_extra_and_boss_programs() {
                     maximum=maximum.max(g.sides[1].st.bullets.len()+g.sides[1].st.lasers.len()+bodies);
                 }
                 assert!(maximum>0,"{} {:?} rank{} produces its attack",character.name(),level,rank);
-                assert!(g.sides[1].st.unknown_ops.keys().all(|op|matches!(*op,516|524|527|534)),
+                assert!(g.sides[1].st.unknown_ops.is_empty(),
                     "{} {:?} rank{} unknown gameplay opcodes {:?}",character.name(),level,rank,g.sides[1].st.unknown_ops);
             }
         }
@@ -1749,7 +1749,7 @@ fn later_characters_send_original_special_extra_and_boss_programs() {
             spawned|=g.sides[1].enemies.iter().any(|e|e.data.sub=="ExAttack" && e.data.owner==0);
         }
         assert!(spawned,"{} special arrivals use ExAttack",character.name());
-        assert!(g.sides[1].st.unknown_ops.keys().all(|op|matches!(*op,516|524|527|534)),"{} {:?}",character.name(),g.sides[1].st.unknown_ops);
+        assert!(g.sides[1].st.unknown_ops.is_empty(),"{} {:?}",character.name(),g.sides[1].st.unknown_ops);
     }
 }
 
@@ -1897,4 +1897,19 @@ fn later_character_shot_callbacks() {
     assert!(p.bullets.iter().any(|b|b.pierce));
     assert!(p.bullets.iter().filter(|b|b.pierce).all(|b|!b.impacting),"piercing shots never impact");
     assert!(enemies[0].data.hp<100000);
+}
+
+/// pl07.anm script 13 (Orin's scope) is ANM623: a 2 x 1 rounded rectangle at the VM's scale.
+#[test]
+fn orin_scope_draws_its_rounded_box() {
+    use th_game::character::Character;
+    let Some(mut g)=setup() else{return};use_next_character(&mut g,0,Character::Orin);
+    for _ in 0..10 {g.tick([input::CHARGE,0]);}
+    let p=g.sides[0].player.as_ref().unwrap();
+    let id=p.scope.vm.unwrap();
+    let before=g.world.draw_list(&g.lib,th_anm::Pass::Ui).iter().map(|b|b.vertices.len()).sum::<usize>();
+    g.world.delete(id);
+    let after=g.world.draw_list(&g.lib,th_anm::Pass::Ui).iter().map(|b|b.vertices.len()).sum::<usize>();
+    // 32 fan triangles.
+    assert!(before>=after+96,"scope VM emits its fan: {before} vs {after}");
 }

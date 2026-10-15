@@ -172,7 +172,8 @@ pub struct Ctx<'a> {
     pub anm: usize,
     pub field: [f32; 4],
     pub player: [f32; 2],
-    pub rand: &'a mut dyn FnMut() -> f32,
+    /// The replay RNG (`DAT_005c6620`).
+    pub rng: &'a mut crate::rng::Rng,
 }
 
 impl Ctx<'_> {
@@ -232,17 +233,17 @@ fn make_bullet(et: &Et, origin: [f32; 2], i: i32, j: i32, aim: f32, ctx: &mut Ct
         2 | 3 => j as f32 * a2 + a1 + ring + if et.aim == 2 { aim } else { 0.0 },
         // Rings offset by half a step.
         4 | 5 => j as f32 * a2 + a1 + ring + PI / ways + if et.aim == 4 { aim } else { 0.0 },
-        // Random angle (6), random speed (7), both (8).
-        // APPROX: the range of the game's random helpers isn't visible in the decompile;
-        // angle is a1 + a2 * [-1, 1], speed s1 + s2 * [0, 1].
-        6 => a1 + a2 * ((ctx.rand)() * 2.0 - 1.0),
+        // Random angle (6), random speed (7), both (8): FUN_00404bd0(a2) = a2 * [-1, 1] and
+        // FUN_00404c90(s2) = s2 * [0, 1] on the replay RNG (FUN_004f3910).
+        6 => a1 + a2 * ctx.rng.signed(),
         7 => {
-            speed = s1 + s2 * (ctx.rand)();
+            speed = s1 + s2 * ctx.rng.unit();
             j as f32 * a2 + a1 + ring
         }
         8 => {
-            speed = s1 + s2 * (ctx.rand)();
-            a1 + a2 * ((ctx.rand)() * 2.0 - 1.0)
+            let angle = a1 + a2 * ctx.rng.signed();
+            speed = s1 + s2 * ctx.rng.unit();
+            angle
         }
         // "Meek" fans: speed also steps across pairs of layers.
         9 | 10 => {
@@ -435,14 +436,14 @@ impl Bullet {
                     let ang = self.resolve_angle(e.r, ctx);
                     self.st.step_angle = match e.c {
                         2 => wrap_angle(ctx.angle_to_player(self.pos) + ang),
-                        5 | 6 => ((ctx.rand)() * 2.0 - 1.0) * e.r,
+                        5 | 6 => ctx.rng.signed() * e.r,
                         7 => {
                             let a = if e.r > -999990.0 {
                                 if e.r < 990.0 { e.r } else { ctx.angle_to_player(self.pos) }
                             } else {
                                 self.angle
                             };
-                            self.st.step_speed = ((ctx.rand)() * 2.0 - 1.0) * e.s + self.speed;
+                            self.st.step_speed = ctx.rng.signed() * e.s + self.speed;
                             a
                         }
                         _ => ang,
@@ -487,16 +488,16 @@ impl Bullet {
     /// ff/ff/clamp((104-age)*2,96,255)/80, a random shake of up to one pixel on each axis
     /// (+0x48/+0x4c, zero otherwise), interrupt 3 on exit. Only the scope (`slowed`) halves the
     /// following movement tick.
-    pub fn scope_contact(&mut self, slowed: bool, touched: bool, world: &mut World, rand: &mut dyn FnMut() -> f32) {
+    pub fn scope_contact(&mut self, slowed: bool, touched: bool, world: &mut World, rng: &mut crate::rng::Rng) {
         self.scope_time_scale = if slowed {0.5} else {1.0};
         if touched {
             self.scope_frames = self.scope_frames.saturating_add(1);
             if self.scope_frames == 1 {
                 if let Some(id) = self.vm { world.interrupt(id, 2); }
             }
-            // FUN_00404bd0(1.0) twice: +0x4c first, then +0x48; each uniform in [-1, 1).
-            let shake_y = rand() * 2.0 - 1.0;
-            let shake_x = rand() * 2.0 - 1.0;
+            // FUN_00404bd0(1.0) twice: +0x4c first, then +0x48; each uniform in [-1, 1].
+            let shake_y = rng.signed();
+            let shake_x = rng.signed();
             if let Some(vm) = self.vm.and_then(|id| world.get_mut(id)) {
                 vm.color2 = [255.0, ((104-self.scope_frames)*2).clamp(96,255) as f32, 128.0];
                 vm.alpha2 = 255.0;

@@ -25,7 +25,7 @@ pub struct Pending {
 impl Pending {
     pub fn delete(self, world: &mut World) { if let Some(id)=self.vm { world.delete(id); } }
     pub fn new(req: Request, source_field: [f32;4], receiver: &mut SideState) -> Self {
-        let delay = (receiver.rand() & 0xffff) as i32 % 120 + 60;
+        let delay = receiver.rand16() as i32 % 120 + 60; // FUN_0051b6c0: FUN_00401960() % 0x78 + 0x3c
         let mut target = [receiver.randf2()*148.0, (receiver.randf()-1.0)*64.0];
         match req.kind {
             Kind::Wolf => target[0] = (receiver.player_pos[0]+receiver.randf2()*48.0).clamp(-140.0,140.0),

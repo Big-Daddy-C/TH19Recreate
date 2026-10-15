@@ -199,7 +199,7 @@ impl Ribbon {
     /// One frame of motion, as in th19.exe's effect update callbacks.
     fn update(&mut self, rng: &mut u32) {
         // Uniform in [-1, 1] and [0, 1].
-        let mut signed = || randf01(rng) * 2.0 - 1.0;
+        let mut signed = || randf_signed(rng);
         let shift = |d: &mut Vec<[f32; 3]>| {
             for i in (1..d.len()).rev() {
                 d[i] = d[i - 1];
@@ -300,6 +300,12 @@ pub enum Primitive {
     Ring { radius: f32, thickness: f32, segments: i32 },
     /// ANM618 (draw type 0x20): one D3D point (a single screen pixel) in colour 1.
     Point,
+    /// ANM623 (draw type 0x25, FUN_004c2cc0): a filled rectangle `w` x `h` (times the scales)
+    /// with corners of radius `corner` (unscaled), a fan from colour 1 at the centre to colour 2.
+    /// ANM625/626/627 (0x27/0x28/0x29, FUN_004c2460): its outline, a band `thickness` wide
+    /// centred on the corner radius `corner`, `corner + thickness / 2` or `corner - thickness / 2`
+    /// (`band` 0, 1, -1), colour 1 inside and 2 outside.
+    RoundRect { w: f32, h: f32, corner: f32, thickness: f32, segments: i32, outline: Option<i8> },
 }
 
 #[derive(Clone, Debug)]
@@ -855,7 +861,6 @@ impl World {
         }
         let mut rng = self.rng;
         // rand / (RAND_MAX - 1) and rand / (RAND_MAX / 2 - 1) - 1 in the original.
-        let mut r01 = || randf01(&mut rng);
         let norm = |v: [f32; 3]| {
             let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
             if l.abs() >= 0.01 { v.map(|x| x / l) } else { v }
@@ -868,15 +873,15 @@ impl World {
                 continue;
             };
             if p.state == 0 {
-                let (r, a) = (r01() * 150.0, (r01() * 2.0 - 1.0) * std::f32::consts::PI);
+                let (r, a) = (randf01(&mut rng) * 150.0, randf_signed(&mut rng) * std::f32::consts::PI);
                 let start = polar(far, r, a);
-                let (r, a) = (r01() * 50.0, (r01() * 2.0 - 1.0) * std::f32::consts::PI);
+                let (r, a) = (randf01(&mut rng) * 50.0, randf_signed(&mut rng) * std::f32::consts::PI);
                 let mid = polar(near, r, a);
                 let along = norm([mid[0] - start[0], mid[1] - start[1], mid[2] - start[2]]);
                 let inward = norm([centre[0] - mid[0], centre[1] - mid[1], centre[2] - mid[2]]);
-                let k = r01() * 200.0 + 200.0;
+                let k = randf01(&mut rng) * 200.0 + 200.0;
                 let mid_tangent = norm([along[0] + inward[0], along[1] + inward[1], along[2] + inward[2]]).map(|x| x * k);
-                let k = r01() * 100.0 + 100.0;
+                let k = randf01(&mut rng) * 100.0 + 100.0;
                 let start_tangent = along.map(|x| x * k);
                 c.pos = start;
                 c.i_pos.start_bezier(start, start_tangent, mid, mid_tangent, duration);
@@ -884,9 +889,9 @@ impl World {
                 p.mid_tangent = mid_tangent;
                 p.state = 1;
             } else if p.state == 1 && p.age >= duration + 1 {
-                let (r, a) = (r01() * 20.0, (r01() * 2.0 - 1.0) * std::f32::consts::PI);
+                let (r, a) = (randf01(&mut rng) * 20.0, randf_signed(&mut rng) * std::f32::consts::PI);
                 let end = polar(centre, r, a);
-                let (r, a) = (r01() * 20.0, (r01() * 2.0 - 1.0) * std::f32::consts::PI);
+                let (r, a) = (randf01(&mut rng) * 20.0, randf_signed(&mut rng) * std::f32::consts::PI);
                 let end_tangent = [a.cos() * r, a.sin() * r, 0.0];
                 c.i_pos.start_bezier(p.mid, p.mid_tangent, end, end_tangent, duration);
                 p.state = 2;
@@ -1148,18 +1153,24 @@ fn layer_priority(layer: i32) -> i32 {
     }
 }
 
+/// The ANM interpreter's generator (`FUN_00402540` on `DAT_005c6638`, the game's second RNG):
+/// `state = state * 48271 mod (2^31 - 1)`, returning `state % 0xffff00`.
+/// APPROX (sequencing): the game shares this generator between all ANM managers and draws in
+/// its own order; the values follow its distribution but not its sequence.
 fn next_rand(rng: &mut u32) -> u32 {
-    // APPROX: xorshift32; the real game uses its own replay-deterministic generator.
-    let mut x = *rng;
-    x ^= x << 13;
-    x ^= x >> 17;
-    x ^= x << 5;
-    *rng = x;
-    x
+    if *rng == 0 { *rng = 1; }
+    *rng = (*rng as u64 * 48271 % 0x7fff_ffff) as u32;
+    *rng % 0x00ff_ff00
 }
 
+/// `r / (d - 1)` (`FUN_00404c90` without its factor): [0, 1].
 fn randf01(rng: &mut u32) -> f32 {
-    (next_rand(rng) >> 8) as f32 / (1u32 << 24) as f32
+    next_rand(rng) as f32 / (0x00ff_ff00 as f32 - 1.0)
+}
+
+/// `FUN_00404b70`: `r / (d / 2 - 1) - 1`, [-1, 1].
+fn randf_signed(rng: &mut u32) -> f32 {
+    next_rand(rng) as f32 / (0x00ff_ff00 as f32 / 2.0 - 1.0) - 1.0
 }
 
 /// The window's scale over the 640x480 game space (`DAT_0062eeb0`), fixed at the 1280x960 setting.
@@ -1267,9 +1278,9 @@ fn read_var(vm: &Vm, id: i32, rng: &mut u32) -> f32 {
         10033..=10035 => vm.fvars[(id - 10029) as usize],
         10027 | 10028 => vm.fvars[(id - 10020) as usize],
         // Random values scaled by variables 10028 (default pi) and 10027 (default 1).
-        10010 | 10030 => (randf01(rng) * 2.0 - 1.0) * vm.fvars[8],
+        10010 | 10030 => randf_signed(rng) * vm.fvars[8],
         10011 | 10031 => randf01(rng) * vm.fvars[7],
-        10012 | 10032 => (randf01(rng) * 2.0 - 1.0) * vm.fvars[7],
+        10012 | 10032 => randf_signed(rng) * vm.fvars[7],
         10013..=10015 => vm.pos[(id - 10013) as usize],
         10022 => next_rand(rng) as i32 as f32,
         10023..=10025 => vm.rot[(id - 10023) as usize],
@@ -1667,6 +1678,9 @@ fn exec(
         611 | 615 | 616 => vm.primitive = Some(Primitive::Ring { radius: f!(0), thickness: f!(1), segments: i!(2) }),
         612 => vm.primitive = Some(Primitive::RectBorder { w: f!(0), h: f!(1) }),
         618 => vm.primitive = Some(Primitive::Point),
+        623 => vm.primitive = Some(Primitive::RoundRect { w: f!(0), h: f!(1), corner: f!(2), thickness: 0.0, segments: i!(3), outline: None }),
+        o @ 625..=627 => vm.primitive = Some(Primitive::RoundRect { w: f!(0), h: f!(1), corner: f!(2), thickness: f!(3), segments: i!(4),
+            outline: Some(match o { 625 => 0, 626 => 1, _ => -1 }) }),
 
         op => *unknown.entry(op).or_default() += 1,
     }
@@ -1927,6 +1941,34 @@ fn emit(world: &World, lib: &AnmLibrary, vm: &Vm, camera: Option<&Camera>, out: 
                         pl.quad(out, [a0, b0, b1, a1], [z; 4], [c1; 4]);
                     } else {
                         pl.tri(out, [(0.0, 0.0, z, c1), (b0.0, b0.1, z, c2), (b1.0, b1.1, z, c2)]);
+                    }
+                }
+            }
+            Primitive::RoundRect { w, h, corner, thickness, segments, outline } => {
+                let n = segments.clamp(4, 256);
+                // Corner centres sit (w - 2c) / 2 and (h - 2c) / 2 from the middle; perimeter
+                // point i (angle -pi + i * 2pi / n) belongs to the corner of its quarter, the
+                // first quarter (and the closing point) top-left, then top-right, bottom-right,
+                // bottom-left.
+                let (hw, hh) = ((w * sx - corner * 2.0) / 2.0, (h * sy - corner * 2.0) / 2.0);
+                let pt = |i: i32, r: f32| {
+                    let t = -std::f32::consts::PI + i as f32 * std::f32::consts::TAU / n as f32;
+                    let (dx, dy) = if i < n / 4 || i == n { (-hw, -hh) } else if i < n * 2 / 4 { (hw, -hh) }
+                        else if i < n * 3 / 4 { (hw, hh) } else { (-hw, hh) };
+                    (t.cos() * r + dx, t.sin() * r + dy)
+                };
+                match outline {
+                    None => for i in 0..n {
+                        let (a, b) = (pt(i, corner), pt(i + 1, corner));
+                        pl.tri(out, [(0.0, 0.0, z, c1), (a.0, a.1, z, c2), (b.0, b.1, z, c2)]);
+                    },
+                    Some(band) => {
+                        let mid = corner + band as f32 * thickness / 2.0;
+                        let (ri, ro) = (mid - thickness / 2.0, mid + thickness / 2.0);
+                        for i in 0..n {
+                            let (a0, a1, b0, b1) = (pt(i, ri), pt(i + 1, ri), pt(i, ro), pt(i + 1, ro));
+                            pl.quad(out, [a0, b0, b1, a1], [z; 4], [c1, c2, c2, c1]);
+                        }
                     }
                 }
             }

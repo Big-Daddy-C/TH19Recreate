@@ -278,6 +278,10 @@ impl Bomb {
     /// Frames elapsed and the frame count the circle lasts.
     pub fn progress(&self) -> (i32, i32) { (self.time, self.duration) }
 
+    /// The frame the duration ran out (the update functions' `time == duration` block: VMs
+    /// interrupted, screen shake, sound 0x31 stopped and 0x2c played).
+    pub fn ended_now(&self) -> bool { self.time == self.duration }
+
     /// Whether the circle is still growing (the player is protected meanwhile).
     pub fn protecting(&self) -> bool { self.time < self.duration }
 }

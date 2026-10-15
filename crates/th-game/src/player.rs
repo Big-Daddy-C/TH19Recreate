@@ -176,7 +176,8 @@ pub struct Player {
     pub cancel_columns: Vec<(f32, f32)>,
     damage_circles: Vec<crate::skill::DamageCircle>,
     snake_explosions: Vec<SnakeExplosion>,
-    skill_rng: u32,
+    /// APPROX (sequencing): the player's draws use their own copy of the replay RNG (`rng.rs`).
+    skill_rng: crate::rng::Rng,
     charge_timer: Option<i32>,
     /// Marisa: a skill release also fires the two side charge beams (SHT slot 11).
     wide_charge: bool,
@@ -186,6 +187,8 @@ pub struct Player {
     /// Orin's skill arms her next charge shot with SHT slot 11 (EX class +0xf0, `FUN_0041d020`).
     orin_armed: bool,
     nazrin_skill: Option<MarkCircle>,
+    /// Set the frame a bomb's duration ran out; the side turns it into a screen shake.
+    pub bomb_shake: bool,
     /// Positions of the enemies a shot's init callback may aim at (refreshed every update;
     /// `FUN_00508530` skips flags 0x21).
     targets: Vec<[f32; 2]>,
@@ -256,7 +259,8 @@ impl Player {
         // Normal power is 200 (two options); the game raises it to 400 only for a timed
         // boost and drops back to 200 afterwards (FUN_00419ae0).
         let power = 200.min(sht.power_levels * 100).clamp(0, 400);
-        // APPROX: use 100% charge speed until match settings / card modifiers are loaded.
+        // Charge speed is status +0x88: 100 for both sides at game init (FUN_005177a0 sets
+        // +0x84..+0x98 to 100); only ability cards change it (FUN_004085a0: 125), and VS has none.
         let charge_settings = crate::charge::Settings::from_sht(&sht, 100);
         Self {
             character: crate::character::Character::Reimu,
@@ -273,10 +277,10 @@ impl Player {
             charge: crate::charge::Gauge::default(),
             meter: charge_settings.attack,
             free_charge: false, opponent_boss_active: false, charge_event: None, sounds: Vec::new(), last_charge: None,
-            skills: Vec::new(), bomb: None, bomb_prev: false, cancel_circles: Vec::new(), cancel_columns: Vec::new(), damage_circles: Vec::new(), snake_explosions: Vec::new(), skill_rng: 0x1cafe777,
+            skills: Vec::new(), bomb: None, bomb_prev: false, cancel_circles: Vec::new(), cancel_columns: Vec::new(), damage_circles: Vec::new(), snake_explosions: Vec::new(), skill_rng: crate::rng::Rng::new(0x1cafe777),
             charge_timer: None,
             wide_charge: false, charge_origin: [0.0;2], skill_volley: false, boost_frames: 0, cancel_rects: Vec::new(),
-            orin_armed: false, nazrin_skill: None, targets: Vec::new(), cancel_ellipses: Vec::new(), cancel_orects: Vec::new(),
+            orin_armed: false, nazrin_skill: None, bomb_shake: false, targets: Vec::new(), cancel_ellipses: Vec::new(), cancel_orects: Vec::new(),
             aura_anm: None,
             charge_vm: None,
             focus_vm: None,
@@ -560,9 +564,13 @@ impl Player {
             if !self.free_charge {
                 self.meter = if alive { b.meter() } else { self.charge_settings.attack.clamp(0, crate::bomb::MAX_METER) };
             }
-            if !alive {
-                // The update functions end by stopping 0x31 and playing 0x2c (centre pan).
+            if b.ended_now() {
+                // When the duration runs out the update functions shake the field
+                // (FUN_004b9f00(1, 15, 6, 6, side)), stop 0x31 and play 0x2c (centre pan).
+                self.bomb_shake = true;
                 if crate::sfx::on(crate::sfx::Cat::Bomb) { self.sounds.push((0x31, Some(crate::sfx::STOP))); self.sounds.push((0x2c, Some(0))); }
+            }
+            if !alive {
                 self.bomb = None;
             }
             if protecting {
@@ -724,9 +732,7 @@ impl Player {
                 self.wide_charge = true;
             }
             if level == Level::Skill && self.character == Character::Reimu {
-                // APPROX: deterministic local RNG instead of the game's replay RNG.
-                self.skill_rng ^= self.skill_rng << 13; self.skill_rng ^= self.skill_rng >> 17; self.skill_rng ^= self.skill_rng << 5;
-                let phase = (self.skill_rng as f64/u32::MAX as f64) as f32*std::f32::consts::TAU-std::f32::consts::PI;
+                let phase = self.skill_rng.angle();
                 // FUN_0053b920 (skill init) plays 0x31 at centre pan.
                 if crate::sfx::on(crate::sfx::Cat::Skill) { self.sounds.push((0x31, Some(0))); }
                 self.skills.push(crate::skill::Skill::new(self.pos,phase,self.anm_file,world,lib,field));
@@ -1042,12 +1048,9 @@ impl Player {
         });
     }
 
-    /// `FUN_00404b70` on the replay RNG: uniform in [-1, 1].
-    /// APPROX: a local xorshift stands in for the game's replay RNG.
+    /// `FUN_00404b70` on the replay RNG: [-1, 1].
     fn rand_signed(&mut self) -> f32 {
-        let x = &mut self.skill_rng;
-        *x ^= *x << 13; *x ^= *x >> 17; *x ^= *x << 5;
-        (*x as f64 / u32::MAX as f64 * 2.0 - 1.0) as f32
+        self.skill_rng.signed()
     }
 
     /// Marisa's beams (`FUN_0054d370` / `FUN_0054cd70`): grow, hit, and end with the shot button.
@@ -1182,14 +1185,11 @@ impl Player {
                             // Callback 1 adds effect 142 before the shared impact transition.
                             if b.hit_callback == 1 || b.hit_callback == 5 {
                                 if let Some(file) = self.effect_anm {
-                                    let mut random = || {
-                                        let x = &mut self.skill_rng;
-                                        *x ^= *x << 13; *x ^= *x >> 17; *x ^= *x << 5;
-                                        *x
-                                    };
-                                    // Original replay RNG is not yet shared by this controller.
-                                    let spread = random() as f64 / u32::MAX as f64 * 2.0 - 1.0;
-                                    let angle = crate::motion::wrap_angle(b.angle + spread as f32 * 0.34906584 + std::f32::consts::PI);
+                                    // FUN_0054da60: the signed helper times 20 degrees, then four
+                                    // raw draws for the colour and alpha.
+                                    let spread = self.skill_rng.signed();
+                                    let mut random = || self.skill_rng.next();
+                                    let angle = crate::motion::wrap_angle(b.angle + spread * 0.34906584 + std::f32::consts::PI);
                                     let id = world.spawn_rotated(lib, file, 142, field_to_canvas(field, b.pos), field, angle);
                                     if let Some(vm) = world.get_mut(id) {
                                         vm.color = [(random() & 127) as f32 + 127.0, (random() & 63) as f32 + 64.0, (random() & 63) as f32 + 64.0];

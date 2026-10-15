@@ -358,6 +358,49 @@ pub fn ellipse_circle(pos: [f32; 2], r: f32, centre: [f32; 2], a: f32, b: f32, t
     false
 }
 
+/// `FUN_004d3c50`: a box (`size` = the 16-pixel laser step, `alpha` its angle) at `pos` against
+/// an ellipse (`a` along `theta`, `b` across). The box centre goes into the ellipse's frame and
+/// its extents are taken as `cos(beta) w - sin(beta) h` by `sin(beta) w + cos(beta) h`
+/// (beta = alpha - theta, wrapped; signs kept as the original computes them). A box larger than
+/// both axes checks max(8, (int)(a + b) / 4) ellipse points, starting at `alpha`, for one strictly
+/// inside the box; otherwise a grid of max(3, (int)(max(w, h) / 8)) squared points spread over
+/// the box is tested against the ellipse.
+pub fn ellipse_rect(pos: [f32; 2], size: [f32; 2], alpha: f32, centre: [f32; 2], a: f32, b: f32, theta: f32) -> bool {
+    use std::f32::consts::TAU;
+    let (w, h) = (size[0], size[1]);
+    let (dx, dy) = (pos[0] - centre[0], pos[1] - centre[1]);
+    let (s, c) = (-theta).sin_cos();
+    let x = c * dx - s * dy;
+    let y = s * dx + c * dy;
+    let beta = crate::motion::wrap_angle(alpha - theta);
+    let (s2, c2) = beta.sin_cos();
+    let wr = c2 * w - s2 * h;
+    let hr = s2 * w + c2 * h;
+    if w.max(h) > a.max(b) {
+        let n = ((a + b) as i32 / 4).max(8);
+        let step = TAU / n as f32;
+        let mut t = alpha;
+        for _ in 0..n {
+            let p = [t.cos() * a, t.sin() * b];
+            t += step;
+            if (p[0] - x).abs() < wr / 2.0 && (p[1] - y).abs() < hr / 2.0 { return true; }
+        }
+        return false;
+    }
+    let m = ((w.max(h) / 8.0) as i32).max(3);
+    let mut gy = -hr / 2.0;
+    for _ in 0..m {
+        let mut gx = -wr / 2.0;
+        for _ in 0..m {
+            let q = [x + gx, y + gy];
+            if q[0] * q[0] / (a * a) + q[1] * q[1] / (b * b) <= 1.0 { return true; }
+            gx += wr / (m - 1) as f32;
+        }
+        gy += hr / (m - 1) as f32;
+    }
+    false
+}
+
 pub(crate) fn bullet_hit(character: Character, centre: [f32;2], r: f32, pos: [f32;2], radius: f32) -> bool {
     match character {
         Character::Marisa => (pos[0]-centre[0]).abs()<r,

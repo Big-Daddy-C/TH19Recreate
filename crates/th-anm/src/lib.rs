@@ -17,7 +17,7 @@ pub use camera::Camera;
 /// Texture id meaning "the stage image rendered so far this frame" (for screen effects
 /// such as the STD distortion grid).
 pub const SCENE_TEXTURE: u32 = u32::MAX - 1;
-pub use vm::{BlendMode, DepthMode, Pass, DrawList, DrawBatch, Vertex, VmId, World};
+pub use vm::{BlendMode, DepthMode, Pass, DrawList, DrawBatch, Vertex, VmId, World, RESOLUTION_SCALE};
 
 /// A decoded RGBA8 texture owned by the library. Index into `AnmLibrary::textures` is the texture id.
 pub struct TextureImage {

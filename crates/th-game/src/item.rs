@@ -59,6 +59,13 @@ pub struct Items {
 }
 
 impl Items {
+    /// The orb drop rate (`+0xff8e8`).
+    pub fn rate(&self) -> i32 { self.rate }
+    /// ECL 1023 (`FUN_004fecc0` case 0xb2): 0 for a negative value, else at most 500.
+    pub fn set_rate(&mut self, rate: i32) { self.rate = if rate < 0 { 0 } else { rate.min(500) }; }
+    /// ECL 1024 (case 0xb3): the value itself while the rate is 0, else the average (truncated).
+    pub fn blend_rate(&mut self, rate: i32) { self.rate = if self.rate == 0 { rate } else { (self.rate + rate) / 2 }; }
+
     pub fn new() -> Self {
         Self { rate: DEFAULT_RATE, ..Default::default() }
     }
