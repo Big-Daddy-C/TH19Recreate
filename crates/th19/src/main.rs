@@ -1327,7 +1327,7 @@ fn main() {
         viewer.full_charge = args.iter().any(|a| a == "--full-charge");
         viewer.bot_ai = !args.iter().any(|a| a == "--no-bot");
         // `--p1 N` / `--p2 N`: character select numbers (1 Reimu, 2 Marisa, 3 Sanae, 4 Ran,
-        // 5 Aunn, 6 Nazrin, 7 Seiran, 8 Orin).
+        // 5 Aunn, 6 Nazrin, 7 Seiran, 8 Orin, 9 Tsukasa, 10 Mamizou, 11 Yachie, 12 Saki).
         // `--2v2` plays two per team; `--p3` is your ally, `--p4` the second rival.
         if args.iter().any(|a| a == "--2v2") { viewer.team_size = 2; }
         for (flag, side) in [("--p1", 0), ("--p2", 1), ("--p3", 2), ("--p4", 3)] {
