@@ -1009,14 +1009,17 @@ fn dot_and_special_counters_send_bullets_and_yin_yang_orbs() {
 
 #[test]
 fn dot_types_follow_the_round_time() {
-    use th_game::reflect::{dot_kind, dot_time_bonus, special_limit, special_time_bonus};
+    use th_game::reflect::{dot_kind, dot_time_bonus, special_limit, special_limit_base, special_time_bonus};
     assert!((0..100).all(|r| dot_kind(100, r) == 1));
     assert_eq!((0..5).filter(|&r| dot_kind(4000, r) == 4).count(), 1);
     assert_eq!((0..5).filter(|&r| dot_kind(8000, r) == 4).count(), 2);
     assert_eq!((0..6).filter(|&r| dot_kind(11000, r) == 4).count(), 3);
     assert_eq!([dot_time_bonus(0), dot_time_bonus(4000), dot_time_bonus(8000), dot_time_bonus(11000)], [0, 30, 110, 200]);
     assert_eq!([special_time_bonus(0), special_time_bonus(4000), special_time_bonus(8000), special_time_bonus(11000)], [0, 20, 40, 100]);
-    assert_eq!([special_limit(0), special_limit(4000), special_limit(8000), special_limit(11000)], [20, 40, 80, 999]);
+    assert_eq!([special_limit(0, 20), special_limit(4000, 20), special_limit(8000, 20), special_limit(11000, 20)], [20, 40, 80, 999]);
+    use th_game::character::Character;
+    assert_eq!([Character::Reimu, Character::Ran, Character::Aunn, Character::Mamizou, Character::Yachie, Character::Saki].map(special_limit_base),
+        [20, 30, 30, 32, 14, 15]);
 }
 
 /// Holding focus shows effect.anm script 19 (the ring and hit dot) at the player; releasing it
@@ -1912,4 +1915,197 @@ fn orin_scope_draws_its_rounded_box() {
     let after=g.world.draw_list(&g.lib,th_anm::Pass::Ui).iter().map(|b|b.vertices.len()).sum::<usize>();
     // 32 fan triangles.
     assert!(before>=after+96,"scope VM emits its fan: {before} vs {after}");
+}
+
+#[test]
+fn last_four_send_original_special_extra_and_boss_programs() {
+    use th_game::character::Character;
+    for character in [Character::Tsukasa,Character::Mamizou,Character::Yachie,Character::Saki] {
+        for rank in 0..8 {
+            for level in [Level::Extra,Level::Boss] {
+                let Some(mut g)=setup() else{return};use_next_character(&mut g,0,character);
+                g.sides[1].player.as_mut().unwrap().godmode=true;
+                g.sides[0].st.extra_level=rank;g.sides[0].st.boss_level=rank;
+                g.sides[0].player.as_mut().unwrap().instant_charge(level);
+                let mut maximum=0;
+                for _ in 0..500 {
+                    g.tick([0;2]);
+                    let bodies=g.sides[1].enemies.iter().filter(|e|e.data.owner==0 && e.data.sub.starts_with("ExAttack")).count();
+                    maximum=maximum.max(g.sides[1].st.bullets.len()+g.sides[1].st.lasers.len()+bodies);
+                }
+                assert!(maximum>0,"{} {:?} rank{} produces its attack",character.name(),level,rank);
+                assert!(g.sides[1].st.unknown_ops.is_empty(),
+                    "{} {:?} rank{} unknown gameplay opcodes {:?}",character.name(),level,rank,g.sides[1].st.unknown_ops);
+            }
+        }
+        // Specials: thresholds 90 / 70 / 90 / 90 at Normal; Yachie's attack has 2400 HP and
+        // Saki's 4000; Mamizou's lands as one of ExAttackW / O / E.
+        let threshold=if character==Character::Mamizou {70} else {90};
+        let Some(mut g)=setup() else{return};use_next_character(&mut g,0,character);
+        g.sides[0].st.special_counter=threshold-1;
+        g.sides[0].st.last_special_pos=[0.0,200.0];dispatch_charges(&mut g.sides);
+        assert!(g.sides[1].st.pending_reflects.is_empty(),"{} below its threshold",character.name());
+        g.sides[0].st.special_counter=threshold;dispatch_charges(&mut g.sides);
+        assert_eq!(g.sides[1].st.pending_reflects.len(),1,"{} sends one special at its threshold",character.name());
+        let (landing,_)=g.sides[1].st.pending_reflects[0].landing();
+        match character {
+            Character::Tsukasa => assert!(landing[0]<=-132.0 && landing[0]>=-164.0 && (160.0..=360.0).contains(&landing[1]),"{landing:?}"),
+            Character::Yachie => assert!(landing[0].abs()<=128.0 && (128.0..=256.0).contains(&landing[1]),"{landing:?}"),
+            Character::Saki => assert!(landing[0].abs()<=128.0 && (0.0..=32.0).contains(&landing[1]),"{landing:?}"),
+            _ => {}
+        }
+        let mut spawned=None;
+        for _ in 0..200 {
+            g.tick([0;2]);
+            if spawned.is_none() {
+                spawned=g.sides[1].enemies.iter().find(|e|e.data.sub.starts_with("ExAttack") && e.data.owner==0)
+                    .map(|e|(e.data.sub.clone(),e.data.hp));
+            }
+        }
+        let (sub,hp)=spawned.unwrap_or_else(||panic!("{} special arrives",character.name()));
+        match character {
+            Character::Mamizou => assert!(["ExAttackW","ExAttackO","ExAttackE"].contains(&sub.as_str()),"{sub}"),
+            _ => assert_eq!(sub,"ExAttack"),
+        }
+        let expected=match character {Character::Yachie=>2400,Character::Saki=>4000,_=>200};
+        assert!(hp<=expected && hp>expected/2,"{} ExAttack hp {hp}",character.name());
+        assert!(g.sides[1].st.unknown_ops.is_empty(),"{} {:?}",character.name(),g.sides[1].st.unknown_ops);
+    }
+}
+
+#[test]
+fn last_four_scopes_follow_their_natives() {
+    use th_game::character::Character;
+    // Tsukasa: R 1 -> 50 in 10 frames, a 4R x R box on her.
+    let Some(mut g)=setup() else{return};use_next_character(&mut g,0,Character::Tsukasa);
+    for _ in 0..10 {g.tick([input::CHARGE,0]);}
+    let p=g.sides[0].player.as_ref().unwrap();
+    assert!((p.scope.radius-50.0).abs()<0.001,"{}",p.scope.radius);
+    let c=p.pos;
+    assert!(g.sides[0].st.scope_bullet([c[0]+101.0,c[1]],2.0));
+    assert!(!g.sides[0].st.scope_bullet([c[0]+103.0,c[1]],2.0));
+    assert!(!g.sides[0].st.scope_bullet([c[0],c[1]+28.0],2.0));
+    // Mamizou: three circles of R 28 at (0,-96), (+-64,-64).
+    let Some(mut g)=setup() else{return};use_next_character(&mut g,0,Character::Mamizou);
+    for _ in 0..10 {g.tick([input::CHARGE,0]);}
+    let p=g.sides[0].player.as_ref().unwrap();
+    assert!((p.scope.radius-28.0).abs()<0.001);
+    let c=p.pos;
+    assert!(g.sides[0].st.scope_bullet([c[0],c[1]-96.0-29.0],1.0));
+    assert!(g.sides[0].st.scope_bullet([c[0]+64.0+29.0,c[1]-64.0],1.0));
+    assert!(!g.sides[0].st.scope_bullet([c[0],c[1]],1.0),"nothing on her");
+    // Yachie: a hexagon of radius 88, vertices up and down: flat sides at +-76.2.
+    let Some(mut g)=setup() else{return};use_next_character(&mut g,0,Character::Yachie);
+    for _ in 0..10 {g.tick([input::CHARGE,0]);}
+    let p=g.sides[0].player.as_ref().unwrap();
+    assert!((p.scope.radius-88.0).abs()<0.001);
+    let c=p.pos;
+    assert!(g.sides[0].st.scope_bullet([c[0]+75.0,c[1]],0.5));
+    assert!(!g.sides[0].st.scope_bullet([c[0]+78.0,c[1]],0.5));
+    assert!(g.sides[0].st.scope_bullet([c[0],c[1]-86.0],0.5));
+    // Saki: an ellipse 32 ahead of her, 32 along the (zero) lean and 96 across it.
+    let Some(mut g)=setup() else{return};use_next_character(&mut g,0,Character::Saki);
+    for _ in 0..10 {g.tick([input::CHARGE,0]);}
+    let p=g.sides[0].player.as_ref().unwrap();
+    assert!((p.scope.radius-96.0).abs()<0.001 && (p.scope.radius2-32.0).abs()<0.001);
+    let c=p.scope.pos;
+    assert_eq!(c,[p.pos[0],p.pos[1]-32.0]);
+    assert!(g.sides[0].st.scope_bullet([c[0]+30.0,c[1]],1.0));
+    assert!(!g.sides[0].st.scope_bullet([c[0]+40.0,c[1]],1.0));
+    assert!(g.sides[0].st.scope_bullet([c[0],c[1]+90.0],1.0));
+    // The lean: moving right turns it towards +7 degrees.
+    for _ in 0..10 {g.tick([input::CHARGE|input::RIGHT,0]);}
+    let a=g.sides[0].player.as_ref().unwrap().scope.angle;
+    assert!(a>0.0 && a<0.12217305,"{a}");
+}
+
+#[test]
+fn last_four_skills_and_charge_volleys() {
+    use th_game::character::Character;
+    // Tsukasa: one-frame explosions cancel her field's small bullets into attacks for the
+    // opponent; the basic volley (slot 10) fires too.
+    let Some(mut g)=setup() else{return};use_next_character(&mut g,0,Character::Tsukasa);
+    let pos=g.sides[0].player.as_ref().unwrap().pos;
+    put_bullet(&mut g,0,0,1,[pos[0]+60.0,pos[1]-60.0],false);
+    g.sides[0].player.as_mut().unwrap().instant_charge(Level::Skill);
+    let mut shots=0;
+    for _ in 0..20 {g.tick([0;2]);shots=shots.max(g.sides[0].player.as_ref().unwrap().bullets.len());}
+    assert!(g.sides[0].st.bullets.iter().all(|b|b.delete || b.state!=1),"the sweep cancelled the bullet");
+    assert!(!g.sides[1].st.pending_reflects.is_empty(),"and sent it across");
+    assert!(shots>0,"the basic volley still fires");
+    // Mamizou: each skill adds a fragment; three make a bomb; at full stock it is an attack.
+    let Some(mut g)=setup() else{return};use_next_character(&mut g,0,Character::Mamizou);
+    let bombs=g.sides[0].player.as_ref().unwrap().bombs;
+    for k in 0..3 {
+        g.sides[0].player.as_mut().unwrap().instant_charge(Level::Skill);
+        for _ in 0..70 {g.tick([0;2]);}
+        let p=g.sides[0].player.as_ref().unwrap();
+        assert_eq!(p.bomb_fragments,(k+1)%3);
+        assert_eq!(p.last_charge,Some(Level::Skill));
+    }
+    assert_eq!(g.sides[0].player.as_ref().unwrap().bombs,bombs+1);
+    let p=g.sides[0].player.as_mut().unwrap();
+    p.bombs=p.max_bombs;
+    p.instant_charge(Level::Skill);
+    g.tick([0;2]);
+    assert_eq!(g.sides[0].player.as_ref().unwrap().last_charge,Some(Level::Attack),"refused at full stock");
+    // Yachie: the skill hexagon (radius 128) cancels for 110 frames; no SHT shots.
+    let Some(mut g)=setup() else{return};use_next_character(&mut g,0,Character::Yachie);
+    g.sides[0].player.as_mut().unwrap().instant_charge(Level::Skill);
+    let mut widest:f32=0.0;
+    let mut frames=0;
+    for _ in 0..130 {
+        g.tick([0;2]);
+        let p=g.sides[0].player.as_ref().unwrap();
+        assert!(p.bullets.is_empty());
+        if let Some(&(_,r,_,_))=p.cancel_polygons.first() {widest=widest.max(r);frames+=1;}
+    }
+    assert!((widest-128.0).abs()<0.01,"{widest}");
+    assert_eq!(frames,110);
+    // Saki: the skill's slot 11 beams last 60 frames without the shot button.
+    let Some(mut g)=setup() else{return};use_next_character(&mut g,0,Character::Saki);
+    g.sides[0].player.as_mut().unwrap().instant_charge(Level::Skill);
+    let mut most=0;
+    for _ in 0..58 {g.tick([0;2]);most=most.max(g.sides[0].player.as_ref().unwrap().beams.iter().filter(|b|!b.ended).count());}
+    assert_eq!(most,20,"all twenty slot 11 beams are up");
+    for _ in 0..70 {g.tick([0;2]);}
+    assert!(g.sides[0].player.as_ref().unwrap().beams.iter().all(|b|b.ended),"and end after their life");
+}
+
+#[test]
+fn last_four_bombs_have_native_durations_and_shapes() {
+    use th_game::character::Character;
+    for (character,duration) in [(Character::Tsukasa,370),(Character::Mamizou,400),(Character::Yachie,280),(Character::Saki,280)] {
+        let Some(mut g)=setup() else{return};use_next_character(&mut g,0,character);
+        g.tick([input::BOMB,0]);
+        let p=g.sides[0].player.as_ref().unwrap();
+        assert_eq!(p.bomb.as_ref().unwrap().progress().1,duration,"{}",character.name());
+        let start=p.pos;
+        for _ in 0..duration-2 {g.tick([0,0]);}
+        let p=g.sides[0].player.as_ref().unwrap();
+        let b=p.bomb.as_ref().unwrap();
+        match character {
+            Character::Tsukasa => {
+                assert!((b.current_radius-104.0).abs()<0.01);
+                let (c,size,_)=p.cancel_orects[0];
+                assert_eq!(size,[416.0,104.0]);
+                assert!((c[1]-(start[1]-(duration-1) as f32)).abs()<0.01,"rises 1 px a frame {:?}",c);
+            }
+            Character::Mamizou => {
+                assert_eq!(p.cancel_circles.len(),3);
+                assert!((p.cancel_circles[0].1-80.0).abs()<0.05,"{}",p.cancel_circles[0].1);
+                assert!((p.cancel_circles[0].0[1]-(start[1]-96.0-0.1*(duration-1) as f32)).abs()<0.01);
+            }
+            Character::Yachie => {
+                let (c,r,angle,sides)=p.cancel_polygons[0];
+                assert!((r-176.0).abs()<0.05 && sides==6 && (angle+std::f32::consts::FRAC_PI_2).abs()<1e-6);
+                assert!((c[1]-(start[1]-0.1*(duration-1) as f32)).abs()<0.01);
+            }
+            _ => {
+                let (c,a,e,_)=p.cancel_ellipses[0];
+                assert!((a-64.0).abs()<0.05 && (e-192.0).abs()<0.05,"{a} {e}");
+                assert_eq!(c,[p.pos[0],p.pos[1]-64.0]);
+            }
+        }
+    }
 }

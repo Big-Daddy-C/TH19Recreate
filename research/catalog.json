@@ -1557,6 +1557,250 @@
     "spirit_flight": {
       "address": "0051b6c0",
       "decompile_sha256": "4946f8f3ba11854024a73ab8f2ccc3c465b32fc03ae35241aa297ccf363f0a2a"
+    },
+    "tsukasa_aura_start": {
+      "address": "0041dba0",
+      "decompile_sha256": "798f77d16a5b67a3ab3b21f2609cc7ddcb076e1013c8ad999a84921e757e1aab"
+    },
+    "tsukasa_aura_update": {
+      "address": "0041de20",
+      "decompile_sha256": "9ed4bf9d64f86caae85728451eaf372fbd7d50ea79244da0340ee486ae0eabe0"
+    },
+    "tsukasa_basic": {
+      "address": "0041e550",
+      "decompile_sha256": "cd193d5f6637f84f1dee9b2744442baec33c7b9b66526442ee941c4e2dfd83f7"
+    },
+    "tsukasa_skill": {
+      "address": "0041e5e0",
+      "decompile_sha256": "713ee4269609c9ccdb77785d287402b56687803f890e21a15e56f0444eeac412"
+    },
+    "tsukasa_ex_update": {
+      "address": "0041e750",
+      "decompile_sha256": "1e6109344d93177b7818aa5b72a4877cd992eb652c05dcb88ab41758b9e6e8f9"
+    },
+    "tsukasa_bomb_start": {
+      "address": "0041d650",
+      "decompile_sha256": "d3e729f04a36462afce3fb52c4fe8cb085f653290c721c786b3895881a63e429"
+    },
+    "tsukasa_bomb_update": {
+      "address": "0041d870",
+      "decompile_sha256": "bf1aa7cc5fe5a4ef0f09dc4e0c3f42e3d7656373bbb0d51ff9aa51b56ad90ebe"
+    },
+    "tsukasa_flight_init": {
+      "address": "0041e200",
+      "decompile_sha256": "d4de4935d10b1b9e5093a027767e817975c6e8db9b311ba7e0fd6543c61acb04"
+    },
+    "mamizou_aura_start": {
+      "address": "0041f470",
+      "decompile_sha256": "3bdbd8974160261f7da3340279df62aa9f31ef89d432cf49c86ba26f4bf27982"
+    },
+    "mamizou_aura_update": {
+      "address": "0041f770",
+      "decompile_sha256": "32a4102f82895c5c55c9f74a1cd0eb5a91da32c95a6dfa2ffd3093fadcbf2db0"
+    },
+    "mamizou_aura_test": {
+      "address": "0041fce0",
+      "decompile_sha256": "a2d61af316180623aca8126e2a0196650c5f32bb7363551c1e7baee2b9d66921"
+    },
+    "mamizou_skill": {
+      "address": "00420380",
+      "decompile_sha256": "911c060226d26b9ae808069b96f5020872448cb15b3e1580448ba162e26801ac"
+    },
+    "mamizou_ex_update": {
+      "address": "004204f0",
+      "decompile_sha256": "2bb5da34b8392bd6006a16cce0ecc1fcca05c531f1a23cb4ffb27290d1a3fe2b"
+    },
+    "mamizou_bomb_start": {
+      "address": "0041ed00",
+      "decompile_sha256": "d70bd2344e6d3bbfe4afa49ca9a16530e1e498bbde240b6e7aa672ac333ac9ff"
+    },
+    "mamizou_bomb_update": {
+      "address": "0041efa0",
+      "decompile_sha256": "a4f54c4d274cfa1217de38efadb8c1789cad817d6e41195bc0c63acc5811c5ca"
+    },
+    "mamizou_flight_init": {
+      "address": "0041fe00",
+      "decompile_sha256": "265a42d515e87e06293df79745330be9aa0eebd9cad5ffa88a7a7b77b2cdac5e"
+    },
+    "mamizou_flight_update": {
+      "address": "00420140",
+      "decompile_sha256": "9f27a38ca8a075f31555d1bab6cdaa74d285a5dc02d48fcbd0433dd4bacd8471"
+    },
+    "mamizou_ex_init": {
+      "address": "00420260",
+      "decompile_sha256": "1a138694cc3815069be3606b1e98a2e3ebde3ae8170eb018ae9d661a96d2e564"
+    },
+    "yachie_aura_start": {
+      "address": "00421210",
+      "decompile_sha256": "b47cbf88e04e0b99615b15334f5f1ccb21259e883759f6fbaa5fbd6f350d57d9"
+    },
+    "yachie_aura_update": {
+      "address": "00421490",
+      "decompile_sha256": "5d2413f2290acc19dee9c1d9dad2cf4aeaa9d5bd19a470442f88ba5b801b8493"
+    },
+    "yachie_aura_test": {
+      "address": "004217e0",
+      "decompile_sha256": "ee55a51e1171c003276b26fb4b199da64d7af9773df70150030b97f79a6a30d4"
+    },
+    "yachie_basic": {
+      "address": "00421f80",
+      "decompile_sha256": "719ff8813dffd0a420e363e8fd5ed3e39adbae6bac9b7af1637d09111d92514b"
+    },
+    "yachie_skill": {
+      "address": "00422150",
+      "decompile_sha256": "6160db6bf777cbb1f1ad3e7382506b8f06b75e8cc107741c1e81aee2577d64e3"
+    },
+    "yachie_ex_update": {
+      "address": "004222d0",
+      "decompile_sha256": "ed8bca165281ae96f8c7cb2050d2619bae4a03466c7cc7ec47bbf8ac68f21ae1"
+    },
+    "yachie_bomb_start": {
+      "address": "00420c80",
+      "decompile_sha256": "bbc9a50f97fd64253f406a6ec6a49d74b3834a7bb1055264fc5e0a3ce989f18d"
+    },
+    "yachie_bomb_update": {
+      "address": "00420ef0",
+      "decompile_sha256": "95cbe47609f9654c8510ea2dbc84d5a9d54fa876e8330b0971066f664e855418"
+    },
+    "yachie_flight_init": {
+      "address": "00421a90",
+      "decompile_sha256": "7e08627a0424afd83946f3adb342f883091f1b8028dc78215eb5a13b43ae2a6a"
+    },
+    "yachie_flight_update": {
+      "address": "00421dd0",
+      "decompile_sha256": "43c1fdd83f6a3691713efe69fc4cadbd785eea884797f2bb34d9e3396139cd33"
+    },
+    "yachie_ex_init": {
+      "address": "00421ee0",
+      "decompile_sha256": "5ceb4669c9e024c2905c593b9ac928fbcc2951a3417e1d256771ff9f6756f3b4"
+    },
+    "saki_aura_start": {
+      "address": "004231f0",
+      "decompile_sha256": "33cfffd66ac8f4512044d50c8422b79595d51d2c038a467a0ec0f1b879dc96f4"
+    },
+    "saki_aura_update": {
+      "address": "00423540",
+      "decompile_sha256": "a78fedbfb4c1050b61d4e2636002cc45cb06846b5c8ddaa75f69be9edef9154a"
+    },
+    "saki_aura_test": {
+      "address": "00423910",
+      "decompile_sha256": "ee49449e82e239f494325b3eae7a60a39b2d40094f39d87d0932b5cffde3d8d0"
+    },
+    "saki_basic": {
+      "address": "00423ef0",
+      "decompile_sha256": "f3af93631efa27b4487cd5fc840135277287588a4638add67cdab66d95964575"
+    },
+    "saki_skill": {
+      "address": "00423f80",
+      "decompile_sha256": "515973affbcdd15f9bd0c70c5170ecd4429c55b6551ba3a60105d70e811f7611"
+    },
+    "saki_ex_update": {
+      "address": "00424000",
+      "decompile_sha256": "67d26a392bbbd69ac25936538ea67831845233b05a33be919cbfd7d530a9871c"
+    },
+    "saki_bomb_start": {
+      "address": "004228b0",
+      "decompile_sha256": "667ed459cfa2d99982fb99273e6520a0e7aec64386da90c2b24ed3d8afad2bb2"
+    },
+    "saki_bomb_update": {
+      "address": "00422c60",
+      "decompile_sha256": "ee5218c9f38f38b523e81d17f46376b486b48977d6fa1a9c61102539e7482398"
+    },
+    "saki_flight_init": {
+      "address": "004239f0",
+      "decompile_sha256": "141acbf32ac06a634138019314ea882ec99610f4585fe9cc28fe83ad5f52ab81"
+    },
+    "saki_flight_update": {
+      "address": "00423d30",
+      "decompile_sha256": "3dc607912cb7b58c47f2509899f516df6a27e123138c597f0a28ef6a70dd53ea"
+    },
+    "saki_ex_init": {
+      "address": "00423e40",
+      "decompile_sha256": "4f25cd3898271eaac24f799772cd4bbbef17965983196283327dfd3528de7cd6"
+    },
+    "polygon_contains": {
+      "address": "004d2a10",
+      "decompile_sha256": "db302b061badfc566afd299fd0e949e2c1831c124e27cce6f9c17f80bbc9ccd3"
+    },
+    "segments_cross": {
+      "address": "004d3ae0",
+      "decompile_sha256": "63be2a7c3f8017d3a00df4a1b25ebc6ca45a55012d96fa9e194bb2f5df5d6f98"
+    },
+    "polygon_circle": {
+      "address": "004d26a0",
+      "decompile_sha256": "6e2e573caa0e27546558833ecfa51ecaa9bff86fa9defa4675c3f1baf50362dc"
+    },
+    "polygon_rect": {
+      "address": "004d22d0",
+      "decompile_sha256": "594a89b3bb785da7ee6f36967c7522b117ae7e9bc8bf963506c263fd91851106"
+    },
+    "polygon_segment": {
+      "address": "004d27e0",
+      "decompile_sha256": "1d3a4c5d9abcc868f90700d2017242c05cfbd055ca30f62dce5bce416828531c"
+    },
+    "cancel_polygon": {
+      "address": "004ee640",
+      "decompile_sha256": "bd6351953526e142507d29d7bb43344c1ba28b33c0de27b208bf413d40ac7dce"
+    },
+    "laser_cancel_polygon": {
+      "address": "00530320",
+      "decompile_sha256": "8387438f8bff2126d3dd922c3db68a3a8151a31e30c3ec1071c32c466e70766b"
+    },
+    "collider_polygon": {
+      "address": "0051f860",
+      "decompile_sha256": "bf9363b30a8d775db349e7ca545ed405a5fb98e570c10ec2ba98486bf6c8398f"
+    },
+    "collider_ellipse_fixed": {
+      "address": "0051f4e0",
+      "decompile_sha256": "a2e17f07b23350eef777e45e0ae09fdbc8fc427caaaee1811c4ff972971094d9"
+    },
+    "bomb_fragment": {
+      "address": "00537b90",
+      "decompile_sha256": "cbd2ef9e6408782782ad891f1c4302b314ae4889af602926ae455b53422fad93"
+    },
+    "bomb_add": {
+      "address": "00537c30",
+      "decompile_sha256": "d95f12de2b1c5521d2f0200bc30c669f738f17bf33ecdb4c852c56fd905ea08d"
+    },
+    "special_limit_set": {
+      "address": "004121a0",
+      "decompile_sha256": "cd6831211f2b934bae568d2cbd53d5e15f2d30edc71826a5d509c07d9c120cdf"
+    },
+    "extra_attack_tick": {
+      "address": "0050df40",
+      "decompile_sha256": "dda20018089ddd240a901bb2656b5f081ec6ab810b562595a1608508144ca697"
+    },
+    "extra_attack_create": {
+      "address": "0050e150",
+      "decompile_sha256": "26fa757a89896d1f9df0c370130f6738cb2f912c6c92303513550a524256ce47"
+    },
+    "beam_init_saki": {
+      "address": "0054d960",
+      "decompile_sha256": "f1d6cc52eacdaffaacf6a3594df7a81a9eaa127d70c1fb39dd091712ccabc10c"
+    },
+    "beam_hit_charge": {
+      "address": "0054c7c0",
+      "decompile_sha256": "9ffbb416849468b89bef6115b30d7a1f379647492b47c54f25afed74cf5764bd"
+    },
+    "beam_update": {
+      "address": "0054d370",
+      "decompile_sha256": "513200b3ae5c14ac4eb5c2f8f83e7deb34c9546c8a9cc36d8a4948462e7a7023"
+    },
+    "ecl_cb2_resprite": {
+      "address": "004fbff0",
+      "decompile_sha256": null
+    },
+    "bullet_resprite": {
+      "address": "004f11a0",
+      "decompile_sha256": "6ca7ebf674c6318be5184cec88cc3cbf12de3a8ed474f4f5d5f93fd2ce130618"
+    },
+    "bullet_tick": {
+      "address": "004f4c30",
+      "decompile_sha256": "93459850e33bb03b5fe8a8051f08d8b17c76ce8d0493e269d338e38b84d7cbc0"
+    },
+    "bomb_base_init": {
+      "address": "004ed4a0",
+      "decompile_sha256": "6ab2060c9e172dab44a280a50d59f60e0be52434d14bd1f6cb40d945ed8cda1c"
     }
   },
   "features": {
@@ -3832,6 +4076,203 @@
         "Boss life ring: no spawner or HP reader found (enemy +0x6238/+0x6240/+0x6248 are only read by the damage sound); 527 markers have no reader.",
         "Shake on lasers and spark batches: whether their draw code adds +0xc4 was not checked.",
         "The 512 clone-clearing observation is still untraced."
+      ]
+    },
+    "later_characters_2": {
+      "implementation": "partial",
+      "summary": "Tsukasa, Mamizou, Yachie and Saki from their native aura, EX, bomb and flight classes; polygon geometry; ECL 1037 by owner character and 624(2).",
+      "symbols": [
+        "tsukasa_aura_start",
+        "tsukasa_aura_update",
+        "tsukasa_basic",
+        "tsukasa_skill",
+        "tsukasa_ex_update",
+        "tsukasa_bomb_start",
+        "tsukasa_bomb_update",
+        "tsukasa_flight_init",
+        "mamizou_aura_start",
+        "mamizou_aura_update",
+        "mamizou_aura_test",
+        "mamizou_skill",
+        "mamizou_ex_update",
+        "mamizou_bomb_start",
+        "mamizou_bomb_update",
+        "mamizou_flight_init",
+        "mamizou_flight_update",
+        "mamizou_ex_init",
+        "yachie_aura_start",
+        "yachie_aura_update",
+        "yachie_aura_test",
+        "yachie_basic",
+        "yachie_skill",
+        "yachie_ex_update",
+        "yachie_bomb_start",
+        "yachie_bomb_update",
+        "yachie_flight_init",
+        "yachie_flight_update",
+        "yachie_ex_init",
+        "saki_aura_start",
+        "saki_aura_update",
+        "saki_aura_test",
+        "saki_basic",
+        "saki_skill",
+        "saki_ex_update",
+        "saki_bomb_start",
+        "saki_bomb_update",
+        "saki_flight_init",
+        "saki_flight_update",
+        "saki_ex_init",
+        "polygon_contains",
+        "segments_cross",
+        "polygon_circle",
+        "polygon_rect",
+        "polygon_segment",
+        "cancel_polygon",
+        "laser_cancel_polygon",
+        "collider_polygon",
+        "collider_ellipse_fixed",
+        "collider_test",
+        "bomb_fragment",
+        "bomb_add",
+        "special_limit_set",
+        "extra_attack_tick",
+        "extra_attack_create",
+        "beam_init_saki",
+        "beam_hit_charge",
+        "beam_update",
+        "ecl_cb2_resprite",
+        "bullet_resprite",
+        "bullet_tick",
+        "charge_release",
+        "bomb_base_init"
+      ],
+      "code": [
+        "crates/th-game/src/character.rs",
+        "crates/th-game/src/scope.rs",
+        "crates/th-game/src/player.rs",
+        "crates/th-game/src/bomb.rs",
+        "crates/th-game/src/skill.rs",
+        "crates/th-game/src/side.rs",
+        "crates/th-game/src/reflect.rs",
+        "crates/th-game/src/beam.rs",
+        "crates/th-game/src/laser.rs",
+        "crates/th-game/src/bullet.rs",
+        "crates/th-game/src/enemy.rs"
+      ],
+      "tests": [
+        "crates/th-game/tests/higher_charge.rs",
+        "crates/th-game/src/scope.rs"
+      ],
+      "findings": [
+        {
+          "text": "Tsukasa (pl08): aura 0041dba0/0041de20 script 8, R 1 -> 50 over 10 frames (mode 6), a 4R x R box on her turned by the lean (all four later auras: +-0.12217 rad when |+0x20f4| > 0.1, else 0, then 10% a frame towards it). Basic [3] 0041e550: slot 10 for 50 frames, stop past 60. Skill 0041e5e0/[11] 0041e750: scripts 13 and 12 at her, radius 20 -> 420 over 170 frames (mode 4) scales script 12 and is a one-frame FUN_0051d4e0(.., 1, 0, 2, 1) explosion each frame (no damage, case 2 no credit) that cancels small bullets into attacks for the opponent; then both VMs are deleted. Bomb 0041d650/0041d870: max(200, 370m/2500) frames, R 1 -> m/2500*40+64 over 20 (mode 4), 4R x R box starting on her, y -1 a frame, angle -pi/2 + 0.0872665 a frame (motion flag 0x10), FUN_004ee0d0/005303f0 cancels, FUN_0051f320 damage 20; flash 13 follows her, ring 9.",
+          "sources": [
+            "tsukasa_aura_start",
+            "tsukasa_aura_update",
+            "tsukasa_basic",
+            "tsukasa_skill",
+            "tsukasa_ex_update",
+            "tsukasa_bomb_start",
+            "tsukasa_bomb_update"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Mamizou (pl09): aura 0041f470/0041f770/[7] 0041fce0: script 10 x3, R 1 -> 28 over 10 (mode 4), circles at player + rot(lean)(0,-96), (64,-64), (-64,-64); side VMs at 0.6R; test (R + r)^2 against all three. Basic slot 10 50/60. Skill 00420380 returns 1 when the stock (+0x68 clamped 0..10) has reached +0x74 (clamped 0..7); FUN_004e79e0 then skips the Lv2 block (no meter spent, no Ecl_EtBreakLv2) and only [3] runs. Otherwise FUN_00537b90 (fragment, sound 0x2e; the third gives FUN_00537c30(1,1): +1 bomb, sound 0x2e unless over the cap), script 9 at her, FUN_004ee770/FUN_00530c60 radius 40 and FUN_005200f0 radius 40 life 1 damage 20. Bomb 0041ed00/0041efa0: max(180, 400m/2500), R 24 -> m/2500*32+48 over the duration, three circles at (0,-96), (-64,-64), (64,-64) from the cast position rising 0.1 a frame, each cancel + damage 20; flash 14 follows her, rings 11 x3 scale (R,R); only the first ring is interrupted at the end (APPROX: the port deletes the other two with it).",
+          "sources": [
+            "mamizou_aura_start",
+            "mamizou_aura_update",
+            "mamizou_aura_test",
+            "mamizou_skill",
+            "bomb_fragment",
+            "bomb_add",
+            "charge_release",
+            "mamizou_bomb_start",
+            "mamizou_bomb_update"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Yachie (pl10): aura 00421210/00421490 script 13, R 1 -> 88 over 10 (mode 4), VM rot lean - pi/2; [7] 004217e0: a hit when the body centre is within its radius of the aura centre, else FUN_004d2a10(6 sides, R, lean - pi/2) on the body point nearest the centre (normalised when |d| >= 0.01). FUN_004d2a10: inside when the segment point -> centre crosses no edge (FUN_004d3ae0, touching counts, collinear by bounding boxes); vertices cos/sin (0x47a0c0 = cos, 0x47a070 = sin). Her charge never fires SHT slots: basic 00421f80 (not while +0x110): sound 0x29 side-panned, script 8 at the release point, a hexagon (vertex at angle 0) R 1 -> 48 over 10 (mode 4); skill 00422150: +0x110 = 1, script 10, R 1 -> 128 over 60, sound 0x29. [11] 004222d0: while the shared timer < 40 (110) FUN_004ee640 (bullets via FUN_004d26a0 with the bullet size +0x674), FUN_00530320 (lasers: line steps FUN_004d22d0, curve nodes FUN_004d2a10) and FUN_0051f860 (collider type 7, life 1, damage 1, flag 0x10); ends past 40 (110). Bomb 00420c80/00420ef0: max(140, 280m/2500), hexagon at -pi/2, R 24 -> m/2500*16+160 over the duration, rising 0.1, damage 20; flash 17 follows her, ring 14 (scale R, rot -pi/2). FUN_0051e670 type 7: FUN_004d26a0 for round bodies, FUN_004d22d0 for boxes.",
+          "sources": [
+            "yachie_aura_start",
+            "yachie_aura_update",
+            "yachie_aura_test",
+            "polygon_contains",
+            "segments_cross",
+            "polygon_circle",
+            "polygon_rect",
+            "polygon_segment",
+            "yachie_basic",
+            "yachie_skill",
+            "yachie_ex_update",
+            "cancel_polygon",
+            "laser_cancel_polygon",
+            "collider_polygon",
+            "collider_test",
+            "yachie_bomb_start",
+            "yachie_bomb_update"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Saki (pl11): aura 004231f0/00423540: script 14; +0x6c 1 -> 96 (+0xcc), +0x9c 1 -> 32 (+0xd0) over 10 (mode 4); centre player + rot(lean)(0,-32); VM scale (+0xcc,1), scale2 (+0xd0,1), rot lean; [7] 00423910 = FUN_004d4020(a = +0xd0 along the lean, b = +0xcc), the same argument order as Aunn's 0041a830. Basic 00423ef0 (not while +0xdc): slot 10 via FUN_0054f990(t, t) for 50 frames, stop past 60; skill 00423f80 returns -1 while +0xdc, else +0xdc = 1 and slot 11 for 60, stop past 70. Her beams [18,2,0,8]: init 0054d960 sets the collider interval +0xa4 = 4; hit 0054c7c0 never cuts (interrupt 2 once); update 0054d370 keeps a beam whose record +0x3c (60 for slots 10/11) is set for that many frames regardless of the button (APPROX: the collider life-counter phase of the interval). Bomb 004228b0/00422c60: max(160, 280m/2500); +0xc8 24 -> m/2500*48+144 (A), +0xf8 24 -> m/2500*16+48 (B) over the duration; lean as the aura; centre player + rot(lean)(0,-64); ring 15 scale (A,30) scale2 (B,30) rot lean; FUN_004ee500/00530180 ellipse (a = B along the lean, b = A); FUN_0051f4e0 has a fixed damage 10, life 1; the flash (18) stays where she bombed (FUN_004ed4a0 sets +0x30 to the player).",
+          "sources": [
+            "saki_aura_start",
+            "saki_aura_update",
+            "saki_aura_test",
+            "saki_basic",
+            "saki_skill",
+            "beam_init_saki",
+            "beam_hit_charge",
+            "beam_update",
+            "saki_bomb_start",
+            "saki_bomb_update",
+            "collider_ellipse_fixed",
+            "bomb_base_init"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "Specials of the four: thresholds at Normal Tsukasa 90 (0x59e978), Mamizou 70 (0x59ebd0), Yachie 90 (0x59ee28), Saki 90 (0x59f080). Targets: Tsukasa (+0x118 even -148 else 148) + signed*16, unit*200+160; Mamizou rand%3: W (x +-148 by rand&1, receiving player y - unit*128), O (+-148, unit*128+128), E (unit*148, 0), stored at request +0x48 and used by FUN_00420140 to pick ExAttackW/O/E (table 0x5a9254); Yachie (signed*128, unit*128+128); Saki (signed*128, unit*32). Flights 70..129 frames with tangents (r100,200),(r100,-300), scripts 16/13/14/18, script scale kept, no arrival sound. ExAttack HP (flight update local_50): 200, except Yachie 2400 (00421dd0) and Saki 4000 (00423d30). Special limit ExtraAttackInf +0x38: FUN_0050e150 sets 20 (Normal) and the EX class init's FUN_004121a0 replaces it: Ran/Aunn 30, Mamizou 32, Yachie 14, Saki 15 (VS: doubled at 3600/7200, 999 at 10800, FUN_0050df40). Active specials are slot timers +0x44.. counted in +0x3c (APPROX kept: the port counts live ExAttack enemies).",
+          "sources": [
+            "tsukasa_ex_update",
+            "mamizou_ex_update",
+            "mamizou_flight_update",
+            "yachie_ex_update",
+            "saki_ex_update",
+            "yachie_flight_update",
+            "saki_flight_update",
+            "special_limit_set",
+            "extra_attack_create",
+            "extra_attack_tick",
+            "mamizou_ex_init",
+            "yachie_ex_init",
+            "saki_ex_init"
+          ],
+          "evidence": "code_checked"
+        },
+        {
+          "text": "ECL 1037 (00505116) builds the request with origin = opponent player, target (arg0, arg1), side, +0x48 = the enemy's +0x29c (I0, set by the scripts to 0/1/2 before each group) and +0x50 = 1, and passes it to the owner's ExtraAttackInf (FUN_0040f090 -> EX vtable +0x28): it flies as the owner's character's special (Ran, Orin, Mamizou, Yachie, Saki use it). The port had always flown it as Ran's. ECL 624(2) = FUN_004fbff0: each bullet of the field older than 20 frames (+0x104c, the age FUN_004f4c30 advances) strictly within 32 px and not yet marked by this enemy (+0x1070) is marked and re-sprited with FUN_004f11a0: types 0/1 -> 4 (own colour), 4/5 -> 18, 8 -> 20, 9 -> 31, 18 -> 33 (colour 1).",
+          "sources": [
+            "ecl_dispatch",
+            "ecl_cb2_resprite",
+            "bullet_resprite",
+            "bullet_tick"
+          ],
+          "evidence": "code_checked"
+        }
+      ],
+      "checks": {
+        "date": "2026-10-15",
+        "automated": "cargo test --workspace PASS; new: last_four_send_original_special_extra_and_boss_programs (all ranks, zero unknown ECL ops), last_four_scopes_follow_their_natives, last_four_skills_and_charge_volleys, last_four_bombs_have_native_durations_and_shapes, hexagon/lean unit tests.",
+        "visual": "Not inspected."
+      },
+      "next": [
+        "Visual check of the four in game (Saki aura/bomb axes copy the binary; the ANM orientation was not inspected).",
+        "EX [8] (busy query) has no ported caller.",
+        "Special limit: slot timers (+0x40 = 240) instead of live ExAttack counting.",
+        "Tsukasa skill recast deletes the old VMs (the original overwrites the handles)."
       ]
     }
   }

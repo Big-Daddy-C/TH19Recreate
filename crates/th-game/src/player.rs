@@ -140,6 +140,19 @@ struct SnakeExplosion {pos:[f32;2],angle:f32,speed:f32,radius:f32,growth:f32,dam
 /// Nazrin's skill (`FUN_0041b420`): pl05.anm script 9 at the cast position; its X scale is the
 /// radius of a collider (flags 0x2c0) that kills disabled spirits until the VM ends.
 struct MarkCircle { pos: [f32; 2], vm: VmId }
+
+/// Yachie's charge areas (EX class +0x8c timer, +0x110 skill flag; `FUN_004222d0`): a hexagon
+/// (a vertex at angle 0) where she released, radius 1 -> 48 over 10 frames (the basic one,
+/// `FUN_00421f80`, script 8) or 1 -> 128 over 60 (the skill, `FUN_00422150`, script 10), mode 4.
+/// While its timer is below 40 (110) it cancels bullets and lasers and hits for 1 every frame;
+/// it ends once the timer passes 40 (110).
+struct HexArea { pos: [f32; 2], skill: bool, time: i32, growth: th_anm::interp::Interp<1>, radius: f32 }
+
+/// Tsukasa's skill (`FUN_0041e5e0`, EX [11] `FUN_0041e750`): scripts 13 and 12 where she cast it;
+/// for 170 frames a radius 20 -> 420 (mode 4) scales script 12 and is a one-frame explosion
+/// (`FUN_0051d4e0(.., 1, 0, 2, 1)`: no damage, no kill credit) that cancels small bullets into
+/// attacks for the opponent; then both VMs are deleted.
+struct SweepCircle { pos: [f32; 2], frames: i32, growth: th_anm::interp::Interp<1>, vms: [VmId; 2] }
 pub struct Player {
     pub character: crate::character::Character,
     /// Development toggle: the player can't be hit.
@@ -187,6 +200,17 @@ pub struct Player {
     /// Orin's skill arms her next charge shot with SHT slot 11 (EX class +0xf0, `FUN_0041d020`).
     orin_armed: bool,
     nazrin_skill: Option<MarkCircle>,
+    yachie_area: Option<HexArea>,
+    tsukasa_skill: Option<SweepCircle>,
+    /// Mamizou's skill burst this frame (cancel radius 40, collider radius 40 hitting for 20).
+    mamizou_burst: Option<[f32; 2]>,
+    /// Bomb fragments (status +0x6c): three make a bomb (`FUN_00537b90`).
+    pub bomb_fragments: i32,
+    /// One-frame explosions (centre, radius) for the side's explosion list (Tsukasa's skill).
+    pub explosion_requests: Vec<([f32; 2], f32)>,
+    /// Yachie's hexagons (centre, radius, angle, sides) that cancel bullets (`FUN_004ee640`) and
+    /// lasers (`FUN_00530320`).
+    pub cancel_polygons: Vec<([f32; 2], f32, f32, u32)>,
     /// Set the frame a bomb's duration ran out; the side turns it into a screen shake.
     pub bomb_shake: bool,
     /// Positions of the enemies a shot's init callback may aim at (refreshed every update;
@@ -280,7 +304,8 @@ impl Player {
             skills: Vec::new(), bomb: None, bomb_prev: false, cancel_circles: Vec::new(), cancel_columns: Vec::new(), damage_circles: Vec::new(), snake_explosions: Vec::new(), skill_rng: crate::rng::Rng::new(0x1cafe777),
             charge_timer: None,
             wide_charge: false, charge_origin: [0.0;2], skill_volley: false, boost_frames: 0, cancel_rects: Vec::new(),
-            orin_armed: false, nazrin_skill: None, bomb_shake: false, targets: Vec::new(), cancel_ellipses: Vec::new(), cancel_orects: Vec::new(),
+            orin_armed: false, nazrin_skill: None, yachie_area: None, tsukasa_skill: None, mamizou_burst: None, bomb_fragments: 0,
+            explosion_requests: Vec::new(), cancel_polygons: Vec::new(), bomb_shake: false, targets: Vec::new(), cancel_ellipses: Vec::new(), cancel_orects: Vec::new(),
             aura_anm: None,
             charge_vm: None,
             focus_vm: None,
@@ -517,6 +542,8 @@ impl Player {
         self.cancel_rects.clear();
         self.cancel_ellipses.clear();
         self.cancel_orects.clear();
+        self.cancel_polygons.clear();
+        self.update_later_skills(world);
         self.skills.retain_mut(|s| {
             let alive = s.tick(world, field, &mut self.cancel_circles, &mut self.damage_circles);
             if std::mem::take(&mut s.ended) {
@@ -547,6 +574,8 @@ impl Player {
                 crate::bomb::Bomb::new_character(self.character,self.pos,meter,self.anm_file,world,lib,field)
             } else if matches!(self.character, Character::Aunn | Character::Nazrin | Character::Orin) {
                 crate::bomb::Bomb::new_moving(self.character,self.pos,self.prev_vx as f32,meter,self.anm_file,world,lib,field)
+            } else if matches!(self.character, Character::Tsukasa | Character::Mamizou | Character::Yachie | Character::Saki) {
+                crate::bomb::Bomb::new_later(self.character,self.pos,self.prev_vx as f32,meter,self.anm_file,world,lib,field)
             } else {
                 crate::bomb::Bomb::new(self.pos, meter, self.anm_file, world, lib, field)
             });
@@ -554,10 +583,11 @@ impl Player {
             if crate::sfx::on(crate::sfx::Cat::Bomb) { self.sounds.push((0x31, Some(0))); }
         }
         if let Some(b) = &mut self.bomb {
+            b.vel_x = self.prev_vx as f32;
             let protecting = b.protecting();
             let alive = b.tick_character(self.pos, &*enemies, world, field, &mut crate::bomb::Areas {
                 circles: &mut self.cancel_circles, columns: &mut self.cancel_columns, rects: &mut self.cancel_rects,
-                ellipses: &mut self.cancel_ellipses, orects: &mut self.cancel_orects }, &mut self.damage_circles);
+                ellipses: &mut self.cancel_ellipses, orects: &mut self.cancel_orects, polygons: &mut self.cancel_polygons }, &mut self.damage_circles);
             // Every bomb update writes its draining meter (FUN_00403250 at bomb +0x88: the meter
             // at the start -> 0, linear, over the duration) and, 10 frames after the end, resets
             // the meter to the attack threshold (status +0x28).
@@ -583,7 +613,7 @@ impl Player {
         for x in &mut self.snake_explosions {
             x.time+=1;x.pos[0]+=x.angle.cos()*x.speed;x.pos[1]+=x.angle.sin()*x.speed;x.radius+=x.growth;
             if x.time%x.interval==0 {self.damage_circles.push(crate::skill::DamageCircle {pos:x.pos,radius:x.radius,
-                damage:x.damage,remaining:1,growth:0.0,rect:None,ellipse:None,orect:None});}
+                damage:x.damage,remaining:1,growth:0.0,rect:None,ellipse:None,orect:None,polygon:None});}
         }
         self.snake_explosions.retain(|x|x.time<x.life);
         // Nazrin's skill collider (FUN_005402e0 keeps its radius at the VM's X scale; flags
@@ -607,7 +637,15 @@ impl Player {
             for (index, enemy) in enemies.iter_mut().enumerate() {
                 let d = &mut enemy.data;
                 if d.delete || d.flags & flag::NO_HURTBOX != 0 || d.hurtbox[0] <= 0.0 { continue; }
-                let hit = if let Some((size, angle)) = circle.orect {
+                let hit = if let Some((r, angle, sides)) = circle.polygon {
+                    // Collider type 7 (FUN_0051e670): FUN_004d22d0 for a box body (flag 0x1000),
+                    // FUN_004d26a0 for a round one. APPROX: the box body is not turned.
+                    if d.flags & 0x1000 != 0 {
+                        crate::scope::polygon_rect(d.pos, d.hurtbox, 0.0, circle.pos, r, angle, sides)
+                    } else {
+                        crate::scope::polygon_circle(d.pos, d.hurtbox[0] / 2.0, circle.pos, r, angle, sides)
+                    }
+                } else if let Some((size, angle)) = circle.orect {
                     // FUN_0051f320's oriented box, tested like a shot's collider.
                     shot_hits(circle.pos, size, angle, d)
                 } else if let Some((a, b, theta)) = circle.ellipse {
@@ -713,6 +751,10 @@ impl Player {
         }
         if let Some(level) = released {
             use crate::charge::Level;
+            // A skill that refuses (Mamizou's at full bomb stock, FUN_00420380; Saki's while her
+            // volley runs, FUN_00423f80) returns non-zero to FUN_004e79e0, which then neither
+            // spends the meter nor plays the skill: only the basic shot follows, as for an attack.
+            let level = if level == Level::Skill && self.skill_refused() { Level::Attack } else { level };
             self.last_charge = Some(level);
             self.charge_event = Some(level);
             if !self.skill_volley || level==Level::Skill {self.charge_origin = self.pos;}
@@ -774,8 +816,40 @@ impl Player {
                 self.scope.start_circle(self.pos, self.anm_file, world, lib, field);
                 self.orin_armed = true;
             }
-            // The basic local shot accompanies every release ([3] after the switch).
-            if !self.skill_volley && self.nazrin_skill.is_none() { self.charge_timer = Some(0); }
+            if level == Level::Skill && self.character == Character::Tsukasa {
+                // FUN_0041e5e0: scripts 13 and 12 at her, radius 20 -> 420 over 170 frames.
+                // APPROX: a second cast deletes the first one's VMs (the original overwrites the
+                // handles).
+                if let Some(old) = self.tsukasa_skill.take() { for id in old.vms { world.delete(id); } }
+                let at = field_to_canvas(field, self.pos);
+                let vms = [world.spawn_clipped(lib, self.anm_file, 13, at, field), world.spawn_clipped(lib, self.anm_file, 12, at, field)];
+                let mut growth = th_anm::interp::Interp::default();
+                growth.start([20.0], [420.0], 170, 4);
+                self.tsukasa_skill = Some(SweepCircle { pos: self.pos, frames: 170, growth, vms });
+            }
+            if level == Level::Skill && self.character == Character::Mamizou {
+                // FUN_00420380: a bomb fragment, script 9 where she is, and a radius 40 burst.
+                self.add_bomb_fragment();
+                world.spawn_clipped(lib, self.anm_file, 9, field_to_canvas(field, self.pos), field);
+                self.mamizou_burst = Some(self.pos);
+            }
+            if level == Level::Skill && self.character == Character::Yachie {
+                // FUN_00422150: sound 0x29 panned to her side; the skill area replaces the basic.
+                if crate::sfx::on(crate::sfx::Cat::Skill) { self.sounds.push((0x29, None)); }
+                self.start_hex_area(true, world, lib, field);
+            }
+            if level == Level::Skill && self.character == Character::Saki {
+                // FUN_00423f80: SHT slot 11 for 60 frames.
+                self.skill_volley = true; self.charge_timer = Some(0);
+            }
+            // The basic local shot accompanies every release ([3] after the switch). Yachie's
+            // (FUN_00421f80) is her small hexagon instead, not while the skill one runs.
+            if self.character == Character::Yachie {
+                if !self.yachie_area.as_ref().is_some_and(|a| a.skill) {
+                    if crate::sfx::on(crate::sfx::Cat::Skill) { self.sounds.push((0x29, None)); }
+                    self.start_hex_area(false, world, lib, field);
+                }
+            } else if !self.skill_volley && self.nazrin_skill.is_none() { self.charge_timer = Some(0); }
             if matches!(level, Level::Extra | Level::Boss) { self.barrier = Barrier::Up; }
         }
         if let Some(t) = self.charge_timer {
@@ -790,15 +864,91 @@ impl Player {
                 Character::Nazrin => (10,120,121),
                 Character::Seiran => if self.skill_volley {(11,200,211)} else {(10,30,41)},
                 Character::Orin => (if self.orin_armed {11} else {10},10,11),
+                // FUN_0041e750 (Tsukasa), FUN_004204f0 (Mamizou): slot 10, 50 frames, stop past
+                // 60; FUN_00424000 (Saki): slot 10 the same, slot 11 60 / 70 for the skill.
+                Character::Tsukasa | Character::Mamizou => (10,50,61),
+                Character::Saki => if self.skill_volley {(11,60,71)} else {(10,50,61)},
                 _ => (10,21,21),
             };
-            if t < fire_frames { self.fire_slot(slot, t, 0, world, lib, field); }
+            // Saki's update passes the timer as the long timer too (FUN_0054f990(t, t, slot)),
+            // which her records' alternate interval uses.
+            let long = if self.character == Character::Saki { t } else { 0 };
+            if t < fire_frames { self.fire_slot(slot, t, long, world, lib, field); }
             if t == 0 && std::mem::take(&mut self.wide_charge) { self.fire_slot(11,t,0,world,lib,field); }
             self.charge_timer = (t+1 < stop).then_some(t+1);
             if self.charge_timer.is_none() {
                 self.skill_volley=false;
                 if slot == 11 && self.character == Character::Orin { self.orin_armed = false; }
             }
+        }
+    }
+
+    /// Whether the EX class's skill callback refuses: Mamizou's when the bomb stock (clamped
+    /// to 0..10) has reached the maximum (clamped to 0..7), Saki's while her volley runs.
+    fn skill_refused(&self) -> bool {
+        match self.character {
+            Character::Mamizou => self.max_bombs.clamp(0, 7) <= self.bombs.clamp(0, 10),
+            Character::Saki => self.skill_volley,
+            _ => false,
+        }
+    }
+
+    /// `FUN_00537b90`: below the stock maximum a fragment plays 0x2e; the third one is a bomb
+    /// (`FUN_00537c30(1, 1)`: 0x2e again unless that went over the maximum).
+    fn add_bomb_fragment(&mut self) {
+        let max = self.max_bombs.clamp(0, 7);
+        if max <= self.bombs { self.bomb_fragments = 0; return; }
+        if crate::sfx::on(crate::sfx::Cat::Skill) { self.sounds.push((0x2e, Some(0))); }
+        self.bomb_fragments += 1;
+        if self.bomb_fragments > 2 {
+            self.bomb_fragments = 0;
+            self.bombs += 1;
+            if max < self.bombs { self.bombs = max; }
+            else if crate::sfx::on(crate::sfx::Cat::Skill) { self.sounds.push((0x2e, Some(0))); }
+        }
+    }
+
+    /// Yachie's area starts where she is (EX +0x9c) with a fresh timer.
+    fn start_hex_area(&mut self, skill: bool, world: &mut World, lib: &AnmLibrary, field: [f32; 4]) {
+        world.spawn_clipped(lib, self.anm_file, if skill { 10 } else { 8 }, field_to_canvas(field, self.pos), field);
+        let mut growth = th_anm::interp::Interp::default();
+        if skill { growth.start([1.0], [128.0], 60, 4); } else { growth.start([1.0], [48.0], 10, 4); }
+        self.yachie_area = Some(HexArea { pos: self.pos, skill, time: 0, growth, radius: 1.0 });
+    }
+
+    /// The later characters' EX class updates that run every frame: Mamizou's burst, Tsukasa's
+    /// sweep and Yachie's hexagons.
+    fn update_later_skills(&mut self, world: &mut World) {
+        use crate::skill::DamageCircle;
+        if let Some(pos) = self.mamizou_burst.take() {
+            // FUN_004ee770 / FUN_00530c60 radius 40; FUN_005200f0(radius 40, life 1, damage 20).
+            self.cancel_circles.push((pos, 40.0));
+            self.damage_circles.push(DamageCircle { pos, radius: 40.0, damage: 20, remaining: 1, growth: 0.0,
+                rect: None, ellipse: None, orect: None, polygon: None });
+        }
+        if let Some(s) = &mut self.tsukasa_skill {
+            if s.frames > 0 {
+                let r = s.growth.step().map_or(20.0, |[r]| r);
+                self.explosion_requests.push((s.pos, r));
+                if let Some(vm) = world.get_mut(s.vms[1]) { vm.scale = [r, r]; }
+                s.frames -= 1;
+                if s.frames < 1 {
+                    for id in s.vms { world.delete(id); }
+                    self.tsukasa_skill = None;
+                }
+            }
+        }
+        if let Some(a) = &mut self.yachie_area {
+            let (areas, end) = if a.skill { (110, 110) } else { (40, 40) };
+            if a.time < areas {
+                if let Some([r]) = a.growth.step() { a.radius = r; }
+                self.cancel_polygons.push((a.pos, a.radius, 0.0, 6));
+                // FUN_0051f860(.., angle 0, 6 sides, damage 1): life 1, flag 0x10.
+                self.damage_circles.push(DamageCircle { pos: a.pos, radius: 0.0, damage: 1, remaining: 1, growth: 0.0,
+                    rect: None, ellipse: None, orect: None, polygon: Some((a.radius, 0.0, 6)) });
+            }
+            a.time += 1;
+            if a.time > end { self.yachie_area = None; }
         }
     }
 
@@ -1063,7 +1213,10 @@ impl Player {
         let mut hits = Vec::new();
         for b in &mut beams {
             let origin = self.origin_of(b.origin()).unwrap_or(self.pos);
-            let alive = if b.is_charge() { !matches!(self.state, State::GameOver) } else { keep };
+            // FUN_0054d370: a record with a life (+0x3c) only needs the player up and no bomb.
+            let alive = if b.is_charge() { !matches!(self.state, State::GameOver) }
+                else if b.life() > 0 { !matches!(self.state, State::Dead | State::Hit | State::GameOver) && self.bomb.is_none() }
+                else { keep };
             let was_ended = b.ended;
             b.update(origin, alive, field, world);
             // 0054d370 / 0054c830: when a beam ends (state 2, VM interrupt 1) they stop sound 0x14,
@@ -1530,7 +1683,7 @@ fn combined_player_colliders_obey_original_damage_cap() {
     assert_eq!(i32::from_le_bytes(p.sht.params_raw[8..12].try_into().unwrap()),90);
     // Three skill colliders total 120 this frame; the original caps their sum at 90.
     p.damage_circles=(0..3).map(|_|crate::skill::DamageCircle {
-        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1,rect: None, ellipse: None, orect: None
+        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1,rect: None, ellipse: None, orect: None, polygon: None
     }).collect();
     let mut enemies=[crate::Enemy {
         threads:th_ecl::Threads::new(th_ecl::Context::new(th_ecl::SubRef{file:0,sub:0})),
@@ -1540,7 +1693,7 @@ fn combined_player_colliders_obey_original_damage_cap() {
     assert_eq!(enemies[0].data.hp,4910);
     enemies[0].data.hp=1500; enemies[0].data.spell_hp7=Some(10500);
     p.damage_circles=(0..3).map(|_|crate::skill::DamageCircle {
-        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1,rect: None, ellipse: None, orect: None
+        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1,rect: None, ellipse: None, orect: None, polygon: None
     }).collect();
     p.update(0,&mut enemies,&mut world,&lib,crate::FIELDS[0]);
     assert_eq!(enemies[0].data.spell_hp7,Some(10410));
@@ -1548,7 +1701,7 @@ fn combined_player_colliders_obey_original_damage_cap() {
     p.state=State::Entering;
     enemies[0].data.hp=5000;enemies[0].data.spell_hp7=None;
     p.damage_circles=(0..3).map(|_|crate::skill::DamageCircle {
-        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1,rect: None, ellipse: None, orect: None
+        pos:p.pos,radius:10.0,growth:0.0,damage:40,remaining:1,rect: None, ellipse: None, orect: None, polygon: None
     }).collect();
     p.update(0,&mut enemies,&mut world,&lib,crate::FIELDS[0]);
     assert_eq!(enemies[0].data.hp,4982,"Entering divides the capped 90 damage by five");

@@ -4,6 +4,11 @@
 //! rectangle collider that grows 18 pixels a frame up to about 512 from its origin (the player
 //! or an option) along the record's angle, pierces every enemy it overlaps, is cut short at the
 //! one it hits, and lasts while the shot button is held. At most one beam per SHT group is alive.
+//!
+//! Saki's beams are records `[18, 2, 0, 8]`: the same update (they follow the player), but init
+//! `FUN_0054d960` gives the collider a hit interval of 4 and the hit callback is the charge
+//! beam's `FUN_0054c7c0` (never cut short). A record with a life (+0x3c, 60 for her charge
+//! slots 10 and 11) lasts that many frames whatever the shot button does (`FUN_0054d370`).
 use th_anm::{AnmLibrary, VmId, World};
 use th_formats::sht::ShotRecord;
 
@@ -22,6 +27,13 @@ pub struct Beam {
     /// A charge beam: lasts 120 frames whatever the shot button does, is not cut by what it hits
     /// and damages on every frame.
     charge: bool,
+    /// Hit callback 2 (`FUN_0054cd70`): cut short at what it hits, damage every 4th frame of
+    /// its age; otherwise (`FUN_0054c7c0`) never cut, damage on each collider hit.
+    cut: bool,
+    /// The collider's hit interval (+0xa4): 4 after init 18, else 1.
+    interval: i32,
+    /// SHT record +0x3c: frames the beam lasts regardless of the button (0: tied to it).
+    life: i32,
     /// SHT origin nibble: 0 the player, n the n-th option.
     origin: u8,
     offset: [f32; 2],
@@ -48,6 +60,9 @@ impl Beam {
         Self {
             group: r.group,
             charge: r.funcs[0] == 12,
+            cut: r.funcs[3] == 2,
+            interval: if r.funcs[0] == 18 { 4 } else { 1 },
+            life: i32::from_le_bytes(r.raw[0x3c..0x40].try_into().unwrap()),
             origin: r.origin & 0xf,
             offset: r.offset,
             angle: crate::motion::wrap_angle(r.angle),
@@ -73,6 +88,11 @@ impl Beam {
     /// Whether it is a charge beam (not tied to the shot button).
     pub fn is_charge(&self) -> bool {
         self.charge
+    }
+
+    /// The record's life (+0x3c): a beam with one is not tied to the shot button.
+    pub fn life(&self) -> i32 {
+        self.life
     }
 
     pub fn origin(&self) -> u8 {
@@ -123,7 +143,7 @@ impl Beam {
             }
             self.impacting = false;
         }
-        if !keep || (self.charge && self.time > CHARGE_FRAMES) {
+        if !keep || (self.charge && self.time > CHARGE_FRAMES) || (self.life > 0 && self.time >= self.life) {
             self.ended = true;
             self.fade = 30;
             if let Some(id) = self.vm {
@@ -157,8 +177,10 @@ impl Beam {
                 }
                 self.impacting = true;
             }
-            if self.charge {
-                out.push((index, self.damage, centre));
+            if !self.cut {
+                // APPROX (phase): the collider's own life counter (+0x80) picks the frames of an
+                // interval above 1; the beam's age stands in for it.
+                if self.time % self.interval == 0 { out.push((index, self.damage, centre)); }
                 continue;
             }
             let radius = d.hurtbox[0] / 2.0;
@@ -172,7 +194,7 @@ impl Beam {
             self.len = l;
         }
         // An impact glow at the end of the beam on every even frame (record +0x2e).
-        if self.hit && !self.charge && self.time % 2 == 0 && self.impact_script >= 0 {
+        if self.hit && self.cut && self.time % 2 == 0 && self.impact_script >= 0 {
             let (s, c) = angle.sin_cos();
             let end = [self.pos[0] + c * self.len, self.pos[1] + s * self.len];
             world.spawn_rotated(lib, anm, self.impact_script as usize, field_to_canvas(field, end), field, angle);

@@ -15,6 +15,9 @@ pub struct DamageCircle {
     pub ellipse: Option<(f32, f32, f32)>,
     /// A box (size along / across the angle, angle) instead (`FUN_0051f320`: Orin's bomb).
     pub orect: Option<([f32; 2], f32)>,
+    /// A regular polygon (radius, angle of the first vertex, sides) instead (collider type 7,
+    /// `FUN_0051f860`: Yachie's hexagons).
+    pub polygon: Option<(f32, f32, u32)>,
 }
 pub struct Skill {
     pub time: i32,
@@ -97,7 +100,7 @@ impl Skill {
                         radius: 64.0,
                         damage: 4,
                         remaining: 1,
-                        growth: 0.0, rect: None, ellipse: None, orect: None,
+                        growth: 0.0, rect: None, ellipse: None, orect: None, polygon: None,
                     });
                 }
             }
@@ -108,7 +111,7 @@ impl Skill {
                 radius: 64.0,
                 damage: 1,
                 remaining: 24,
-                growth: 1.0, rect: None, ellipse: None, orect: None,
+                growth: 1.0, rect: None, ellipse: None, orect: None, polygon: None,
             });
         }
         self.time += 1;

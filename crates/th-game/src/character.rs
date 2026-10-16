@@ -12,13 +12,19 @@ pub enum Character {
     Nazrin,
     Seiran,
     Orin,
+    Tsukasa,
+    Mamizou,
+    Yachie,
+    Saki,
 }
 
 impl Character {
-    pub const ALL: [Character; 8] = [Character::Reimu, Character::Marisa, Character::Sanae, Character::Ran,
-        Character::Aunn, Character::Nazrin, Character::Seiran, Character::Orin];
+    pub const ALL: [Character; 12] = [Character::Reimu, Character::Marisa, Character::Sanae, Character::Ran,
+        Character::Aunn, Character::Nazrin, Character::Seiran, Character::Orin,
+        Character::Tsukasa, Character::Mamizou, Character::Yachie, Character::Saki];
 
-    /// Character-select number: Reimu 1, Marisa 2, Sanae 3, Ran 4, Aunn 5, Nazrin 6, Seiran 7, Orin 8.
+    /// Character-select number: Reimu 1, Marisa 2, Sanae 3, Ran 4, Aunn 5, Nazrin 6, Seiran 7, Orin 8,
+    /// Tsukasa 9, Mamizou 10, Yachie 11, Saki 12.
     pub fn number(self) -> usize {
         self as usize + 1
     }
@@ -33,7 +39,17 @@ impl Character {
             Character::Nazrin => "Nazrin",
             Character::Seiran => "Seiran",
             Character::Orin => "Orin",
+            Character::Tsukasa => "Tsukasa",
+            Character::Mamizou => "Mamizou",
+            Character::Yachie => "Yachie",
+            Character::Saki => "Saki",
         }
+    }
+
+    /// The characters from Aunn on, whose aura classes answer the body and bullet tests through
+    /// their own [7] callback (`scope::Probe`).
+    pub fn uses_probe(self) -> bool {
+        self as usize >= Character::Aunn as usize
     }
 
     /// File prefix: `pl00` for Reimu, `pl01` for Marisa.

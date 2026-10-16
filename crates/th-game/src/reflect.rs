@@ -29,6 +29,8 @@ pub struct Request {
     pub tangents: Option<([f32; 2], [f32; 2])>,
     /// Land at the opponent player's x on the bottom row (y 448) instead of `target`.
     pub aim_player: bool,
+    /// Which attack a special bullet becomes (Mamizou's `ExAttackW` / `O` / `E`, request +0x48).
+    pub variant: u8,
 }
 
 /// The type the converted bullet takes (`FUN_0051c8c0`): the cancelled bullet's own type
@@ -58,6 +60,7 @@ pub struct Pending {
     owner: usize,
     script: Option<i32>,
     character: crate::character::Character,
+    variant: u8,
 }
 
 /// A converted bullet reaching the opponent's field.
@@ -72,6 +75,7 @@ pub struct Arrival {
     /// Side whose program runs it (special bullets).
     pub owner: usize,
     pub character: crate::character::Character,
+    pub variant: u8,
 }
 
 impl Pending {
@@ -94,13 +98,15 @@ impl Pending {
     /// (vtable [1]): Sanae 80-159 frames (`FUN_004186e0`), Ran 50-89, Orin 70-129
     /// (`FUN_0041cbb0`, whose tangents are always (r100, 200), (r100, -300)); Aunn, Nazrin and
     /// Seiran 60-159 (`FUN_0053f2c0`, `FUN_0041af40`, `FUN_0041bb20`) with the default tangents.
+    /// Tsukasa, Mamizou, Yachie and Saki fly like Orin (`FUN_0041e200`, `FUN_0041fe00`,
+    /// `FUN_00421a90`, `FUN_004239f0`: 70-129 frames, the same tangents).
     pub fn new_character(req: Request, source_field: [f32;4], receiver: &mut SideState, character: crate::character::Character) -> Self {
         use crate::character::Character::*;
         let special = req.special_rank.is_some();
         let delay = match character {
             Sanae if special => receiver.rand16() as i32%80+80,
             Ran if special => receiver.rand16() as i32%40+50,
-            Orin if special => receiver.rand16() as i32%60+70,
+            Orin | Tsukasa | Mamizou | Yachie | Saki if special => receiver.rand16() as i32%60+70,
             _ => receiver.rand16() as i32%100+60,
         };
         let jitter = [receiver.randf2() * 16.0, receiver.randf() * 32.0];
@@ -108,11 +114,11 @@ impl Pending {
         let start = field_to_canvas(source_field, req.origin);
         let end = field_to_canvas(receiver.field, target);
         let mut curve = Interp::default();
-        let (t0, t1) = req.tangents.unwrap_or_else(|| if matches!(character,Sanae|Ran|Orin) && special {
+        let (t0, t1) = req.tangents.unwrap_or_else(|| if matches!(character,Sanae|Ran|Orin|Tsukasa|Mamizou|Yachie|Saki) && special {
             ([receiver.randf2()*100.0,200.0],[receiver.randf2()*100.0,-300.0])
         } else {([receiver.randf2() * 100.0, -400.0], [receiver.randf2() * 100.0, 100.0])});
         curve.start_bezier(start, t0, end, t1, delay);
-        Self { kind: req.kind, color: req.color, speed: (req.speed + 0.5).min(6.0), target, delay, time: 0, start, curve, vm: None, special_rank: req.special_rank, owner: req.owner, script: req.script, character }
+        Self { kind: req.kind, color: req.color, speed: (req.speed + 0.5).min(6.0), target, delay, time: 0, start, curve, vm: None, special_rank: req.special_rank, owner: req.owner, script: req.script, character, variant: req.variant }
     }
 
     /// One frame: the bullet's sprite (0.8 scale) flies; on arrival it becomes a bullet
@@ -124,7 +130,7 @@ impl Pending {
             // Ran's and the later characters' specials use the sender's plNNb.anm
             // (EnemyManager +0x4adc); Sanae's and Marisa's come from bullet.anm.
             let own_file=match self.character {
-                Ran | Aunn | Nazrin | Seiran | Orin => lib.file_id(&format!("{}b.anm", self.character.prefix())),
+                c if c == Ran || c.uses_probe() => lib.file_id(&format!("{}b.anm", self.character.prefix())),
                 _ => anm,
             };
             if let (Some(file), Some(script)) = (own_file, self.script) {
@@ -134,9 +140,10 @@ impl Pending {
                 if let Some(vm) = world.get_mut(id) {
                     // The flight updates (FUN_00418a80, FUN_0053f150) hold Sanae's and Aunn's
                     // sprite at alpha 0xc0, scale 0.8; Nazrin's and Seiran's (FUN_0041b2e0) and
-                    // Orin's (FUN_0041cf10) keep their script's. Orin's VM gets resolution mode 6.
+                    // Orin's (FUN_0041cf10) keep their script's, as do the later four (they only
+                    // move the VM). Orin's VM gets resolution mode 6.
                     match self.character {
-                        Nazrin | Seiran | Orin if special => {}
+                        Nazrin | Seiran | Orin | Tsukasa | Mamizou | Yachie | Saki if special => {}
                         _ => vm.scale = [0.8, 0.8],
                     }
                     if special && matches!(self.character, Sanae | Ran | Aunn) { vm.alpha = 192.0; }
@@ -162,7 +169,7 @@ impl Pending {
         }
         if let Some(id) = self.vm.take() { world.delete(id); }
         if self.special_rank.is_some() {
-            return Some(Arrival { kind: self.kind, color: self.color, speed: 0.0, angle: 0.0, pos: self.target, special: self.special_rank, owner: self.owner, character:self.character });
+            return Some(Arrival { kind: self.kind, color: self.color, speed: 0.0, angle: 0.0, pos: self.target, special: self.special_rank, owner: self.owner, character:self.character, variant: self.variant });
         }
         // FUN_0051bd50: at |x| >= 64 the bullet aims down and up to 30 degrees inward
         // (pi/2 -/+ FUN_00404c90(pi/6), i.e. unit * pi/6); nearer the middle down +- 30 degrees.
@@ -173,7 +180,7 @@ impl Pending {
             FRAC_PI_2 + receiver.randf2() * FRAC_PI_6
         };
         let speed = receiver.randf() * 0.2 + self.speed + receiver.spirit_pressure as f32 / 200.0 * 2.0;
-        Some(Arrival { kind: self.kind, color: self.color, speed, angle, pos: self.target, special: None, owner: self.owner, character:self.character })
+        Some(Arrival { kind: self.kind, color: self.color, speed, angle, pos: self.target, special: None, owner: self.owner, character:self.character, variant: 0 })
     }
 }
 
@@ -200,8 +207,16 @@ pub fn special_time_bonus(frames: i32) -> i32 {
     match frames { ..3600 => 0, 3600..7200 => 20, 7200..10800 => 40, _ => 100 }
 }
 
-/// How many special bullets one side may have on the other (ExtraAttackInf +0x38): 20, doubling
-/// at 3600 and 7200 frames, unlimited from 10800.
-pub fn special_limit(frames: i32) -> usize {
-    match frames { ..3600 => 20, 3600..7200 => 40, 7200..10800 => 80, _ => 999 }
+/// How many special bullets one side may have on the other (ExtraAttackInf +0x38): the base,
+/// doubling at 3600 and 7200 frames, unlimited from 10800 (`FUN_0050df40`).
+pub fn special_limit(frames: i32, base: usize) -> usize {
+    match frames { ..3600 => base, 3600..7200 => base * 2, 7200..10800 => base * 4, _ => 999 }
+}
+
+/// The limit's base: 20 at Normal (`FUN_0050e150`), replaced by the EX class's init
+/// (`FUN_004121a0`): Ran and Aunn 30 (`FUN_00419a30`), Mamizou 32 (`FUN_00420260`), Yachie 14
+/// (`FUN_00421ee0`), Saki 15 (`FUN_00423e40`).
+pub fn special_limit_base(character: crate::character::Character) -> usize {
+    use crate::character::Character::*;
+    match character { Ran | Aunn => 30, Mamizou => 32, Yachie => 14, Saki => 15, _ => 20 }
 }

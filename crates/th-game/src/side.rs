@@ -141,6 +141,9 @@ pub struct SideState {
     pub scope_circle: Option<([f32; 2], f32)>,
     pub scope_column: bool,
     pub scope_character: crate::character::Character,
+    /// The character of each program owner (players 0 and 1, partners 2 and 3), refreshed by
+    /// `prepare_charge_targets`.
+    pub owner_characters: [crate::character::Character; 4],
     /// The aura's [7] state for Aunn, Nazrin, Seiran and Orin (whose shapes the fields above
     /// do not describe); `None` while it is not running.
     pub scope_probe: Option<crate::scope::Probe>,
@@ -187,6 +190,16 @@ pub struct Explosion {
     radius_interp: th_anm::interp::Interp<1>,
     /// The collider skips the enemy it hit most recently (`+0xa8`).
     vm: Option<th_anm::VmId>,
+}
+
+impl Explosion {
+    /// An explosion without a sprite (`FUN_0051cc70` called with no VM): radius 1 -> `radius`
+    /// (mode 5) over `duration` frames.
+    pub fn plain(pos: [f32; 2], radius: f32, duration: i32, damage: i32) -> Self {
+        let mut radius_interp = th_anm::interp::Interp::<1>::default();
+        radius_interp.start([1.0], [radius], duration, 5);
+        Self { pos, time: 0, duration, radius: 1.0, damage, radius_interp, vm: None }
+    }
 }
 
 /// The counters behind the automatic EX ("C3") and boss ("C4") attacks that chains send to the
@@ -269,8 +282,7 @@ impl SideState {
     }
     /// The aura [7] result for the characters described by `scope_probe` (`None` for the others).
     fn new_scope_test(&self, pos: [f32;2], radius: f32) -> Option<i32> {
-        use crate::character::Character::*;
-        if !matches!(self.scope_character, Aunn | Nazrin | Seiran | Orin) { return None; }
+        if !self.scope_character.uses_probe() { return None; }
         Some(self.scope_probe.filter(|p| p.running()).map_or(0, |p| p.test(pos, radius)))
     }
     /// `FUN_00509030`'s aura test for an enemy body (radius: half its +0x120 size): positive when
@@ -294,8 +306,7 @@ impl SideState {
     }
     fn scope_bullet_with(circle: Option<([f32;2],f32)>, character: crate::character::Character,
         probe: Option<crate::scope::Probe>, pos: [f32;2], radius: f32) -> bool {
-        use crate::character::Character::*;
-        if matches!(character, Aunn | Nazrin | Seiran | Orin) {
+        if character.uses_probe() {
             return probe.filter(|p| p.running()).is_some_and(|p| p.test(pos, radius) > 0);
         }
         circle.is_some_and(|(c,r)| crate::scope::bullet_hit(character,c,r,pos,radius))
@@ -556,7 +567,7 @@ impl Side {
                 sounds: Vec::new(),
                 explosions: Vec::new(),
                 scope_circle: None,
-                scope_column: false, scope_character: Default::default(), scope_probe: None, shakes: Vec::new(),
+                scope_column: false, scope_character: Default::default(), owner_characters: Default::default(), scope_probe: None, shakes: Vec::new(),
                 spirit_credit: 0, spirit_origin: [0.0;2], spirit_pressure: 0, spirit_frames: 0,
                 outgoing_spirits: Vec::new(), pending_spirits: Vec::new(), outgoing_reflects: Vec::new(), pending_reflects: Vec::new(), arrived_reflects: Vec::new(), rain: 0, dot_counter: 0, special_counter: 0, special_sequence: 0, last_credit_pos: [0.0; 2], last_special_pos: [0.0; 2],
                 sent_spirits_pending: 0,
@@ -618,7 +629,7 @@ impl Side {
         for (kind, color, speed, origin) in cancelled {
             let roll = st.rand();
             let kind = crate::reflect::converted_kind(kind, st.spirit_frames, roll);
-            st.outgoing_reflects.push(crate::reflect::Request { kind, color, speed, origin, target: None, special_rank: None, owner: 0, script: None, tangents: None, aim_player: false });
+            st.outgoing_reflects.push(crate::reflect::Request { kind, color, speed, origin, target: None, special_rank: None, owner: 0, script: None, tangents: None, aim_player: false, variant: 0 });
             // FUN_00548bc0(30) and FUN_00548d00(1) per cancelled bullet.
             st.add_dots(30, origin);
             st.add_special(1, origin);
@@ -683,6 +694,8 @@ impl Side {
                 b.intersects_cancel_ellipse(pos,a,e,theta,ctx.world,ctx.lib))) { b.cancel(); continue; }
             if ps.iter().any(|p| p.cancel_orects.iter().any(|&(pos,size,angle)|
                 b.intersects_cancel_box(pos,size,angle,ctx.world,ctx.lib))) { b.cancel(); continue; }
+            if ps.iter().any(|p| p.cancel_polygons.iter().any(|&(pos,r,angle,sides)|
+                b.intersects_cancel_polygon(pos,r,angle,sides,ctx.world,ctx.lib))) { b.cancel(); continue; }
             // FUN_00549e00: hit when d^2 < player_r^2 + bullet_r^2.
             let hit_by = if b.state == 1 && !b.delete {
                 ps.iter().zip(&radii).position(|(p, &r)| r > 0.0 && d2_of(b, p) < r * r + b.hitbox * b.hitbox)
@@ -741,7 +754,15 @@ impl Side {
                     let pan = if st.field[0] < 320.0 { -100.0 } else { 100.0 };
                     st.sounds.push((0x3e, (pan * 1000.0 / 192.0) as i32));
                 }
-                st.request(SpawnRequest { id: 0, difficulty: 0, sub: if matches!(a.character,Reimu|Marisa) {"ExtraAttack00"} else {"ExAttack"}.into(), pos: a.pos, hp: 200, score: 0,
+                // The flight updates spawn the attack with 200 HP; Yachie's (FUN_00421dd0) 2400
+                // and Saki's (FUN_00423d30) 4000. Mamizou's (FUN_00420140) picks the sub.
+                let sub = match a.character {
+                    Reimu | Marisa => "ExtraAttack00",
+                    Mamizou => ["ExAttackW", "ExAttackO", "ExAttackE"][a.variant.min(2) as usize],
+                    _ => "ExAttack",
+                };
+                let hp = match a.character { Yachie => 2400, Saki => 4000, _ => 200 };
+                st.request(SpawnRequest { id: 0, difficulty: 0, sub: sub.into(), pos: a.pos, hp, score: 0,
                     item: -1, mirrored: false, ivars: [0; 4], fvars: [0.0; 8], owner: Some(a.owner) });
                 continue;
             }
@@ -945,6 +966,9 @@ impl Side {
             if std::mem::take(&mut p.bomb_shake) {
                 self.st.shakes.push(crate::shake::Shake::bomb(side as usize));
             }
+            for (pos, radius) in p.explosion_requests.drain(..) {
+                self.st.explosions.push(Explosion::plain(pos, radius, 1, 0));
+            }
             // Losing a heart raises this player's EX and boss levels by one while below 3
             // (FUN_00549830, status +0x38/+0x3c).
             if std::mem::take(&mut p.just_died) {
@@ -1059,6 +1083,7 @@ impl Side {
             areas.extend(p.cancel_columns.iter().map(|&(x,half_width)| crate::laser::CancelArea::Column {x,half_width}));
             areas.extend(p.cancel_orects.iter().map(|&(pos,size,angle)| crate::laser::CancelArea::ORect {pos,size,angle}));
             areas.extend(p.cancel_ellipses.iter().map(|&(pos,a,b,angle)| crate::laser::CancelArea::Ellipse {pos,a,b,angle}));
+            areas.extend(p.cancel_polygons.iter().map(|&(pos,radius,angle,sides)| crate::laser::CancelArea::Polygon {pos,radius,angle,sides}));
         }
         for area in areas { self.st.cancel_lasers(area, true, world, lib); }
         let mut lasers = std::mem::take(&mut self.st.lasers);
@@ -1153,6 +1178,12 @@ pub fn prepare_charge_targets(sides: &mut [Side]) {
     for i in 0..2 {
         for slot in 0..2 { if let Some(p)=sides[i].slot_mut(slot) { p.opponent_boss_active=active[1-i]; } }
     }
+    let mut owners = [crate::character::Character::default(); 4];
+    for (i, side) in sides.iter().enumerate() {
+        if let Some(p) = &side.player { owners[i] = p.character; }
+        if let Some(p) = &side.partner { owners[i + 2] = p.character; }
+    }
+    for side in sides.iter_mut() { side.st.owner_characters = owners; }
 }
 pub fn dispatch_charges(sides: &mut [Side]) {
     if sides.len()!=2 { return; }
@@ -1197,10 +1228,12 @@ pub fn dispatch_charges(sides: &mut [Side]) {
     // The dot and special-bullet counters send attacks (FUN_005450e0 and Reimu's FUN_0053ac80).
     for sender in 0..2 {
         let frames = sides[sender].st.spirit_frames;
-        let mut active = sides[1 - sender].enemies.iter().filter(|e| matches!(e.data.sub.as_str(),"ExtraAttack00"|"ExAttack")).count()
+        let mut active = sides[1 - sender].enemies.iter().filter(|e| e.data.sub == "ExtraAttack00" || e.data.sub.starts_with("ExAttack")).count()
             + sides[1 - sender].st.pending_reflects.iter().filter(|p| p.is_special()).count();
         let rank = sides[sender].st.extra_level as i32;
         let character = sides[sender].player.as_ref().map_or(Default::default(),|p|p.character);
+        // Mamizou's ExAttackW lands at the receiving player's height.
+        let receiver_y = sides[1 - sender].player.as_ref().map_or(400.0, |p| p.pos[1]);
         let st = &mut sides[sender].st;
         // White dots: threshold 150 minus the pressure term, one bullet each.
         let threshold = (150 - (st.spirit_pressure as f32 / 200.0 * 100.0) as i32).max(1);
@@ -1213,19 +1246,22 @@ pub fn dispatch_charges(sides: &mut [Side]) {
             let target = [st.randf2() * 148.0, st.randf() * 16.0];
             let color = (st.rand() & 0xf) as i32;
             st.outgoing_reflects.push(crate::reflect::Request { kind: crate::reflect::dot_kind(frames, roll), color,
-                speed: 0.5, origin, target: Some(target), special_rank: None, owner: 0, script: None, tangents: None, aim_player: false });
+                speed: 0.5, origin, target: Some(target), special_rank: None, owner: 0, script: None, tangents: None, aim_player: false, variant: 0 });
         }
         // Special bullets: threshold 100/90/90/80 by difficulty (Normal assumed), limited.
         // Reimu's special bullet is a yin-yang (EXOnmyoInf); Marisa's a laser orb (EXLaserInf,
         // bullet.anm script 63). Both land as ExtraAttack00 of the sender's program.
         // EX class [11] tables at Normal: Ran 65, Aunn 45 (0x59df78), Nazrin, Seiran and Orin
-        // 90 (0x59e228, 0x59e4c8, 0x59e720).
+        // 90 (0x59e228, 0x59e4c8, 0x59e720), Tsukasa 90 (0x59e978), Mamizou 70 (0x59ebd0),
+        // Yachie 90 (0x59ee28), Saki 90 (0x59f080).
         use crate::character::Character as C;
-        let threshold = match character { C::Ran => 65, C::Aunn => 45, _ => 90 };
+        let threshold = match character { C::Ran => 65, C::Aunn => 45, C::Mamizou => 70, _ => 90 };
+        let limit = crate::reflect::special_limit(frames, crate::reflect::special_limit_base(character));
         while st.special_counter >= threshold {
             st.special_counter -= threshold;
-            if active >= crate::reflect::special_limit(frames) { break; }
+            if active >= limit { break; }
             active += 1;
+            let mut variant = 0;
             let target = match character {
                 C::Sanae => {
                     let k=st.special_sequence;st.special_sequence+=1;
@@ -1242,6 +1278,28 @@ pub fn dispatch_charges(sides: &mut [Side]) {
                 }
                 // FUN_0041d1b0: x within 132 of the middle, y in 0..160.
                 C::Orin => [st.randf2()*132.0,st.randf()*160.0],
+                // FUN_0041e750: the sides in turn (+0x118 even: left), 16 either way, y 160..360.
+                C::Tsukasa => {
+                    let k = st.special_sequence; st.special_sequence += 1;
+                    let x = if k % 2 == 0 { -148.0 } else { 148.0 };
+                    let x = x + st.randf2() * 16.0;
+                    [x, st.randf() * 200.0 + 160.0]
+                }
+                // FUN_004204f0: rand % 3 picks ExAttackW (a side, at the receiving player's
+                // height up to 128 above), ExAttackO (a side, y 128..256) or ExAttackE (x 0..148
+                // on the top row); the side is rand & 1 (even: left).
+                C::Mamizou => {
+                    let k = st.rand() % 3;
+                    variant = k as u8;
+                    match k {
+                        0 => { let x = if st.rand() & 1 == 0 { -148.0 } else { 148.0 }; [x, receiver_y - st.randf() * 128.0] }
+                        1 => { let x = if st.rand() & 1 == 0 { -148.0 } else { 148.0 }; [x, st.randf() * 128.0 + 128.0] }
+                        _ => [st.randf() * 148.0, 0.0],
+                    }
+                }
+                // FUN_004222d0 (Yachie): x within 128, y 128..256; FUN_00424000 (Saki): y 0..32.
+                C::Yachie => [st.randf2()*128.0,st.randf()*128.0+128.0],
+                C::Saki => [st.randf2()*128.0,st.randf()*32.0],
                 _ => {
                     let t = [st.randf2()*160.0,st.randf()*60.0];
                     // The EX class [10] then replaces it: Aunn FUN_0053eeb0 (y 40..240),
@@ -1257,10 +1315,11 @@ pub fn dispatch_charges(sides: &mut [Side]) {
             let script = match character {
                 C::Reimu => None, C::Marisa => Some(63), C::Sanae => Some(61), C::Ran => Some(14),
                 C::Aunn => Some(17), C::Nazrin => Some(11), C::Seiran => Some(15), C::Orin => Some(31),
+                C::Tsukasa => Some(16), C::Mamizou => Some(13), C::Yachie => Some(14), C::Saki => Some(18),
             };
             st.outgoing_reflects.push(crate::reflect::Request { kind: 44, color: 1, speed: 0.0,
                 origin: st.last_special_pos, target: Some(target), special_rank: Some(rank), owner: sender,
-                script, tangents: None, aim_player: false });
+                script, tangents: None, aim_player: false, variant });
         }
     }
     // Bullets cancelled by a kill explosion fly to the opponent's field and fire there.
@@ -1329,7 +1388,7 @@ pub fn dispatch_charges(sides: &mut [Side]) {
                     let a = -std::f32::consts::FRAC_PI_2 + k as f32 * std::f32::consts::FRAC_PI_3;
                     let t = [a.cos() * 600.0, a.sin() * 600.0];
                     sides[sender].st.outgoing_reflects.push(crate::reflect::Request { kind: 44, color: 1, speed: 0.0, origin,
-                        target: None, special_rank: Some(rank), owner, script: Some(63), tangents: Some((t, t)), aim_player: true });
+                        target: None, special_rank: Some(rank), owner, script: Some(63), tangents: Some((t, t)), aim_player: true, variant: 0 });
                 }
             }
             _ => {}
@@ -1418,7 +1477,7 @@ impl Side {
                 angle: std::f32::consts::FRAC_PI_2 + st.randf2() * 0.15,
                 pos: [x, 0.0],
                 special: None,
-                owner: 0, character:Default::default(),
+                owner: 0, character:Default::default(), variant: 0,
             };
             st.arrived_reflects.push(a);
         }

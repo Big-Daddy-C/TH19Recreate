@@ -52,6 +52,9 @@ pub enum CancelArea {
     ORect { pos: [f32;2], size: [f32;2], angle: f32 },
     /// Aunn's bomb ellipse (`FUN_00530180`): `a` along `angle`, `b` across.
     Ellipse { pos: [f32;2], a: f32, b: f32, angle: f32 },
+    /// Yachie's hexagons (`FUN_00530320`, vtable +0x34): line lasers test each step box with
+    /// `FUN_004d22d0`, curved ones each node with `FUN_004d2a10`.
+    Polygon { pos: [f32;2], radius: f32, angle: f32, sides: u32 },
 }
 
 pub struct CancelContext<'a> {
@@ -294,6 +297,7 @@ impl Laser {
                 // The ellipse callback (vtable +0x3c, FUN_00529820 / FUN_0052c2c0) tests the
                 // 16-pixel step box against the ellipse (FUN_004d3c50).
                 CancelArea::Ellipse { pos, a, b, angle } => crate::scope::ellipse_rect(at, [16.0*c, 16.0*s], self.angle, pos, a, b, angle),
+                CancelArea::Polygon { pos, radius, angle, sides } => crate::scope::polygon_rect(at, [16.0*c, 16.0*s], self.angle, pos, radius, angle, sides),
             };
             mask.push(hit);
             if hit {
@@ -718,6 +722,7 @@ impl Laser {
             CancelArea::ORect {pos,size,angle}=>crate::scope::rect_circle_exact(pos,size,angle,n.pos,0.0),
             // FUN_00524160 -> FUN_004d4420: each node as a point in the ellipse.
             CancelArea::Ellipse {pos,a,b,angle}=>crate::scope::ellipse_circle(n.pos,0.0,pos,a,b,angle),
+            CancelArea::Polygon {pos,radius,angle,sides}=>crate::scope::polygon_contains(n.pos,pos,radius,angle,sides),
         }).collect();
         if !mask.iter().any(|&x|x) {return (true,Vec::new());}
         let mut runs=Vec::new();let mut i=0;

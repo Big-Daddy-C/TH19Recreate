@@ -16,6 +16,16 @@
 //! 6 degrees towards her horizontal movement, speed 1 accelerating by 0.1 a frame, whose
 //! 2R x R box (R 1 -> 50 over 10 frames, mode 6) scopes; once above y = -60 it starts again
 //! from her. Nazrin's and Seiran's [7] is `FUN_00418690` (radii summed, like Sanae's).
+//!
+//! The last four lean with the player's movement: an angle that starts at +-0.12217 (7 degrees)
+//! when moving faster than 0.1 sideways, else 0, and then eases 10% a frame towards that target.
+//! Tsukasa (`0041dba0`/`0041de20`) holds a 4R x R box on her turned by it (script 8, R 1 -> 50
+//! over 10 frames, mode 6). Mamizou (`0041f470`/`0041f770`, [7] `0041fce0`) holds three circles
+//! (script 10, R 1 -> 28 over 10, mode 4) at (0, -96), (64, -64) and (-64, -64) turned by the
+//! angle; the side ones are drawn at 0.6 R, all three test with R. Yachie (`00421210`/`00421490`,
+//! [7] `004217e0`) holds a hexagon of radius R (script 13, 1 -> 88 over 10, mode 4) turned by the
+//! angle - pi/2. Saki (`004231f0`/`00423540`, [7] `00423910`) holds an ellipse 32 along the
+//! angle and 96 across it (script 14, both from 1 over 10 frames, mode 4) 32 ahead of her.
 use th_anm::{interp::Interp, AnmLibrary, VmId, World};
 use crate::enemy::{field_to_canvas, Enemy};
 use crate::character::Character;
@@ -45,10 +55,15 @@ pub struct Scope {
     /// Aunn's vertical radius (+0xd0; `radius` is the horizontal one, +0xcc).
     pub radius2: f32,
     growth2: Interp<1>,
-    /// Orin's projectile speed (+0x30) and direction (+0x34).
+    /// Orin's projectile speed (+0x30) and direction (+0x34); the lean of the later four
+    /// characters' auras (+0xa4 / +0xd8).
     speed: f32,
-    angle: f32,
+    pub angle: f32,
+    /// Mamizou's two side circles' VMs.
+    side_vms: [Option<VmId>; 2],
     pub circle: Option<SkillCircle>,
+    /// The player position the aura last used (Mamizou's circles are placed from it).
+    anchor: [f32; 2],
 }
 
 /// What the aura's [7] callback needs, copied for the side's body and bullet tests.
@@ -62,6 +77,8 @@ pub struct Probe {
     pub radius2: f32,
     /// Orin's skill circle (centre, radius) while it lasts.
     pub circle: Option<([f32; 2], f32)>,
+    /// The lean (Tsukasa, Mamizou, Yachie, Saki).
+    pub angle: f32,
 }
 
 impl Probe {
@@ -78,6 +95,14 @@ impl Probe {
                 }
                 rect_circle_exact(self.centre, [self.radius*2.0, self.radius], 0.0, pos, radius) as i32
             }
+            // FUN_004d44e0 on the turned 4R x R box.
+            Character::Tsukasa => rect_circle_exact(self.centre, [self.radius*4.0, self.radius], self.angle, pos, radius) as i32,
+            // FUN_0041fce0: any of the three circles, radii summed (strictly outside misses).
+            Character::Mamizou => mamizou_circles(self.centre, self.angle).iter()
+                .any(|c| (pos[0]-c[0]).powi(2)+(pos[1]-c[1]).powi(2) <= (self.radius+radius).powi(2)) as i32,
+            Character::Yachie => polygon_circle(pos, radius, self.centre, self.radius, self.angle - std::f32::consts::FRAC_PI_2, 6) as i32,
+            // FUN_004d4020(a = +0xd0 along the lean, b = +0xcc).
+            Character::Saki => ellipse_circle(pos, radius, self.centre, self.radius2, self.radius, self.angle) as i32,
             c => bullet_hit(c, self.centre, self.radius, pos, radius) as i32,
         }
     }
@@ -91,8 +116,10 @@ impl Scope {
     pub fn active(&self) -> bool { self.active }
 
     pub fn probe(&self) -> Probe {
-        Probe { character: self.character, active: self.active, centre: self.pos, radius: self.radius, radius2: self.radius2,
-            circle: self.circle.as_ref().map(|c| (c.pos, c.radius)) }
+        // Mamizou's centre is the player; the circles are placed from it.
+        let centre = if self.character == Character::Mamizou { self.anchor } else { self.pos };
+        Probe { character: self.character, active: self.active, centre, radius: self.radius, radius2: self.radius2,
+            circle: self.circle.as_ref().map(|c| (c.pos, c.radius)), angle: self.angle }
     }
 
     pub fn update(&mut self, held: bool, column: bool, pos: [f32; 2], file: usize,
@@ -123,12 +150,22 @@ impl Scope {
                 Character::Nazrin => (32.0,30,6,10),
                 Character::Seiran => (48.0,30,6,11),
                 Character::Orin => (50.0,10,6,13),
+                Character::Tsukasa => (50.0,10,6,8),
+                Character::Mamizou => (28.0,10,4,10),
+                Character::Yachie => (88.0,10,4,13),
+                // +0x6c: 1 -> 96 (+0xcc); +0x9c: 1 -> 32 (+0xd0) below.
+                Character::Saki => (96.0,10,4,14),
             };
             self.growth.start([1.0], [size], frames, mode);
             if character == Character::Aunn { self.growth2.start([1.0], [32.0], 30, 3); }
+            if character == Character::Saki { self.growth2.start([1.0], [32.0], 10, 4); }
             if character == Character::Orin { self.launch(pos, vel_x); }
+            if leans(character) { self.angle = lean_target(vel_x); }
             let draw_pos = if column { [pos[0], 0.0] } else { pos };
             self.vm = Some(world.spawn_clipped(lib, file, script, field_to_canvas(field, draw_pos), field));
+            if character == Character::Mamizou {
+                self.side_vms = std::array::from_fn(|_| Some(world.spawn_clipped(lib, file, script, field_to_canvas(field, pos), field)));
+            }
             // The start functions place the aura on the player (Orin's projectile too).
             self.pos = pos;
         } else if !held && self.active {
@@ -136,12 +173,14 @@ impl Scope {
             // Orin's [7] keeps testing the last box while the skill circle lasts.
             if character != Character::Orin { self.radius = 0.0; }
             if let Some(id) = self.vm.take() { world.delete(id); }
+            for id in self.side_vms.iter_mut().filter_map(|v| v.take()) { world.delete(id); }
         }
         if !self.active { return; }
         match character {
             Character::Aunn => self.update_aunn(pos, world, field),
             Character::Nazrin => self.update_nazrin(pos, enemies, world, field),
             Character::Orin => self.update_orin(pos, vel_x, world, field),
+            Character::Tsukasa | Character::Mamizou | Character::Yachie | Character::Saki => self.update_leaning(pos, vel_x, world, field),
             _ => {
                 self.pos = if character == Character::Seiran { [pos[0], pos[1] - 160.0] } else { pos };
                 if let Some([radius]) = self.growth.step() { self.radius = radius; }
@@ -223,6 +262,43 @@ impl Scope {
         }
     }
 
+    /// The leaning auras' updates (`0041de20`, `0041f770`, `00421490`, `00423540`): the lean
+    /// eases, the radii step, the shape is placed from the player and the VMs follow.
+    fn update_leaning(&mut self, pos: [f32; 2], vel_x: f32, world: &mut World, field: [f32; 4]) {
+        self.angle = lean_step(self.angle, vel_x);
+        if let Some([r]) = self.growth.step() { self.radius = r; }
+        if self.character == Character::Saki {
+            if let Some([r]) = self.growth2.step() { self.radius2 = r; }
+        }
+        let (s, c) = self.angle.sin_cos();
+        self.anchor = pos;
+        // Saki's ellipse sits at rot(angle) (0, -32) from her.
+        self.pos = if self.character == Character::Saki { [pos[0] + 32.0 * s, pos[1] - 32.0 * c] } else { pos };
+        let r = self.radius;
+        let (scale, scale2, rot) = match self.character {
+            Character::Tsukasa => ([r, r], None, Some(self.angle)),
+            Character::Mamizou => ([r, r], None, None),
+            Character::Yachie => ([r, r], None, Some(crate::motion::wrap_angle(self.angle - std::f32::consts::FRAC_PI_2))),
+            _ => ([r, 1.0], Some([self.radius2, 1.0]), Some(self.angle)),
+        };
+        let centres = if self.character == Character::Mamizou { mamizou_circles(pos, self.angle) } else { [self.pos; 3] };
+        if self.character == Character::Mamizou { self.pos = centres[0]; }
+        if let Some(v) = self.vm.and_then(|id| world.get_mut(id)) {
+            v.scale = scale;
+            if let Some(s2) = scale2 { v.scale2 = s2; }
+            if let Some(a) = rot { v.rot[2] = a; }
+            let at = field_to_canvas(field, centres[0]);
+            v.origin = [at[0], at[1], 0.0];
+        }
+        for (k, id) in self.side_vms.iter().enumerate() {
+            if let Some(v) = id.and_then(|id| world.get_mut(id)) {
+                v.scale = [r * 0.6; 2];
+                let at = field_to_canvas(field, centres[k + 1]);
+                v.origin = [at[0], at[1], 0.0];
+            }
+        }
+    }
+
     /// `FUN_0041d020`: Orin's skill circle at `pos`.
     pub fn start_circle(&mut self, pos: [f32; 2], file: usize, world: &mut World, lib: &AnmLibrary, field: [f32; 4]) {
         if let Some(id) = self.circle.take().and_then(|c| c.vm) { world.delete(id); }
@@ -260,6 +336,95 @@ impl Scope {
         let y = (v.abs()-size[1]*0.5).max(0.0);
         x*x+y*y < self.radius*self.radius
     }
+}
+
+/// Whether the character's aura leans with the movement.
+fn leans(character: Character) -> bool {
+    matches!(character, Character::Tsukasa | Character::Mamizou | Character::Yachie | Character::Saki)
+}
+
+/// The lean an aura (or Saki's bomb) starts with: +-0.12217 (7 degrees) beyond +-0.1 of
+/// horizontal velocity (+0x20f4), else 0.
+pub fn lean_target(vel_x: f32) -> f32 {
+    if vel_x < -0.1 { -0.12217305 } else if vel_x > 0.1 { 0.12217305 } else { 0.0 }
+}
+
+/// One frame of the lean: 10% of the way to `lean_target`.
+pub fn lean_step(angle: f32, vel_x: f32) -> f32 {
+    crate::motion::wrap_angle(angle + (lean_target(vel_x) - angle) * 0.1)
+}
+
+/// Mamizou's three circle centres (`FUN_0041f770`): `pos` plus (0, -96), (64, -64) and (-64, -64)
+/// turned by `angle`.
+pub fn mamizou_circles(pos: [f32; 2], angle: f32) -> [[f32; 2]; 3] {
+    let (s, c) = angle.sin_cos();
+    [[pos[0] + 96.0 * s, pos[1] - 96.0 * c],
+     [pos[0] + c * 64.0 + s * 64.0, pos[1] + s * 64.0 - c * 64.0],
+     [pos[0] - c * 64.0 + s * 64.0, pos[1] - s * 64.0 - c * 64.0]]
+}
+
+/// `FUN_004d3ae0`: whether segment `p1`-`p2` crosses edge `a`-`b` (touching counts; collinear
+/// segments by their bounding boxes).
+pub fn segments_cross(p1: [f32; 2], p2: [f32; 2], a: [f32; 2], b: [f32; 2]) -> bool {
+    let f1 = (a[0]-b[0])*(p1[1]-a[1]) + (a[1]-b[1])*(a[0]-p1[0]);
+    let f2 = (a[0]-b[0])*(p2[1]-a[1]) + (a[1]-b[1])*(a[0]-p2[0]);
+    if f2 * f1 > 0.0 { return false; }
+    if f1 != 0.0 || f2 != 0.0 {
+        return ((b[1]-p1[1])*(p1[0]-p2[0]) + (p1[0]-b[0])*(p1[1]-p2[1]))
+            * ((p1[0]-a[0])*(p1[1]-p2[1]) + (a[1]-p1[1])*(p1[0]-p2[0])) <= 0.0;
+    }
+    let (lo, hi) = if b[0] < a[0] { (b, a) } else { (a, b) };
+    let (q1, q2) = if p2[0] < p1[0] { (p2, p1) } else { (p1, p2) };
+    lo[0] <= q2[0] && lo[1] <= q2[1] && q1[0] <= hi[0] && q1[1] <= hi[1]
+}
+
+/// The edges of a regular polygon (`sides` vertices on a circle of `radius` round `centre`,
+/// the first at `angle`).
+fn polygon_edges(centre: [f32; 2], radius: f32, angle: f32, sides: u32) -> impl Iterator<Item = ([f32; 2], [f32; 2])> {
+    let step = std::f32::consts::TAU / sides as f32;
+    let vertex = move |t: f32| [t.cos() * radius + centre[0], t.sin() * radius + centre[1]];
+    (0..sides).scan(angle, move |t, _| {
+        let a = vertex(*t);
+        *t = crate::motion::wrap_angle(*t + step);
+        Some((a, vertex(*t)))
+    })
+}
+
+/// `FUN_004d2a10`: `point` is inside the polygon when the segment from it to the centre crosses
+/// none of the edges.
+pub fn polygon_contains(point: [f32; 2], centre: [f32; 2], radius: f32, angle: f32, sides: u32) -> bool {
+    !polygon_edges(centre, radius, angle, sides).any(|(a, b)| segments_cross(point, centre, a, b))
+}
+
+/// `FUN_004d26a0` (and Yachie's [7] `FUN_004217e0`): a circle against a regular polygon. It hits
+/// when the polygon's centre lies within the circle, else when the circle's point nearest that
+/// centre is inside the polygon.
+pub fn polygon_circle(pos: [f32; 2], r: f32, centre: [f32; 2], radius: f32, angle: f32, sides: u32) -> bool {
+    let d = [centre[0]-pos[0], centre[1]-pos[1]];
+    let d2 = d[0]*d[0] + d[1]*d[1];
+    if r * r >= d2 { return true; }
+    let len = d2.sqrt();
+    let n = if len.abs() >= 0.01 { [d[0]/len, d[1]/len] } else { d };
+    polygon_contains([pos[0] + n[0]*r, pos[1] + n[1]*r], centre, radius, angle, sides)
+}
+
+/// `FUN_004d22d0`: a box (`size`, turned by `box_angle` when non-zero) against a regular
+/// polygon: the polygon's centre within the box's unturned extent, the box centre inside the
+/// polygon, or one of the box's edges crossing one of the polygon's (`FUN_004d27e0`).
+pub fn polygon_rect(pos: [f32; 2], size: [f32; 2], box_angle: f32, centre: [f32; 2], radius: f32, angle: f32, sides: u32) -> bool {
+    let (w, h) = (size[0] / 2.0, size[1] / 2.0);
+    if w > (centre[0]-pos[0]).abs() && h > (centre[1]-pos[1]).abs() { return true; }
+    if polygon_contains(pos, centre, radius, angle, sides) { return true; }
+    let mut corners = [[w, h], [-w, h], [-w, -h], [w, -h]];
+    if box_angle != 0.0 {
+        let (s, c) = box_angle.sin_cos();
+        for p in &mut corners { *p = [p[0]*c - p[1]*s, p[0]*s + p[1]*c]; }
+    }
+    let corners = corners.map(|p| [p[0] + pos[0], p[1] + pos[1]]);
+    (0..4).any(|i| {
+        let (p1, p2) = (corners[i], corners[(i + 1) % 4]);
+        polygon_edges(centre, radius, angle, sides).any(|(a, b)| segments_cross(p1, p2, a, b))
+    })
 }
 
 /// Orin's launch direction from her horizontal velocity (`FUN_0041c530`, `FUN_0054afc0`,
@@ -408,7 +573,7 @@ pub(crate) fn bullet_hit(character: Character, centre: [f32;2], r: f32, pos: [f3
         Character::Ran => rect_circle(centre,[r,7.0*r],pos,radius) || rect_circle(centre,[7.0*r,r],pos,radius),
         Character::Reimu => (pos[0]-centre[0]).powi(2)+(pos[1]-centre[1]).powi(2)<r*r+radius*radius,
         // Aunn and Orin need the whole probe (`Probe::test`).
-        Character::Aunn | Character::Orin => Probe { character, active: true, centre, radius: r, radius2: r, circle: None }.test(pos, radius) > 0,
+        _ => Probe { character, active: true, centre, radius: r, radius2: r, circle: None, angle: 0.0 }.test(pos, radius) > 0,
     }
 }
 
@@ -447,6 +612,32 @@ mod tests {
         let p = approach([0.0, 0.0], [10.0, 0.0], 4.0, 4.0);
         assert!((p[0] - 4.0).abs() < 1e-5 && p[1] == 0.0);
         assert_eq!(approach([0.0, 0.0], [2.0, 2.0], 3.0, 9.0), [2.0, 2.0]);
+    }
+
+    #[test]
+    fn hexagon_contains_its_inside_and_touches_by_the_nearest_point() {
+        // Vertices at -pi/2 + k pi/3: points up and down, flat sides left and right at
+        // x = +-R cos(30).
+        let h = |p: [f32; 2], r: f32| polygon_circle(p, r, [0.0, 0.0], 100.0, -std::f32::consts::FRAC_PI_2, 6);
+        assert!(h([0.0, 95.0], 1.0));
+        assert!(h([85.0, 0.0], 1.0));
+        assert!(!h([89.0, 0.0], 1.0));
+        assert!(h([89.0, 0.0], 3.0), "the circle's nearest point reaches the side");
+        assert!(!h([60.0, 80.0], 1.0), "outside a slanted side");
+        assert!(h([3.0, 0.0], 5.0), "the centre within the circle");
+        // A box straddling the flat side at x = 86.6.
+        assert!(polygon_rect([90.0, 0.0], [10.0, 10.0], 0.0, [0.0, 0.0], 100.0, -std::f32::consts::FRAC_PI_2, 6));
+        assert!(!polygon_rect([100.0, 0.0], [10.0, 10.0], 0.0, [0.0, 0.0], 100.0, -std::f32::consts::FRAC_PI_2, 6));
+    }
+
+    #[test]
+    fn lean_eases_towards_seven_degrees() {
+        assert_eq!(lean_target(1.0), 0.12217305);
+        let a = lean_step(0.0, -1.0);
+        assert!((a + 0.012217305).abs() < 1e-7);
+        assert!((lean_step(0.1, 0.0) - 0.09).abs() < 1e-7);
+        let c = mamizou_circles([0.0, 0.0], 0.0);
+        assert_eq!(c, [[0.0, -96.0], [64.0, -64.0], [-64.0, -64.0]]);
     }
 
     #[test]

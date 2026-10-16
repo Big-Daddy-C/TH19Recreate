@@ -127,7 +127,8 @@ pub struct EnemyData {
     pub survives_death: bool,
     /// ECL 323: the death effect's sprite slot and script (+0x6330 / +0x632c).
     pub death_effect_override: Option<(usize, i32)>,
-    /// ECL 624: the per-frame callback (+0x5648, table 0x5994f8; 1 = `FUN_004fc120`).
+    /// ECL 624: the per-frame callback (+0x5648, table 0x5994f8; 1 = `FUN_004fc120`,
+    /// 2 = `FUN_004fbff0`).
     pub frame_callback: u8,
     /// Damage received since the callback last looked (+0x501c, added even while invincible).
     pub damage_taken: i32,
@@ -205,6 +206,25 @@ impl Enemy {
             let n = if len.abs() >= 0.01 { [d[0] / len, d[1] / len] } else { d };
             e.abs.pv.pos = [e.abs.pv.pos[0] - n[0], e.abs.pv.pos[1] - n[1]];
             e.damage_taken = 0;
+        }
+        // Callback 2 (FUN_004fbff0, Tsukasa's attacks): each bullet on this field older than
+        // 20 frames, strictly within 32 px and not yet touched by this enemy is marked (+0x1070)
+        // and re-sprited (FUN_004f11a0): types 0/1 -> 4 in their colour, 4/5 -> 18, 8 -> 20,
+        // 9 -> 31 and 18 -> 33 in colour 1; other types keep theirs.
+        if e.frame_callback == 2 {
+            if let Some(anm) = st.anm_files[0] {
+                let types = st.bullet_types.clone();
+                let mut rng = crate::rng::Rng::new(1);
+                let mut ctx = crate::bullet::Ctx { world, lib, types: &types, anm, field: st.field, player: st.player_pos, rng: &mut rng };
+                for b in st.bullets.iter_mut().filter(|b| !b.delete) {
+                    let (dx, dy) = (b.pos[0] - e.pos[0], b.pos[1] - e.pos[1]);
+                    if dx * dx + dy * dy >= 1024.0 || b.touched_by == Some(e.id) || b.age <= 20 { continue; }
+                    b.touched_by = Some(e.id);
+                    let to = match b.kind { 0 | 1 => Some((4, b.color)), 4 | 5 => Some((18, 1)), 8 => Some((20, 1)),
+                        9 => Some((31, 1)), 18 => Some((33, 1)), _ => None };
+                    if let Some((kind, color)) = to { b.resprite(kind, color, &mut ctx); }
+                }
+            }
         }
         e.time += 1;
         if let Some(mesh) = &mut e.boss_mesh { mesh.tick(); }
@@ -1143,7 +1163,7 @@ impl EnemyHost<'_> {
             // The optional per-frame enemy callback (+0x5648 from table 005994f8, case 0x84).
             // Entry 0 is null (Marisa's spell clears it); 1 is FUN_004fc120 (Nazrin's
             // ExAttack). Other entries remain unsupported.
-            624 if matches!(i!(0), 0 | 1) => self.e.frame_callback = i!(0) as u8,
+            624 if matches!(i!(0), 0 | 1 | 2) => self.e.frame_callback = i!(0) as u8,
             621 => {
                 let radius = f!(0);
                 let color = i!(1) as u32;
@@ -1166,13 +1186,19 @@ impl EnemyHost<'_> {
             // dword lower than their displacement suggests, so arg0 lands at request+0xc and arg1
             // at +0x10 (the x/y of the target, as in Ran's own 00419c00 edge cycle, which writes
             // the same two fields). pl03.ecl passes (+-150, y) for the side edges and (x, 0/448)
-            // for top/bottom.
+            // for top/bottom. The request goes to the owner's EX class (FUN_0040f090 -> vtable
+            // +0x28), so it flies as that character's special; +0x48 is the enemy's I0
+            // (+0x29c), which picks Mamizou's ExAttackW / O / E.
             1037 => {
                 let (x,y)=(f!(0),f!(1));
-                let character=crate::character::Character::Ran;
+                use crate::character::Character::*;
+                let character=self.st.owner_characters.get(self.e.owner).copied().filter(|c| *c == Ran || c.uses_probe()).unwrap_or(Ran);
+                // The flight scripts of the specials (side.rs): Ran 14, Aunn 17, Nazrin 11, Seiran 15,
+                // Orin 31, Tsukasa 16, Mamizou 13, Yachie 14, Saki 18.
+                let script=match character { Aunn => 17, Nazrin => 11, Seiran => 15, Orin => 31, Tsukasa => 16, Mamizou => 13, Saki => 18, _ => 14 };
                 let req=crate::reflect::Request {kind:44,color:1,speed:0.0,origin:self.st.opponent_pos,
                     target:Some([x,y]),special_rank:Some(self.e.script_rank.unwrap_or(self.st.incoming_extra_level) as i32),
-                    owner:self.e.owner,script:Some(14),tangents:None,aim_player:false};
+                    owner:self.e.owner,script:Some(script),tangents:None,aim_player:false,variant:self.e.ivars[0].clamp(0, 2) as u8};
                 let field=self.st.field;let source=[640.0-field[0]-field[2],field[1],field[2],field[3]];
                 let pending=crate::reflect::Pending::new_character(req,source,self.st,character);
                 self.st.pending_reflects.push(pending);

@@ -162,6 +162,10 @@ pub struct Bullet {
     /// Consecutive scope-contact frames (native timer at bullet+0xfec).
     pub scope_frames: i32,
     timer_fraction: f32,
+    /// Frames since it was fired (+0x104c, advanced at the end of every update, FUN_004f4c30).
+    pub age: i32,
+    /// The last enemy whose frame callback 2 re-sprited it (+0x1070).
+    pub touched_by: Option<i32>,
 }
 
 /// What a bullet needs from the world around it.
@@ -313,6 +317,8 @@ fn make_bullet(et: &Et, origin: [f32; 2], i: i32, j: i32, aim: f32, ctx: &mut Ct
         scope_time_scale: 1.0,
         scope_frames: 0,
         timer_fraction: 0.0,
+        age: 0,
+        touched_by: None,
     };
     b.set_sprite(et.sprite, et.color, ctx);
     // A leading spawn-animation ex is applied at creation; otherwise the bullet appears at once.
@@ -346,6 +352,15 @@ impl Bullet {
         // ANM layers 17 and 18; FUN_004f6470), whatever layer their script sets.
         ctx.world.set_draw_priority(id, BULLET_DRAW_PRIORITY);
         self.vm = Some(id);
+    }
+
+    /// `FUN_004f11a0` on a bullet already in play: a new type and colour (sprite, hitbox,
+    /// script), shown at once.
+    pub fn resprite(&mut self, kind: i32, color: i32, ctx: &mut Ctx) {
+        self.set_sprite(kind, color, ctx);
+        if self.state == 1 {
+            if let Some(id) = self.vm { ctx.world.interrupt(id, 2); }
+        }
     }
 
     /// Spawn animation: play the bullet's appear interrupt and back the bullet up four steps;
@@ -550,6 +565,7 @@ impl Bullet {
         if self.grace > 0 && timer_tick {
             self.grace -= 1;
         }
+        self.age += 1;
         let at = field_to_canvas(ctx.field, self.pos);
         if let Some(vm) = self.vm.and_then(|id| ctx.world.get_mut(id)) {
             vm.origin = [at[0], at[1], 0.0];
@@ -604,6 +620,13 @@ impl Bullet {
     pub fn intersects_cancel_ellipse(&self, centre: [f32;2], a: f32, b: f32, theta: f32, world: &World, lib: &AnmLibrary) -> bool {
         if self.invuln != 0 || !matches!(self.state, 1 | 2) { return false; }
         crate::scope::ellipse_circle(self.pos, self.cancel_width(world, lib) / 2.0, centre, a, b, theta)
+    }
+
+    /// `FUN_004ee640`: a regular polygon against the bullet's size (+0x674) as a radius
+    /// (`FUN_004d26a0`).
+    pub fn intersects_cancel_polygon(&self, centre: [f32;2], radius: f32, angle: f32, sides: u32, world: &World, lib: &AnmLibrary) -> bool {
+        if self.invuln != 0 || !matches!(self.state, 1 | 2) { return false; }
+        crate::scope::polygon_circle(self.pos, self.cancel_width(world, lib), centre, radius, angle, sides)
     }
 
     /// `FUN_004ee0d0`: a box (`size[0]` along `angle`) against the bullet's whole size (times
