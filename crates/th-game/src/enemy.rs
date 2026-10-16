@@ -936,17 +936,33 @@ impl EnemyHost<'_> {
                 self.e.abs.stop();
                 self.e.rel.stop();
             }
-            // moveAngleTime(t, mode, angle); 440/442 never mirror
-            440 | 441 | 442 | 443 => {
+            // setAngle(angle) (FUN_004fecc0 case 0x29: 440 absolute, 442 relative motion): a
+            // mirrored enemy (internal flag 0x8) takes wrap(pi/2 - wrap(angle - pi/2)).
+            440 | 442 => {
+                let ang = f!(0);
+                let ang = if self.e.mirrored {
+                    let h = std::f32::consts::FRAC_PI_2;
+                    wrap_angle(h - wrap_angle(ang - h))
+                } else { ang };
+                self.motion(op == 440).pv.angle = wrap_angle(ang);
+            }
+            // moveAngleTime (case 0x2a, 441 absolute / 443 relative); not used by the VS scripts,
+            // argument order as earlier traced.
+            441 | 443 => {
                 let (t, mode) = (i!(0), i!(1));
                 let ang = f!(2);
-                let ang = if matches!(op, 441 | 443) { self.mirror_angle(ang, mode == 7) } else { ang };
-                start_angle(self.motion(matches!(op, 440 | 441)), t, mode, ang);
+                let ang = self.mirror_angle(ang, mode == 7);
+                start_angle(self.motion(op == 441), t, mode, ang);
             }
-            // moveSpeedTime(t, mode, speed)
-            444 | 445 | 446 | 447 => {
+            // setSpeed(speed) (case 0x2b: 444 absolute, 446 relative), ignored at -999999.
+            444 | 446 => {
+                let speed = f!(0);
+                if speed > -999999.0 { self.motion(op == 444).pv.speed = speed; }
+            }
+            // moveSpeedTime(t, mode, speed) (case 0x2c)
+            445 | 447 => {
                 let (t, mode, speed) = (i!(0), i!(1), f!(2));
-                start_speed(self.motion(matches!(op, 444 | 445)), t, mode, speed);
+                start_speed(self.motion(op == 445), t, mode, speed);
             }
             // Random move (FUN_004fecc0 case 0x1c, 00501013): 412 on the absolute motion, 413 on
             // the relative one. The direction comes from the ECL 504 box (centre x, y, size w,
@@ -1108,6 +1124,13 @@ impl EnemyHost<'_> {
             // rankI / rankF: pick the value for the current difficulty.
             570 => {
                 let d = self.e_difficulty();
+                let v = i!(1 + d);
+                ctx.set_int_var(ins, 0, v, self);
+            }
+            // FUN_004fecc0 case 0x49: by the rank field (+0x5168), arg 1 + min(rank, 3) into
+            // var arg 0 (four values; 570 has eight).
+            529 => {
+                let d = self.e_difficulty().min(3);
                 let v = i!(1 + d);
                 ctx.set_int_var(ins, 0, v, self);
             }

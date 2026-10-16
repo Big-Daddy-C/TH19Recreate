@@ -3814,6 +3814,13 @@
             "ecl_dispatch"
           ],
           "evidence": "code_checked"
+        },
+        {
+          "text": "ECL 440/442 (FUN_004fecc0 case 0x29) set the absolute/relative motion angle directly (mirrored enemies take wrap(pi/2 - wrap(a - pi/2))); 444/446 (case 0x2b) set the speed, ignored at -999999; 441/443 and 445/447 are the timed variants. The port had treated 440/444 as timed. ECL 529 (case 0x49) stores arg 1 + min(rank +0x5168, 3) into var arg 0 (four values, like 570 with eight).",
+          "sources": [
+            "ecl_dispatch"
+          ],
+          "evidence": "code_checked"
         }
       ],
       "checks": {
